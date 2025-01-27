@@ -1,0 +1,7 @@
+[workspace]
+members = [
+  "flame",
+  "runtime",
+]
+resolver = "2"
+
