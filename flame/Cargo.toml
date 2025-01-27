@@ -1,0 +1,9 @@
+[package]
+name = "flame"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "flame"
+path = "src/lib.rs"
+
