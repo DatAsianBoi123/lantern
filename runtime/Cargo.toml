@@ -1,0 +1,13 @@
+[package]
+name = "runtime"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "runtime"
+path = "src/lib.rs"
+
+[dependencies]
+flame = { path = "../flame" }
+thiserror = { workspace = true }
+
