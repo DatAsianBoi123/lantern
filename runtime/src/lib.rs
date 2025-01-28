@@ -86,8 +86,10 @@ impl<const S: usize> Stack<S> {
         Ok(size)
     }
 
-    pub fn pop(&mut self, len: usize) -> Result<usize, StackUnderflowError> {
-        self.ptr.checked_sub(len).ok_or(StackUnderflowError)
+    pub fn pop(&mut self, len: usize) -> Result<(), StackUnderflowError> {
+        if len > self.ptr { return Err(StackUnderflowError); };
+        self.ptr -= len;
+        Ok(())
     }
 
     pub fn copy(&mut self, from: Address, len: usize, to: Address) -> Result<(), AccessUndefinedError> {
