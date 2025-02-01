@@ -1,9 +1,9 @@
 use std::{mem, slice};
 
-use err::{AccessUndefinedError, RuntimeError, StackOverflowError, StackUnderflowError};
+use error::{AccessUndefinedError, RuntimeError, StackOverflowError, StackUnderflowError};
 use flame::{Address, Instruction};
 
-pub mod err;
+pub mod error;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LanternRuntime<const S: usize, const T: usize> {
