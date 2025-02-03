@@ -2,11 +2,11 @@
 members = [
   "flame",
   "runtime",
-
-  "tests",
+  "parse",
 ]
 resolver = "2"
 
 [workspace.dependencies]
 thiserror = "1"
+anyhow = "1"
 
