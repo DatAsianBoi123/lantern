@@ -3,6 +3,8 @@ members = [
   "flame",
   "runtime",
   "parse",
+
+  "cli",
 ]
 resolver = "2"
 
