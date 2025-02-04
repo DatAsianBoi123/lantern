@@ -2,6 +2,50 @@ use std::iter::Peekable;
 
 use crate::{diagnostic, error::{Diagnostic, Diagnostics, InvalidTokenError}, Parse};
 
+macro_rules! punct_kind {
+    ($(#[$meta: meta])* $vis: vis enum $ident: ident { $($punct: ident ( $char: literal )),* $(,)? }) => {
+        $(#[$meta])*
+        $vis enum $ident {
+            $($punct($punct),)*
+        }
+
+        impl $ident {
+            pub fn is_punct(char: char) -> bool {
+                match char {
+                    $($char => { true },)*
+                    _ => false
+                }
+            }
+        }
+
+        impl $crate::Parse<char> for $ident {
+            fn parse<I>(iter: &mut std::iter::Peekable<I>) -> Result<Self, $crate::error::Diagnostics>
+            where I: std::iter::Iterator<Item = char>
+            {
+                match iter.next().expect("next iter") {
+                    $($char => { Ok(Self::$punct($punct)) },)*
+                    char => Err($crate::diagnostic!("invalid punct `{char}`").into())
+                }
+            }
+        }
+
+        $(
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+        $vis struct $punct;
+
+        impl $crate::Parse<char> for $punct {
+            fn parse<I>(iter: &mut std::iter::Peekable<I>) -> Result<Self, $crate::error::Diagnostics>
+            where I: std::iter::Iterator<Item = char>
+            {
+                let next = iter.next().expect("next iter");
+                if next == $char { Ok(Self) }
+                else { Err($crate::diagnostic!("expected char `{}`", $char).into()) }
+            }
+        }
+        )*
+    };
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenTree {
     Group(Group),
@@ -159,56 +203,23 @@ impl Parse<char> for LiteralKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Punct {
-    pub kind: PunctKind,
-}
+punct_kind!(
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum Punct {
+        Comma(','),
+        Semi(';'),
+        Colon(':'),
+        Period('.'),
+        Question('?'),
+        Bang('!'),
 
-impl Parse<char> for Punct {
-    fn parse<I>(iter: &mut Peekable<I>) -> Result<Self, Diagnostics>
-    where I: Iterator<Item = char>
-    {
-        let next = iter.next().expect("next iter");
-        Ok(Self { kind: PunctKind::from_char(next).ok_or_else(|| diagnostic!("unknown punctuation {next}"))? })
+        Plus('+'),
+        Hyphen('-'),
+        Asterisk('*'),
+        Slash('/'),
+        Equals('='),
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PunctKind {
-    Comma,
-    Semi,
-    Colon,
-    Period,
-    Question,
-    Bang,
-
-    Plus,
-    Hyphen,
-    Asterisk,
-    Slash,
-    Equals,
-}
-
-impl PunctKind {
-    fn from_char(char: char) -> Option<Self> {
-        match char {
-            ',' => Some(Self::Comma),
-            ';' => Some(Self::Semi),
-            ':' => Some(Self::Colon),
-            '.' => Some(Self::Period),
-            '?' => Some(Self::Question),
-            '!' => Some(Self::Bang),
-
-            '+' => Some(Self::Plus),
-            '-' => Some(Self::Hyphen),
-            '*' => Some(Self::Asterisk),
-            '/' => Some(Self::Slash),
-            '=' => Some(Self::Equals),
-
-            _ => None,
-        }
-    }
-}
+);
 
 pub fn lex<I>(input: &mut Peekable<I>) -> Result<Vec<TokenTree>, Diagnostics>
 where I: Iterator<Item = char>
@@ -226,7 +237,7 @@ where I: Iterator<Item = char>
             tokens.push(TokenTree::Group(Group::parse(input)?));
         } else if peek == '"' || peek == '\'' || peek.is_ascii_digit() {
             tokens.push(TokenTree::Literal(Literal::parse(input)?));
-        } else if PunctKind::from_char(peek).is_some() {
+        } else if Punct::is_punct(peek) {
             tokens.push(TokenTree::Punct(Punct::parse(input)?));
         } else if peek.is_ascii_alphanumeric() {
             tokens.push(TokenTree::Ident(Ident::parse(input)?));
