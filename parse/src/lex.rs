@@ -46,6 +46,21 @@ macro_rules! punct_kind {
     };
 }
 
+macro_rules! impl_parse_token {
+    ($ident: ident : $pat: pat = $expr: expr) => {
+        impl Parse<$crate::lex::TokenTree> for $ident {
+            fn parse<I>(iter: &mut std::iter::Peekable<I>) -> Result<Self, $crate::error::Diagnostics>
+            where I: std::iter::Iterator<Item = $crate::lex::TokenTree>
+            {
+                match iter.next().expect("next iter") {
+                    $pat => Ok($expr),
+                    _ => Err($crate::diagnostic!("unexpected token").into()),
+                }
+            }
+        }
+    };
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenTree {
     Group(Group),
@@ -60,6 +75,8 @@ pub struct Group {
     pub delimiter: Delimiter,
     pub tokens: Vec<TokenTree>,
 }
+
+impl_parse_token!(Group: TokenTree::Group(group) = group);
 
 impl Parse<char> for Group {
     fn parse<I>(iter: &mut Peekable<I>) -> Result<Self, Diagnostics>
@@ -106,6 +123,8 @@ pub struct Ident {
     pub name: String,
 }
 
+impl_parse_token!(Ident: TokenTree::Ident(ident) = ident);
+
 impl Parse<char> for Ident {
     fn parse<I>(iter: &mut Peekable<I>) -> Result<Self, Diagnostics>
     where I: Iterator<Item = char>
@@ -127,6 +146,8 @@ impl Parse<char> for Ident {
 pub struct Literal {
     pub kind: LiteralKind,
 }
+
+impl_parse_token!(Literal: TokenTree::Literal(literal) = literal);
 
 impl Parse<char> for Literal {
     fn parse<I>(iter: &mut Peekable<I>) -> Result<Self, Diagnostics>
@@ -220,6 +241,8 @@ punct_kind!(
         Equals('='),
     }
 );
+
+impl_parse_token!(Punct: TokenTree::Punct(punct) = punct);
 
 pub fn lex<I>(input: &mut Peekable<I>) -> Result<Vec<TokenTree>, Diagnostics>
 where I: Iterator<Item = char>
