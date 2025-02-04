@@ -3,7 +3,7 @@ use std::{error::Error, fmt::Display};
 #[macro_export]
 macro_rules! diagnostic {
     ($($tt: tt)*) => {
-        Diagnostic::new(::anyhow::anyhow!($($tt)*).into())
+        $crate::error::Diagnostic::new(::anyhow::anyhow!($($tt)*).into())
     };
 }
 

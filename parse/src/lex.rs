@@ -1,10 +1,6 @@
 use std::iter::Peekable;
 
-use error::{Diagnostic, Diagnostics, InvalidTokenError};
-
-use crate::{diagnostic, Parse};
-
-pub mod error;
+use crate::{diagnostic, error::{Diagnostic, Diagnostics, InvalidTokenError}, Parse};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenTree {
