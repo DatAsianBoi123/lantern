@@ -3,7 +3,7 @@ use std::iter::Peekable;
 use crate::{diagnostic, error::{Diagnostic, Diagnostics, InvalidTokenError}, Parse};
 
 macro_rules! punct_kind {
-    ($(#[$meta: meta])* $vis: vis enum $ident: ident { $($punct: ident ( $char: literal )),* $(,)? }) => {
+    (for $tt_ident: ident : $(#[$meta: meta])* $vis: vis enum $ident: ident { $($punct: ident ( $char: literal )),* $(,)? }) => {
         $(#[$meta])*
         $vis enum $ident {
             $($punct($punct),)*
@@ -39,6 +39,15 @@ macro_rules! punct_kind {
             {
                 let next = iter.next().expect("next iter");
                 if next == $char { Ok(Self) }
+                else { Err($crate::diagnostic!("expected char `{}`", $char).into()) }
+            }
+        }
+        impl $crate::Parse<$crate::lex::TokenTree> for $punct {
+            fn parse<I>(iter: &mut std::iter::Peekable<I>) -> Result<Self, $crate::error::Diagnostics>
+            where I: std::iter::Iterator<Item = $crate::lex::TokenTree>
+            {
+                let next = iter.next().expect("next iter");
+                if matches!(next, $crate::lex::TokenTree::$tt_ident($ident::$punct(_))) { Ok(Self) }
                 else { Err($crate::diagnostic!("expected char `{}`", $char).into()) }
             }
         }
@@ -224,7 +233,7 @@ impl Parse<char> for LiteralKind {
     }
 }
 
-punct_kind!(
+punct_kind!(for Punct:
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum Punct {
         Comma(','),
