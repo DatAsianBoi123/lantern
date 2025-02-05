@@ -39,7 +39,7 @@ macro_rules! punct_kind {
             {
                 let next = iter.next().expect("next iter");
                 if next == $char { Ok(Self) }
-                else { Err($crate::diagnostic!("expected char `{}`", $char).into()) }
+                else { Err($crate::diagnostic!("expected punct `{}`", $char).into()) }
             }
         }
         impl $crate::Parse<$crate::lex::TokenTree> for $punct {
@@ -48,7 +48,7 @@ macro_rules! punct_kind {
             {
                 let next = iter.next().expect("next iter");
                 if matches!(next, $crate::lex::TokenTree::$tt_ident($ident::$punct(_))) { Ok(Self) }
-                else { Err($crate::diagnostic!("expected char `{}`", $char).into()) }
+                else { Err($crate::diagnostic!("expected punct `{}`", $char).into()) }
             }
         }
         )*
