@@ -3,6 +3,7 @@ use std::iter::Peekable;
 use error::Diagnostics;
 
 pub mod lex;
+pub mod ast;
 pub mod error;
 
 pub trait Parse<T> {
