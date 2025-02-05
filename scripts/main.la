@@ -6,7 +6,3 @@ val hello: str = "hello"
 val world: str = 'world'
 val aaaaa: str = 'hi \'john\'\\\"hello\"'
 
-print(x + 5)
-print(y)
-print(pow(x, 3))
-
