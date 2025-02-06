@@ -89,7 +89,7 @@ impl_parse_token!(Group: TokenTree::Group(group) = group);
 
 impl Parse<char> for Group {
     fn parse<I>(iter: &mut Peekable<I>) -> Result<Self, Diagnostics>
-    where I: Iterator<Item = char>
+    where I: Iterator<Item = char> + Clone
     {
         let delimiter = Delimiter::from_char_open(iter.next().expect("next iter")).ok_or_else(|| diagnostic!("unknown open delimiter"))?;
         let tokens = lex(iter)?;
@@ -136,7 +136,7 @@ impl_parse_token!(Ident: TokenTree::Ident(ident) = ident);
 
 impl Parse<char> for Ident {
     fn parse<I>(iter: &mut Peekable<I>) -> Result<Self, Diagnostics>
-    where I: Iterator<Item = char>
+    where I: Iterator<Item = char> + Clone
     {
         let mut name = String::new();
 
@@ -160,7 +160,7 @@ impl_parse_token!(Literal: TokenTree::Literal(literal) = literal);
 
 impl Parse<char> for Literal {
     fn parse<I>(iter: &mut Peekable<I>) -> Result<Self, Diagnostics>
-    where I: Iterator<Item = char>
+    where I: Iterator<Item = char> + Clone
     {
         Ok(Self { kind: LiteralKind::parse(iter)? })
     }
@@ -174,7 +174,7 @@ pub enum LiteralKind {
 
 impl Parse<char> for LiteralKind {
     fn parse<I>(iter: &mut Peekable<I>) -> Result<Self, Diagnostics>
-    where I: Iterator<Item = char>,
+    where I: Iterator<Item = char> + Clone
     {
         let next = iter.next().expect("next iter");
 
@@ -254,7 +254,7 @@ punct_kind!(for Punct:
 impl_parse_token!(Punct: TokenTree::Punct(punct) = punct);
 
 pub fn lex<I>(input: &mut Peekable<I>) -> Result<Vec<TokenTree>, Diagnostics>
-where I: Iterator<Item = char>
+where I: Iterator<Item = char> + Clone
 {
     let mut tokens = Vec::new();
 

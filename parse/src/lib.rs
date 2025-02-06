@@ -8,7 +8,7 @@ pub mod error;
 
 pub trait Parse<T> {
     fn parse<I>(iter: &mut Peekable<I>) -> Result<Self, Diagnostics>
-        where I: Iterator<Item = T>,
+        where I: Iterator<Item = T> + Clone,
               Self: Sized;
 }
 

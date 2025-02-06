@@ -15,7 +15,7 @@ macro_rules! parse_impl {
 
         impl $crate::Parse<$ty> for $ident {
             fn parse<I>(iter: &mut std::iter::Peekable<I>) -> Result<Self, $crate::error::Diagnostics>
-            where I: std::iter::Iterator<Item = $ty>
+            where I: std::iter::Iterator<Item = $ty> + std::clone::Clone
             {
                 $(
                     let $item_ident = <$item_ty as $crate::Parse<$ty>>::parse(iter)?;
@@ -33,7 +33,7 @@ pub struct LanternFile {
 
 impl Parse<TokenTree> for LanternFile {
     fn parse<I>(iter: &mut Peekable<I>) -> Result<Self, Diagnostics>
-    where I: Iterator<Item = TokenTree>
+    where I: Iterator<Item = TokenTree> + Clone
     {
         let mut statements = Vec::new();
 
@@ -66,7 +66,7 @@ pub enum Statement {
 
 impl Parse<TokenTree> for Statement {
     fn parse<I>(iter: &mut Peekable<I>) -> Result<Self, Diagnostics>
-    where I: Iterator<Item = TokenTree>
+    where I: Iterator<Item = TokenTree> + Clone
     {
         Ok(Self::ValDeclaration(ValDeclaration::parse(iter)?))
     }
@@ -91,7 +91,7 @@ pub enum Expression {
 
 impl Parse<TokenTree> for Expression {
     fn parse<I>(iter: &mut Peekable<I>) -> Result<Self, Diagnostics>
-    where I: Iterator<Item = TokenTree>
+    where I: Iterator<Item = TokenTree> + Clone
     {
         Ok(Self::Literal(Literal::parse(iter)?))
     }
