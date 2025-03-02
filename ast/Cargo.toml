@@ -1,13 +1,13 @@
 [package]
-name = "cli"
+name = "ast"
 version = "0.1.0"
 edition = "2021"
 
-[[bin]]
-name = "lantern"
-path = "src/main.rs"
+[lib]
+name = "ast"
+path = "src/lib.rs"
 
 [dependencies]
 parse = { path = "../parse" }
-ast = { path = "../ast" }
+anyhow = { workspace = true }
 

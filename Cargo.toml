@@ -3,6 +3,7 @@ members = [
   "flame",
   "runtime",
   "parse",
+  "ast",
 
   "cli",
 ]

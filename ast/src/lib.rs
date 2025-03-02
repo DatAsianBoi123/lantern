@@ -2,7 +2,7 @@ use std::{iter::Peekable, marker::PhantomData};
 
 use token::{Val, Fun};
 
-use crate::{diagnostic, lex::{Colon, Comma, Delimiter, Equals, Group, Ident, Literal, TokenTree}, Parse, Result};
+use parse::{diagnostic, lex::{Colon, Comma, Delimiter, Equals, Group, Ident, Literal, TokenTree}, Parse, Result};
 
 pub mod token;
 
