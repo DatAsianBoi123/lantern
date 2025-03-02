@@ -3,6 +3,15 @@ macro_rules! impl_token {
         $(#[$meta])*
         $vis struct $ident;
 
+        impl $ident {
+            pub fn is(token: &$crate::lex::TokenTree) -> bool {
+                match token {
+                    $crate::lex::TokenTree::Ident($crate::lex::Ident { name }) if name == $name => true,
+                    _ => false,
+                }
+            }
+        }
+
         impl $crate::Parse<$crate::lex::TokenTree> for $ident {
             fn parse<I>(iter: &mut std::iter::Peekable<I>) -> Result<Self, $crate::error::Diagnostics>
             where I: Iterator<Item = $crate::lex::TokenTree>
@@ -18,7 +27,12 @@ macro_rules! impl_token {
 }
 
 impl_token!(
-    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct Val = "val"
+);
+
+impl_token!(
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Fun = "fun"
 );
 
