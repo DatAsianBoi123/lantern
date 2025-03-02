@@ -102,8 +102,11 @@ impl Parse<char> for Group {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Delimiter {
+    /// Parenthesis ()
     Paren,
+    /// Brackets &#91;&#93;
     Bracket,
+    /// Braces {}
     Brace,
 }
 
