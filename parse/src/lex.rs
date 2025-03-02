@@ -1,6 +1,6 @@
 use std::iter::Peekable;
 
-use crate::{diagnostic, error::{Diagnostic, Diagnostics, InvalidTokenError}, Parse};
+use crate::{diagnostic, error::{Diagnostic, InvalidTokenError}, Parse, Result};
 
 macro_rules! punct_kind {
     (for $tt_ident: ident : $(#[$meta: meta])* $vis: vis enum $ident: ident { $($punct: ident ( $char: literal )),* $(,)? }) => {
@@ -12,14 +12,14 @@ macro_rules! punct_kind {
         impl $ident {
             pub fn is_punct(char: char) -> bool {
                 match char {
-                    $($char => { true },)*
+                    $($char => true,)*
                     _ => false
                 }
             }
         }
 
         impl $crate::Parse<char> for $ident {
-            fn parse<I>(iter: &mut std::iter::Peekable<I>) -> Result<Self, $crate::error::Diagnostics>
+            fn parse<I>(iter: &mut std::iter::Peekable<I>) -> Result<Self>
             where I: std::iter::Iterator<Item = char>
             {
                 match iter.next().expect("next iter") {
@@ -34,7 +34,7 @@ macro_rules! punct_kind {
         $vis struct $punct;
 
         impl $crate::Parse<char> for $punct {
-            fn parse<I>(iter: &mut std::iter::Peekable<I>) -> Result<Self, $crate::error::Diagnostics>
+            fn parse<I>(iter: &mut std::iter::Peekable<I>) -> Result<Self>
             where I: std::iter::Iterator<Item = char>
             {
                 let next = iter.next().expect("next iter");
@@ -43,7 +43,7 @@ macro_rules! punct_kind {
             }
         }
         impl $crate::Parse<$crate::lex::TokenTree> for $punct {
-            fn parse<I>(iter: &mut std::iter::Peekable<I>) -> Result<Self, $crate::error::Diagnostics>
+            fn parse<I>(iter: &mut std::iter::Peekable<I>) -> Result<Self>
             where I: std::iter::Iterator<Item = $crate::lex::TokenTree>
             {
                 let next = iter.next().expect("next iter");
@@ -58,7 +58,7 @@ macro_rules! punct_kind {
 macro_rules! impl_parse_token {
     ($ident: ident : $pat: pat = $expr: expr) => {
         impl Parse<$crate::lex::TokenTree> for $ident {
-            fn parse<I>(iter: &mut std::iter::Peekable<I>) -> Result<Self, $crate::error::Diagnostics>
+            fn parse<I>(iter: &mut std::iter::Peekable<I>) -> Result<Self>
             where I: std::iter::Iterator<Item = $crate::lex::TokenTree>
             {
                 match iter.next().expect("next iter") {
@@ -88,7 +88,7 @@ pub struct Group {
 impl_parse_token!(Group: TokenTree::Group(group) = group);
 
 impl Parse<char> for Group {
-    fn parse<I>(iter: &mut Peekable<I>) -> Result<Self, Diagnostics>
+    fn parse<I>(iter: &mut Peekable<I>) -> Result<Self>
     where I: Iterator<Item = char> + Clone
     {
         let delimiter = Delimiter::from_char_open(iter.next().expect("next iter")).ok_or_else(|| diagnostic!("unknown open delimiter"))?;
@@ -135,7 +135,7 @@ pub struct Ident {
 impl_parse_token!(Ident: TokenTree::Ident(ident) = ident);
 
 impl Parse<char> for Ident {
-    fn parse<I>(iter: &mut Peekable<I>) -> Result<Self, Diagnostics>
+    fn parse<I>(iter: &mut Peekable<I>) -> Result<Self>
     where I: Iterator<Item = char> + Clone
     {
         let mut name = String::new();
@@ -159,7 +159,7 @@ pub struct Literal {
 impl_parse_token!(Literal: TokenTree::Literal(literal) = literal);
 
 impl Parse<char> for Literal {
-    fn parse<I>(iter: &mut Peekable<I>) -> Result<Self, Diagnostics>
+    fn parse<I>(iter: &mut Peekable<I>) -> Result<Self>
     where I: Iterator<Item = char> + Clone
     {
         Ok(Self { kind: LiteralKind::parse(iter)? })
@@ -173,7 +173,7 @@ pub enum LiteralKind {
 }
 
 impl Parse<char> for LiteralKind {
-    fn parse<I>(iter: &mut Peekable<I>) -> Result<Self, Diagnostics>
+    fn parse<I>(iter: &mut Peekable<I>) -> Result<Self>
     where I: Iterator<Item = char> + Clone
     {
         let next = iter.next().expect("next iter");
@@ -253,7 +253,7 @@ punct_kind!(for Punct:
 
 impl_parse_token!(Punct: TokenTree::Punct(punct) = punct);
 
-pub fn lex<I>(input: &mut Peekable<I>) -> Result<Vec<TokenTree>, Diagnostics>
+pub fn lex<I>(input: &mut Peekable<I>) -> Result<Vec<TokenTree>>
 where I: Iterator<Item = char> + Clone
 {
     let mut tokens = Vec::new();

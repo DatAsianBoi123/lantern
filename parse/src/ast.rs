@@ -2,7 +2,7 @@ use std::iter::Peekable;
 
 use token::Val;
 
-use crate::{diagnostic, error::Diagnostics, lex::{Colon, Equals, Ident, Literal, TokenTree}, Parse};
+use crate::{diagnostic, lex::{Colon, Equals, Ident, Literal, TokenTree}, Parse, Result};
 
 pub mod token;
 
@@ -14,7 +14,7 @@ macro_rules! parse_impl {
         }
 
         impl $crate::Parse<$ty> for $ident {
-            fn parse<I>(iter: &mut std::iter::Peekable<I>) -> Result<Self, $crate::error::Diagnostics>
+            fn parse<I>(iter: &mut std::iter::Peekable<I>) -> Result<Self>
             where I: std::iter::Iterator<Item = $ty> + std::clone::Clone
             {
                 $(
@@ -32,7 +32,7 @@ pub struct LanternFile {
 }
 
 impl Parse<TokenTree> for LanternFile {
-    fn parse<I>(iter: &mut Peekable<I>) -> Result<Self, Diagnostics>
+    fn parse<I>(iter: &mut Peekable<I>) -> Result<Self>
     where I: Iterator<Item = TokenTree> + Clone
     {
         let mut statements = Vec::new();
@@ -65,7 +65,7 @@ pub enum Statement {
 }
 
 impl Parse<TokenTree> for Statement {
-    fn parse<I>(iter: &mut Peekable<I>) -> Result<Self, Diagnostics>
+    fn parse<I>(iter: &mut Peekable<I>) -> Result<Self>
     where I: Iterator<Item = TokenTree> + Clone
     {
         Ok(Self::ValDeclaration(ValDeclaration::parse(iter)?))
@@ -90,7 +90,7 @@ pub enum Expression {
 }
 
 impl Parse<TokenTree> for Expression {
-    fn parse<I>(iter: &mut Peekable<I>) -> Result<Self, Diagnostics>
+    fn parse<I>(iter: &mut Peekable<I>) -> Result<Self>
     where I: Iterator<Item = TokenTree> + Clone
     {
         Ok(Self::Literal(Literal::parse(iter)?))
