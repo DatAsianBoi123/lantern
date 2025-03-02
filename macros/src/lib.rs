@@ -9,9 +9,9 @@ pub fn derive_parse(stream: TokenStream) -> TokenStream {
     match data {
         Data::Struct(DataStruct { fields: Fields::Unit, .. }) => {
             quote! {
-                impl ::parse::Parse<::parse::lex::TokenStree> for #ident {
-                    fn parse<I>(_: &mut ::std::iter::Peekable<I>) -> ::parse::Result<Self>
-                    where I: ::std::iter::Iterator<Item = ::parse::lex::TokenTree> + ::std::clone::Clone
+                impl crate::Parse<crate::lex::TokenStree> for #ident {
+                    fn parse<I>(_: &mut ::std::iter::Peekable<I>) -> crate::Result<Self>
+                    where I: ::std::iter::Iterator<Item = crate::lex::TokenTree> + ::std::clone::Clone
                     {
                         Ok(Self)
                     }
@@ -24,13 +24,13 @@ pub fn derive_parse(stream: TokenStream) -> TokenStream {
             let assignments = named.iter()
                 .map(|Field { ident, ty, .. }| {
                     let ident = ident.as_ref().expect("named field");
-                    quote! { let #ident = <#ty as ::parse::Parse<::parse::lex::TokenTree>>::parse(iter)?; }
+                    quote! { let #ident = <#ty as crate::Parse<crate::lex::TokenTree>>::parse(iter)?; }
                 });
 
             quote! {
-                impl ::parse::Parse<::parse::lex::TokenTree> for #ident {
-                    fn parse<I>(iter: &mut ::std::iter::Peekable<I>) -> ::parse::Result<Self>
-                    where I: ::std::iter::Iterator<Item = ::parse::lex::TokenTree> + ::std::clone::Clone
+                impl crate::Parse<crate::lex::TokenTree> for #ident {
+                    fn parse<I>(iter: &mut ::std::iter::Peekable<I>) -> crate::Result<Self>
+                    where I: ::std::iter::Iterator<Item = crate::lex::TokenTree> + ::std::clone::Clone
                     {
                         #(#assignments)*
                         Ok(Self { #(#names),* })

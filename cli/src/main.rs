@@ -1,7 +1,6 @@
 use std::{env::args, fs::File, io::Read, time::Instant};
 
-use ast::LanternFile;
-use parse::{error::InvalidTokenError, lex::lex, Parse};
+use parse::{ast::LanternFile, error::InvalidTokenError, lex::lex, Parse};
 
 fn main() {
     let Some(file) = args().nth(1) else {

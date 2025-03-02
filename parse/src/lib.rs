@@ -3,6 +3,7 @@ use std::iter::Peekable;
 use error::Diagnostics;
 
 pub mod lex;
+pub mod ast;
 pub mod error;
 
 pub type Result<T> = std::result::Result<T, Diagnostics>;

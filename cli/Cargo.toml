@@ -9,5 +9,4 @@ path = "src/main.rs"
 
 [dependencies]
 parse = { path = "../parse" }
-ast = { path = "../ast" }
 

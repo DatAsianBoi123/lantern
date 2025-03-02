@@ -8,6 +8,7 @@ name = "parse"
 path = "src/lib.rs"
 
 [dependencies]
+macros = { path = "../macros" }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 

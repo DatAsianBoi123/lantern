@@ -3,7 +3,7 @@ use std::{iter::Peekable, marker::PhantomData};
 use macros::Parse;
 use token::{Val, Fun};
 
-use parse::{diagnostic, lex::{Colon, Comma, Delimiter, Equals, Group, Ident, Literal, TokenTree}, Parse, Result};
+use crate::{diagnostic, lex::{Colon, Comma, Delimiter, Equals, Group, Ident, Literal, TokenTree}, Parse, Result};
 
 pub mod token;
 
@@ -75,27 +75,7 @@ impl Parse<TokenTree> for LanternFile {
     fn parse<I>(iter: &mut Peekable<I>) -> Result<Self>
     where I: Iterator<Item = TokenTree> + Clone
     {
-        let mut statements = Vec::new();
-
-        while let Some(peek) = iter.peek() {
-            if matches!(peek, TokenTree::Newline) {
-                iter.next();
-                continue;
-            }
-
-            statements.push(Statement::parse(iter)?);
-
-            if let Some(peek) = iter.peek() {
-                if matches!(peek, TokenTree::Newline) {
-                    iter.next();
-                    continue;
-                } else {
-                    return Err(diagnostic!("expected newline to end statement").into());
-                }
-            }
-        }
-
-        Ok(Self { statements })
+        Ok(Self { statements: Vec::parse(iter)? })
     }
 }
 
@@ -121,6 +101,33 @@ impl Parse<TokenTree> for Statement {
     }
 }
 
+impl Parse<TokenTree> for Vec<Statement> {
+    fn parse<I>(iter: &mut Peekable<I>) -> Result<Self>
+    where I: Iterator<Item = TokenTree> + Clone
+    {
+        let mut statements = Vec::new();
+        while let Some(peek) = iter.peek() {
+            if matches!(peek, TokenTree::Newline) {
+                iter.next();
+                continue;
+            }
+
+            statements.push(Statement::parse(iter)?);
+
+            if let Some(peek) = iter.peek() {
+                if matches!(peek, TokenTree::Newline) {
+                    iter.next();
+                    continue;
+                } else {
+                    return Err(diagnostic!("expected newline to end statement").into());
+                }
+            }
+        }
+
+        Ok(statements)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Parse)]
 pub struct ValDeclaration {
     pub val: Val,
@@ -136,6 +143,7 @@ pub struct FunDefinition {
     pub fun: Fun,
     pub ident: Ident,
     pub args: ParenGroup<Punctuated<FunArg, Comma>>,
+    pub body: BraceGroup<Vec<Statement>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Parse)]
