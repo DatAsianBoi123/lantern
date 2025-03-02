@@ -7,3 +7,7 @@ edition = "2021"
 name = "flame"
 path = "src/lib.rs"
 
+[dependencies]
+parse = { path = "../parse" }
+thiserror = { workspace = true }
+

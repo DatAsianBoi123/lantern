@@ -18,6 +18,10 @@ dependencies = [
 [[package]]
 name = "flame"
 version = "0.1.0"
+dependencies = [
+ "parse",
+ "thiserror",
+]
 
 [[package]]
 name = "macros"

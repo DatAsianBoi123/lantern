@@ -1,18 +1,18 @@
 use std::{mem, slice};
 
 use error::{AccessUndefinedError, RuntimeError, StackOverflowError, StackUnderflowError};
-use flame::{Address, Instruction};
+use flame::{instruction::{Instruction, InstructionSet}, Address};
 
 pub mod error;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LanternRuntime<const S: usize, const T: usize> {
     stack: Stack<S>,
-    text: [Instruction; T],
+    text: InstructionSet<T>,
 }
 
 impl<const S: usize, const T: usize> LanternRuntime<S, T> {
-    pub fn new(instructions: [Instruction; T]) -> Self {
+    pub fn new(instructions: InstructionSet<T>) -> Self {
         Self { stack: Default::default(), text: instructions }
     }
 
