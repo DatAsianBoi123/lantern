@@ -3,6 +3,7 @@ members = [
   "flame",
   "runtime",
   "parse",
+  "macros",
   "ast",
 
   "cli",

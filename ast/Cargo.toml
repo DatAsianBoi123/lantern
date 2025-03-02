@@ -9,5 +9,6 @@ path = "src/lib.rs"
 
 [dependencies]
 parse = { path = "../parse" }
+macros = { path = "../macros" }
 anyhow = { workspace = true }
 

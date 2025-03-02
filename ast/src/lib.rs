@@ -1,30 +1,11 @@
 use std::{iter::Peekable, marker::PhantomData};
 
+use macros::Parse;
 use token::{Val, Fun};
 
 use parse::{diagnostic, lex::{Colon, Comma, Delimiter, Equals, Group, Ident, Literal, TokenTree}, Parse, Result};
 
 pub mod token;
-
-macro_rules! parse_impl {
-    (for $ty: ty : $(#[$meta: meta])* $vis: vis struct $ident: ident { $($item_vis: vis $item_ident: ident : $item_ty: ty),* $(,)? }) => {
-        $(#[$meta])*
-        $vis struct $ident {
-            $($item_vis $item_ident : $item_ty,)*
-        }
-
-        impl $crate::Parse<$ty> for $ident {
-            fn parse<I>(iter: &mut std::iter::Peekable<I>) -> Result<Self>
-            where I: std::iter::Iterator<Item = $ty> + std::clone::Clone
-            {
-                $(
-                    let $item_ident = <$item_ty as $crate::Parse<$ty>>::parse(iter)?;
-                )*
-                Ok(Self { $($item_ident,)* })
-            }
-        }
-    };
-}
 
 macro_rules! delimiter {
     ($name: literal : $(#[$meta: meta])* $vis: vis struct $ident: ident ( $delim: ident );) => {
@@ -140,35 +121,29 @@ impl Parse<TokenTree> for Statement {
     }
 }
 
-parse_impl!(for TokenTree:
-    #[derive(Debug, Clone, PartialEq)]
-    pub struct ValDeclaration {
-        pub val: Val,
-        pub ident: Ident,
-        pub colon: Colon,
-        pub r#type: Ident,
-        pub equals: Equals,
-        pub init: Expression,
-    }
-);
+#[derive(Debug, Clone, PartialEq, Parse)]
+pub struct ValDeclaration {
+    pub val: Val,
+    pub ident: Ident,
+    pub colon: Colon,
+    pub r#type: Ident,
+    pub equals: Equals,
+    pub init: Expression,
+}
 
-parse_impl!(for TokenTree:
-    #[derive(Debug, Clone, PartialEq)]
-    pub struct FunDefinition {
-        pub fun: Fun,
-        pub ident: Ident,
-        pub args: ParenGroup<Punctuated<FunArg, Comma>>,
-    }
-);
+#[derive(Debug, Clone, PartialEq, Parse)]
+pub struct FunDefinition {
+    pub fun: Fun,
+    pub ident: Ident,
+    pub args: ParenGroup<Punctuated<FunArg, Comma>>,
+}
 
-parse_impl!(for TokenTree:
-    #[derive(Debug, Clone, PartialEq)]
-    pub struct FunArg {
-        pub ident: Ident,
-        pub colon: Colon,
-        pub r#type: Ident,
-    }
-);
+#[derive(Debug, Clone, PartialEq, Parse)]
+pub struct FunArg {
+    pub ident: Ident,
+    pub colon: Colon,
+    pub r#type: Ident,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression {

@@ -13,6 +13,7 @@ name = "ast"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "macros",
  "parse",
 ]
 
@@ -27,6 +28,15 @@ dependencies = [
 [[package]]
 name = "flame"
 version = "0.1.0"
+
+[[package]]
+name = "macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "parse"
@@ -64,9 +74,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "2.0.96"
+version = "2.0.98"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d5d0adab1ae378d7f53bdebc67a39f1f151407ef230f0ce2883572f5d8985c80"
+checksum = "36147f1a48ae0ec2b5b3bc5b537d267457555a10dc06f3dbc8cb11ba3006d3b1"
 dependencies = [
  "proc-macro2",
  "quote",
