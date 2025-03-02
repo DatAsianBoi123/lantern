@@ -40,9 +40,9 @@ delimiter!("bracket":
     pub struct BracketGroup(Bracket);
 );
 
-delimiter!("brace":
+delimiter!("block":
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct BraceGroup(Brace);
+    pub struct Block(Brace);
 );
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,7 +143,7 @@ pub struct FunDefinition {
     pub fun: Fun,
     pub ident: Ident,
     pub args: ParenGroup<Punctuated<FunArg, Comma>>,
-    pub body: BraceGroup<Vec<Statement>>,
+    pub body: Block<Vec<Statement>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Parse)]
