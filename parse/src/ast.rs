@@ -25,11 +25,6 @@ macro_rules! delimiter {
     };
 }
 
-pub trait DelimiterGroup {
-    fn parse_group<I>(iter: &mut Peekable<I>) -> Result<Group>
-    where I: Iterator<Item = TokenTree> + Clone;
-}
-
 delimiter!("paren":
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct ParenGroup(Paren);
