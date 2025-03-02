@@ -68,7 +68,7 @@ impl<T: Parse<TokenTree>, P: Parse<TokenTree>> Parse<TokenTree> for Punctuated<T
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LanternFile {
-    statements: Vec<Statement>,
+    pub statements: Vec<Statement>,
 }
 
 impl Parse<TokenTree> for LanternFile {
