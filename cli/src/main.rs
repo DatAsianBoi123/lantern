@@ -1,6 +1,7 @@
 use std::{env::args, fs::File, io::Read, time::Instant};
 
 use parse::{ast::LanternFile, error::InvalidTokenError, lex::lex, Parse};
+use runtime::LanternRuntime;
 
 fn main() {
     let Some(file) = args().nth(1) else {
@@ -49,5 +50,25 @@ fn main() {
 
     println!("{lantern_file:#?}");
     println!("took {elapsed:?}");
+
+    let before = Instant::now();
+    let Ok(instructions) = flame::ignite(lantern_file) else {
+        eprintln!("instructions don't fit in txt space!");
+        return;
+    };
+    let elapsed = Instant::now().duration_since(before);
+
+    println!("{instructions:?}");
+    println!("took {elapsed:?}");
+
+    let before = Instant::now();
+    let runtime: LanternRuntime<128, 512> = LanternRuntime::new(instructions);
+    match runtime.exec() {
+        Ok(stack) => {
+            println!("Finished executing in {:?}", Instant::now().duration_since(before));
+            println!("stack dump:\n{stack}");
+        },
+        Err(err) => eprintln!("{err}"),
+    }
 }
 

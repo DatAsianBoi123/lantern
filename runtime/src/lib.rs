@@ -1,4 +1,4 @@
-use std::{mem, slice};
+use std::{fmt::{Display, Formatter}, mem, slice};
 
 use error::{AccessUndefinedError, RuntimeError, StackOverflowError, StackUnderflowError};
 use flame::{instruction::{Instruction, InstructionSet}, Address};
@@ -16,7 +16,7 @@ impl<const S: usize, const T: usize> LanternRuntime<S, T> {
         Self { stack: Default::default(), text: instructions }
     }
 
-    pub fn exec(mut self) -> Result<(), RuntimeError> {
+    pub fn exec(mut self) -> Result<Stack<S>, RuntimeError> {
         for instruction in self.text {
             match instruction {
                 Instruction::Pushu8(u8) => { self.stack.push(u8)?; },
@@ -45,7 +45,7 @@ impl<const S: usize, const T: usize> LanternRuntime<S, T> {
             };
         };
 
-        Ok(())
+        Ok(self.stack)
     }
 }
 
@@ -58,6 +58,15 @@ pub struct Stack<const S: usize> {
 impl<const S: usize> Default for Stack<S> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<const S: usize> Display for Stack<S> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        for byte in self.stack {
+            write!(f, "{byte:02X} ")?;
+        }
+        Ok(())
     }
 }
 
