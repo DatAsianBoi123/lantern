@@ -3,7 +3,7 @@ use std::{iter::Peekable, marker::PhantomData};
 use macros::Parse;
 use token::{Val, Fun};
 
-use crate::{diagnostic, lex::{Colon, Comma, Delimiter, Equals, Group, Ident, Literal, TokenTree}, Parse, Result};
+use crate::{diagnostic, lex::{Colon, Comma, Delimiter, Equals, Group, Ident, Literal, Period, Punct, TokenTree}, Parse, Result};
 
 pub mod token;
 
@@ -40,11 +40,18 @@ delimiter!("block":
     pub struct Block(Brace);
 );
 
+// TODO: trailing punctuation
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Punctuated<T, P> {
     _phantom: PhantomData<P>,
 
     pub items: Vec<T>,
+}
+
+impl<T, P> Punctuated<T, P> {
+    pub fn new(items: Vec<T>) -> Self {
+        Self { _phantom: PhantomData, items }
+    }
 }
 
 impl<T: Parse<TokenTree>, P: Parse<TokenTree>> Parse<TokenTree> for Punctuated<T, P> {
@@ -58,6 +65,26 @@ impl<T: Parse<TokenTree>, P: Parse<TokenTree>> Parse<TokenTree> for Punctuated<T
             items.push(T::parse(iter)?);
         };
         Ok(Self { _phantom: PhantomData, items })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Path {
+    pub items: Punctuated<Ident, Period>,
+}
+
+impl Parse<TokenTree> for Path {
+    fn parse<I>(iter: &mut Peekable<I>) -> Result<Self>
+    where I: Iterator<Item = TokenTree> + Clone
+    {
+        let mut items = Vec::new();
+        items.push(Ident::parse(iter)?);
+        while let Some(peek) = iter.peek() {
+            if !matches!(peek, TokenTree::Punct(Punct::Period(_))) { break; }
+            Period::parse(iter)?;
+            items.push(Ident::parse(iter)?);
+        };
+        Ok(Self { items: Punctuated::new(items) })
     }
 }
 
@@ -128,7 +155,7 @@ pub struct ValDeclaration {
     pub val: Val,
     pub ident: Ident,
     pub colon: Colon,
-    pub r#type: Ident,
+    pub r#type: Path,
     pub equals: Equals,
     pub init: Expression,
 }
@@ -145,7 +172,7 @@ pub struct FunDefinition {
 pub struct FunArg {
     pub ident: Ident,
     pub colon: Colon,
-    pub r#type: Ident,
+    pub r#type: Path,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -1,8 +1,8 @@
-val x: float = 10
-val y: float = 20
-val z: float = 3.88
+val x: std.float = 10
+val y: std.float = 20
+val z: std.float = 3.88
 
-val hello: str = "hello"
-val world: str = 'world'
-val aaaaa: str = 'hi \'john\'\\\"hello\"'
+val hello: std.str = "hello"
+val world: std.str = 'world'
+val aaaaa: std.str = 'hi \'john\'\\\"hello\"'
 
