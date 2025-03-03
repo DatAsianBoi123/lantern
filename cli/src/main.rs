@@ -1,16 +1,25 @@
-use std::{env::args, fs::File, io::Read, time::Instant};
+use std::{fs::File, io::Read, time::Instant};
 
-use parse::{ast::LanternFile, error::InvalidTokenError, lex::lex, Parse};
+use clap::Parser;
+use parse::{ast::LanternFile, lex::lex, Parse};
 use runtime::LanternRuntime;
 
-fn main() {
-    let Some(file) = args().nth(1) else {
-        eprint!("missing file");
-        return;
-    };
+#[derive(Parser, Debug)]
+#[command(version, about)]
+struct Args {
+    file: String,
 
-    let Ok(mut file) = File::open(&file) else {
-        eprintln!("file not found: `{file}`");
+    #[arg(short, long)]
+    verbose: bool,
+    #[arg(short, long)]
+    no_run: bool,
+}
+
+fn main() {
+    let Args { file: file_name, verbose, no_run } = Args::parse();
+
+    let Ok(mut file) = File::open(&file_name) else {
+        eprintln!("file not found: `{file_name}`");
         return;
     };
 
@@ -20,6 +29,7 @@ fn main() {
         return;
     };
     let mut input = content.chars().peekable();
+    let before_compile = Instant::now();
     let before = Instant::now();
     let tokens = match lex(&mut input) {
         Ok(tokens) => tokens,
@@ -28,10 +38,11 @@ fn main() {
             return;
         }
     };
-    let elapsed = Instant::now().duration_since(before);
-    
-    println!("{tokens:#?}");
-    println!("took {elapsed:?}");
+
+    if verbose {
+        println!("{tokens:#?}");
+        println!("took {:?}", Instant::now().duration_since(before));
+    }
 
     let before = Instant::now();
     let lantern_file = match LanternFile::parse(&mut tokens.into_iter().peekable()) {
@@ -41,27 +52,36 @@ fn main() {
             return;
         }
     };
-    let elapsed = Instant::now().duration_since(before);
 
-    println!("{lantern_file:#?}");
-    println!("took {elapsed:?}");
+    if verbose {
+        println!("{lantern_file:#?}");
+        println!("took {:?}", Instant::now().duration_since(before));
+    }
 
     let before = Instant::now();
     let Ok(instructions) = flame::ignite(lantern_file) else {
         eprintln!("instructions don't fit in txt space!");
         return;
     };
-    let elapsed = Instant::now().duration_since(before);
 
-    println!("{instructions:?}");
-    println!("took {elapsed:?}");
+    if verbose {
+        println!("{instructions:?}");
+        println!("took {:?}", Instant::now().duration_since(before));
+    }
 
-    let before = Instant::now();
+    println!("finished compiling in {:?}", Instant::now().duration_since(before_compile));
+
+    if no_run { return; }
+
     let runtime: LanternRuntime<128, 512> = LanternRuntime::new(instructions);
+    println!("running {file_name}");
+    let before = Instant::now();
     match runtime.exec() {
         Ok(stack) => {
             println!("Finished executing in {:?}", Instant::now().duration_since(before));
-            println!("stack dump:\n{stack}");
+            if verbose {
+                println!("stack dump:\n{stack}");
+            }
         },
         Err(err) => eprintln!("{err}"),
     }

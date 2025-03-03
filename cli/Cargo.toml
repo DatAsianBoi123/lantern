@@ -11,4 +11,5 @@ path = "src/main.rs"
 parse = { path = "../parse" }
 flame = { path = "../flame" }
 runtime = { path = "../runtime" }
+clap = { version = "4.5.31", features = ["derive"] }
 
