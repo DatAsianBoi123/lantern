@@ -277,7 +277,7 @@ where I: Iterator<Item = char> + Clone
         } else if peek.is_ascii_alphanumeric() {
             tokens.push(TokenTree::Ident(Ident::parse(input)?));
         } else {
-            break;
+            return Err(Diagnostic::new(InvalidTokenError(peek).into()).into());
         }
     }
 

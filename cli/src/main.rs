@@ -30,11 +30,6 @@ fn main() {
     };
     let elapsed = Instant::now().duration_since(before);
     
-    if let Some(next) = input.next() {
-        eprintln!("{}", InvalidTokenError(next));
-        return;
-    }
-
     println!("{tokens:#?}");
     println!("took {elapsed:?}");
 
