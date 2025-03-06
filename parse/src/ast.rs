@@ -35,10 +35,12 @@ delimiter!("bracket":
     pub struct BracketGroup(Bracket);
 );
 
-delimiter!("block":
+delimiter!("brace":
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct Block(Brace);
+    pub struct BraceGroup(Brace);
 );
+
+pub type Block = BraceGroup<Vec<Statement>>;
 
 // TODO: trailing punctuation
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -165,7 +167,7 @@ pub struct FunDefinition {
     pub fun: Fun,
     pub ident: Ident,
     pub args: ParenGroup<Punctuated<FunArg, Comma>>,
-    pub body: Block<Vec<Statement>>,
+    pub body: Block,
 }
 
 #[derive(Debug, Clone, PartialEq, Parse)]
