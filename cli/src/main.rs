@@ -39,6 +39,11 @@ fn main() {
         }
     };
 
+    if let Some(next) = input.next() {
+        eprintln!("invalid token {next}");
+        return;
+    };
+
     if verbose {
         println!("{tokens:#?}");
         println!("took {:?}", Instant::now().duration_since(before));
