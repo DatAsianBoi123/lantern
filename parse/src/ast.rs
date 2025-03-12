@@ -1,11 +1,13 @@
 use std::{iter::Peekable, marker::PhantomData};
 
+use expr::Expression;
 use macros::Parse;
 use token::{Fun, Using, Val};
 
-use crate::{diagnostic, lex::{Colon, Comma, Delimiter, Equals, Group, Ident, Literal, Period, Punct, TokenTree}, Parse, Result};
+use crate::{diagnostic, lex::{Colon, Comma, Delimiter, Equals, Group, Ident, Period, Punct, TokenTree}, Parse, Result};
 
 pub mod token;
+pub mod expr;
 
 macro_rules! delimiter {
     ($name: literal : $(#[$meta: meta])* $vis: vis struct $ident: ident ( $delim: ident );) => {
@@ -186,18 +188,5 @@ pub struct FunArg {
     pub ident: Ident,
     pub colon: Colon,
     pub r#type: Path,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Expression {
-    Literal(Literal),
-}
-
-impl Parse<TokenTree> for Expression {
-    fn parse<I>(iter: &mut Peekable<I>) -> Result<Self>
-    where I: Iterator<Item = TokenTree> + Clone
-    {
-        Ok(Self::Literal(Literal::parse(iter)?))
-    }
 }
 

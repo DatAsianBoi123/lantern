@@ -1,6 +1,6 @@
 use error::IndexOutOfBoundsErr;
 use instruction::{Instruction, InstructionSet};
-use parse::{ast::{Expression, LanternFile, Statement, ValDeclaration}, lex::LiteralKind};
+use parse::{ast::{expr::Expression, LanternFile, Statement, ValDeclaration}, lex::LiteralKind};
 
 pub mod instruction;
 pub mod error;
