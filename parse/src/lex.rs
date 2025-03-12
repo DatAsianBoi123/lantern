@@ -250,6 +250,7 @@ punct_kind!(for Punct:
         Hyphen('-'),
         Asterisk('*'),
         Slash('/'),
+        Percent('%'),
         Equals('='),
     }
 );
