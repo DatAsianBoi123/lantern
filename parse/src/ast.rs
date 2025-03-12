@@ -1,7 +1,7 @@
 use std::{iter::Peekable, marker::PhantomData};
 
 use macros::Parse;
-use token::{Val, Fun};
+use token::{Fun, Using, Val};
 
 use crate::{diagnostic, lex::{Colon, Comma, Delimiter, Equals, Group, Ident, Literal, Period, Punct, TokenTree}, Parse, Result};
 
@@ -105,6 +105,7 @@ impl Parse<TokenTree> for LanternFile {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
+    UsingStatement(UsingStatement),
     ValDeclaration(ValDeclaration),
     FunDefinition(FunDefinition),
 }
@@ -119,6 +120,8 @@ impl Parse<TokenTree> for Statement {
             Ok(Self::ValDeclaration(ValDeclaration::parse(iter)?))
         } else if Fun::is(peek) {
             Ok(Self::FunDefinition(FunDefinition::parse(iter)?))
+        } else if Using::is(peek) {
+            Ok(Self::UsingStatement(UsingStatement::parse(iter)?))
         } else {
             Err(diagnostic!("unexpected token '{peek:?}'").into())
         }
@@ -150,6 +153,14 @@ impl Parse<TokenTree> for Vec<Statement> {
 
         Ok(statements)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Parse)]
+pub struct UsingStatement {
+    pub using: Using,
+    pub module: Path,
+    pub colon: Colon,
+    pub items: BraceGroup<Punctuated<Ident, Comma>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Parse)]

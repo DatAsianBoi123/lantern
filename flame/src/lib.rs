@@ -23,6 +23,7 @@ pub fn ignite<const S: usize>(file: LanternFile) -> Result<InstructionSet<S>, In
                     },
                 }
             },
+            Statement::UsingStatement(_) => {},
             _ => todo!(),
         }
     }

@@ -36,3 +36,8 @@ impl_token!(
     pub struct Fun = "fun"
 );
 
+impl_token!(
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Using = "using"
+);
+
