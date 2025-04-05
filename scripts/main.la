@@ -1,5 +1,7 @@
-using std:{float, str}
+using std:{float, str, bool}
 using std.io:{print}
+
+val thing: bool = false
 
 val x: float = 10
 val y: float = 20

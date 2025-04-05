@@ -1,6 +1,7 @@
 sy case match
 
 sy keyword Keyword val fun using
+sy keyword Boolean true false
 
 sy match Identifier /\<\w\+\>/
 sy match Operator /[=]/

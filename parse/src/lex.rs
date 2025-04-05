@@ -149,7 +149,7 @@ impl Parse<char> for Ident {
             name += &iter.next().expect("next iter").to_string();
         }
 
-        if name.is_empty() { panic!("empty ident"); };
+        if name.is_empty() { return Err(diagnostic!("expected identifier").into()); };
         Ok(Self { name })
     }
 }
@@ -173,6 +173,7 @@ impl Parse<char> for Literal {
 pub enum LiteralKind {
     String(String),
     Number(f64),
+    Boolean(bool),
 }
 
 impl Parse<char> for LiteralKind {
@@ -232,6 +233,14 @@ impl Parse<char> for LiteralKind {
             return Ok(Self::Number(num));
         };
 
+        if let Ok(Ident { name }) = Ident::parse(iter) {
+            match name.as_ref() {
+                "true" => return Ok(Self::Boolean(true)),
+                "false" => return Ok(Self::Boolean(false)),
+                _ => {},
+            };
+        };
+
         Err(diagnostic!("unknown literal").into())
     }
 }
@@ -271,12 +280,19 @@ where I: Iterator<Item = char> + Clone
 
         if Delimiter::from_char_open(peek).is_some() {
             tokens.push(TokenTree::Group(Group::parse(input)?));
-        } else if peek == '"' || peek == '\'' || peek.is_ascii_digit() {
-            tokens.push(TokenTree::Literal(Literal::parse(input)?));
         } else if Punct::is_punct(peek) {
             tokens.push(TokenTree::Punct(Punct::parse(input)?));
+        } else if peek == '"' || peek == '\'' || peek.is_ascii_digit() {
+            tokens.push(TokenTree::Literal(Literal::parse(input)?));
         } else if peek.is_ascii_alphanumeric() {
-            tokens.push(TokenTree::Ident(Ident::parse(input)?));
+            let ident = Ident::parse(input)?;
+            if ident.name == "true" {
+                tokens.push(TokenTree::Literal(Literal { kind: LiteralKind::Boolean(true) }));
+            } else if ident.name == "false" {
+                tokens.push(TokenTree::Literal(Literal { kind: LiteralKind::Boolean(false) }));
+            } else {
+                tokens.push(TokenTree::Ident(ident));
+            }
         } else {
             break;
         }
