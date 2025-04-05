@@ -1,11 +1,16 @@
 use std::iter::Peekable;
 
-use crate::{diagnostic, error::Diagnostics, lex::{Delimiter, Group, Ident, Literal, Punct, TokenTree}, Parse, Result};
+use macros::Parse;
+
+use crate::{diagnostic, error::Diagnostics, lex::{Comma, Delimiter, Group, Ident, Literal, Punct, TokenTree}, Parse, Result};
+
+use super::{ParenGroup, Punctuated};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
     Literal(Literal),
     Variable(Ident),
+    FunCall(FunCall),
     BinaryAdd(Box<Expression>, Box<Expression>),
     BinarySub(Box<Expression>, Box<Expression>),
     BinaryMult(Box<Expression>, Box<Expression>),
@@ -69,6 +74,7 @@ impl Expression {
             ExpressionItem::Group(items) => Self::parse_items(items),
             ExpressionItem::Literal(literal) => Ok(Self::Literal(literal)),
             ExpressionItem::Variable(ident) => Ok(Self::Variable(ident)),
+            ExpressionItem::FunCall(fun_call) => Ok(Self::FunCall(fun_call)),
             _ => Err(diagnostic!("expected expression value").into()),
         }
     }
@@ -79,6 +85,7 @@ pub enum ExpressionItem {
     Group(Vec<ExpressionItem>),
     Literal(Literal),
     Variable(Ident),
+    FunCall(FunCall),
     BinOp(BinaryOperator),
     UnOp(UnaryOperator),
 }
@@ -93,18 +100,22 @@ impl ExpressionItem {
         while let Some(token) = iter.peek() {
             match token {
                 TokenTree::Group(Group { delimiter: Delimiter::Paren, .. }) => {
-                    let Some(TokenTree::Group(Group { delimiter: Delimiter::Paren, tokens })) = iter.next() else { unreachable!() };
+                    let Ok(Group { tokens, .. }) = Group::parse(iter) else { unreachable!() };
                     items.push(Self::Group(Self::read(&mut tokens.into_iter().peekable())?));
                     prev_is_value = true;
                 },
                 TokenTree::Literal(_) => {
-                    let Some(TokenTree::Literal(literal)) = iter.next() else { unreachable!() };
-                    items.push(Self::Literal(literal));
+                    items.push(Self::Literal(Literal::parse(iter).unwrap()));
                     prev_is_value = true;
                 },
                 TokenTree::Ident(_) => {
-                    let Some(TokenTree::Ident(ident)) = iter.next() else { unreachable!() };
-                    items.push(Self::Variable(ident));
+                    // TODO: custom iter impl
+                    let mut cloned = iter.clone();
+                    if FunCall::parse(&mut cloned).is_ok() {
+                        items.push(Self::FunCall(FunCall::parse(iter).unwrap()));
+                    } else {
+                        items.push(Self::Variable(Ident::parse(iter).unwrap()));
+                    }
                     prev_is_value = true;
                 },
                 TokenTree::Punct(punct) => {
@@ -129,6 +140,12 @@ impl ExpressionItem {
 
         Ok(items)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Parse)]
+pub struct FunCall {
+    pub ident: Ident,
+    pub args: ParenGroup<Punctuated<Expression, Comma>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,2 +1,2 @@
-val x: float = 5 * -3 + (9/3 + 2)
+val x: float = max(5 + 3, rand()) + -rand()
 

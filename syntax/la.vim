@@ -3,7 +3,8 @@ sy case match
 sy keyword Keyword val fun using
 sy keyword Boolean true false
 
-sy match Identifier /\<\w\+\>/
+sy match Identifier /\w\+/
+sy match Function /\w\+\ze\s*(.*)/
 sy match Operator /[=+\-*/%]/
 sy match Delimiter /[:.,(){}\[\]]/
 sy match Type /\(:\s*\)\@<=\<\w\+\>/
