@@ -3,6 +3,40 @@ use std::{fmt::{Display, Formatter}, mem, slice};
 use error::{AccessUndefinedError, RuntimeError, StackOverflowError, StackUnderflowError};
 use flame::{instruction::{Instruction, InstructionSet}, Address};
 
+macro_rules! args {
+    (@args ( $ty: ty ) in $stack: expr) => {{
+        let total_size = std::mem::size_of::<$ty>();
+        (unsafe { *($stack.access($stack.ptr - total_size)? as *const $ty) }, total_size)
+    }};
+    (@args ( $($ty: ty),+ $(,)? ) in $stack: expr) => {{
+        let mut total_size = 0;
+        $(
+            total_size += std::mem::size_of::<$ty>();
+        )+
+        let args_start = $stack.ptr - total_size;
+        let mut current_arg = 0;
+        #[allow(unused_assignments)]
+        let args = (
+            $(
+                {
+                    let arg = unsafe { *($stack.access(args_start + current_arg * std::mem::size_of::<$ty>())? as *const $ty) };
+                    current_arg += 1;
+                    arg
+                }
+            ),+
+        );
+        (args, total_size)
+    }};
+
+    ( ( $($ty: ty),+ $(,)? ) in $stack: expr, $pat: pat => $ret: expr) => {{
+        let (args, total_size) = args!(@args ($($ty),+) in $stack);
+
+        let $pat = args;
+        $stack.pop(total_size)?;
+        $stack.push($ret)?;
+    }};
+}
+
 pub mod error;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -21,26 +55,21 @@ impl<const S: usize, const T: usize> LanternRuntime<S, T> {
             match instruction {
                 Instruction::Pushu8(u8) => { self.stack.push(u8)?; },
                 Instruction::Pushf64(f64) => { self.stack.push(f64)?; },
+                Instruction::Pop(len) => { self.stack.pop(len)?; },
+                Instruction::Copy(from, len, to) => { self.stack.copy(from, len, to)?; },
+                Instruction::Addf => args!((f64, f64) in self.stack, (lhs, rhs) => lhs + rhs),
+                Instruction::Subf => args!((f64, f64) in self.stack, (lhs, rhs) => lhs - rhs),
+                Instruction::Multf => args!((f64, f64) in self.stack, (lhs, rhs) => lhs * rhs),
+                Instruction::Divf => args!((f64, f64) in self.stack, (lhs, rhs) => lhs / rhs),
+                Instruction::Modf => args!((f64, f64) in self.stack, (lhs, rhs) => lhs % rhs),
+                Instruction::Negf => args!((f64) in self.stack, f64 => -f64),
+                Instruction::Not => args!((bool) in self.stack, bool => !bool),
                 Instruction::InvokeNative(name) => {
                     match name {
-                        "add_f64" => {
-                            let args_start = self.stack.ptr - 2 * mem::size_of::<f64>();
-                            let left = self.stack.access(args_start)? as *const f64;
-                            let right = self.stack.access(args_start + mem::size_of::<f64>())? as *const f64;
-                            let res = unsafe { *left + *right };
-
-                            self.stack.push(res)?;
-                        },
-                        "print_f64" => {
-                            let f64 = self.stack.access(self.stack.ptr - mem::size_of::<f64>())? as *const f64;
-                            let f64 = unsafe { *f64 };
-                            println!("{f64}");
-                        },
+                        "print_f64" => args!((f64) in self.stack, f64 => println!("{f64}")),
                         _ => panic!("unknown native function {name}"),
                     }
                 },
-                Instruction::Pop(len) => { self.stack.pop(len)?; },
-                Instruction::Copy(from, len, to) => { self.stack.copy(from, len, to)?; },
                 Instruction::NULL => break,
             };
         };

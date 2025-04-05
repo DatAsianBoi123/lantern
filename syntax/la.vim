@@ -4,7 +4,7 @@ sy keyword Keyword val fun using
 sy keyword Boolean true false
 
 sy match Identifier /\<\w\+\>/
-sy match Operator /[=]/
+sy match Operator /[=+\-*/%]/
 sy match Delimiter /[:.,(){}\[\]]/
 sy match Type /\(:\s*\)\@<=\<\w\+\>/
 sy match Number /\d\+\(\.\d\+\)\?/

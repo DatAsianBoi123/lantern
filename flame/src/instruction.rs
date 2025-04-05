@@ -41,9 +41,16 @@ impl<const S: usize> IntoIterator for InstructionSet<S> {
 pub enum Instruction {
     Pushu8(u8),
     Pushf64(f64),
-    InvokeNative(&'static str),
     Pop(usize),
     Copy(Address, usize, Address),
+    Addf,
+    Subf,
+    Multf,
+    Divf,
+    Modf,
+    Negf,
+    Not,
+    InvokeNative(&'static str),
     NULL,
 }
 
