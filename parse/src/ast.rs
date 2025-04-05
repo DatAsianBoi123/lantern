@@ -63,6 +63,7 @@ impl<T: Parse<TokenTree>, P: Parse<TokenTree>> Parse<TokenTree> for Punctuated<T
     where I: Iterator<Item = TokenTree> + Clone
     {
         let mut items = Vec::new();
+        if iter.peek().is_none() { return Ok(Self { _phantom: PhantomData, items }); };
         items.push(T::parse(iter)?);
         while iter.peek().is_some() {
             P::parse(iter)?;
