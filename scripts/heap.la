@@ -1,0 +1,2 @@
+val str: std.string = 'hi there'
+

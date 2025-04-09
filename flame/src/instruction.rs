@@ -40,8 +40,11 @@ impl<const S: usize> IntoIterator for InstructionSet<S> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
     Pushu8(u8),
+    Pushusize(usize),
     Pushf64(f64),
+    PushHeap(usize, usize),
     Pop(usize),
+    PopHeap(Address, usize, usize),
     Copy(Address, usize, Address),
     Addf,
     Subf,

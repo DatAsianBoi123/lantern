@@ -1,4 +1,4 @@
-use std::{fmt::{Display, Formatter}, mem, slice};
+use std::{alloc::{handle_alloc_error, GlobalAlloc, Layout, System}, fmt::{Display, Formatter}, mem, slice};
 
 use error::{AccessUndefinedError, RuntimeError, StackOverflowError, StackUnderflowError};
 use flame::{instruction::{Instruction, InstructionSet}, Address};
@@ -54,8 +54,24 @@ impl<const S: usize, const T: usize> LanternRuntime<S, T> {
         for instruction in self.text {
             match instruction {
                 Instruction::Pushu8(u8) => { self.stack.push(u8)?; },
+                Instruction::Pushusize(usize) => { self.stack.push(usize)?; },
                 Instruction::Pushf64(f64) => { self.stack.push(f64)?; },
+                Instruction::PushHeap(size, align) => {
+                    if size == 0 { panic!("attempted to alloc 0 bytes"); };
+                    let layout = unsafe { Layout::from_size_align_unchecked(size, align) };
+                    let heap_ptr = unsafe { System.alloc(layout) };
+                    if heap_ptr.is_null() { handle_alloc_error(layout); };
+                    unsafe { std::ptr::copy_nonoverlapping(self.stack.access(self.stack.ptr - size)?, heap_ptr, size); };
+                    println!("allocated {layout:?} at {heap_ptr:?}, is {:02X?}", unsafe { slice::from_raw_parts(heap_ptr, size) });
+                    self.stack.pop(size)?;
+                    self.stack.push(heap_ptr)?;
+                },
                 Instruction::Pop(len) => { self.stack.pop(len)?; },
+                Instruction::PopHeap(address, size, align) => {
+                    let layout = unsafe { Layout::from_size_align_unchecked(size, align) };
+                    unsafe { System.dealloc(address as *mut u8, layout); };
+                    println!("deallocated {address:02X} ({layout:?})");
+                },
                 Instruction::Copy(from, len, to) => { self.stack.copy(from, len, to)?; },
                 Instruction::Addf => args!((f64, f64) in self.stack, (lhs, rhs) => lhs + rhs),
                 Instruction::Subf => args!((f64, f64) in self.stack, (lhs, rhs) => lhs - rhs),

@@ -28,10 +28,12 @@ fn compile_expr<const S: usize>(expression: Expression, instructions: &mut Instr
         Expression::Literal(Literal { kind: LiteralKind::Number(number) }) => instructions.push(Instruction::Pushf64(number))?,
         Expression::Literal(Literal { kind: LiteralKind::Boolean(bool) }) => instructions.push(Instruction::Pushu8(bool as u8))?,
         Expression::Literal(Literal { kind: LiteralKind::String(string) }) => {
+            let len = string.len();
+            instructions.push(Instruction::PushHeap(len, 1))?;
             for byte in string.into_bytes() {
-                // TODO: string in heap
                 instructions.push(Instruction::Pushu8(byte))?;
             };
+            instructions.push(Instruction::Pushusize(len))?;
         },
         Expression::BinaryAdd(lhs, rhs) => {
             compile_expr(*lhs, instructions)?;
