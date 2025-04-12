@@ -78,7 +78,7 @@ fn main() {
 
     if no_run { return; }
 
-    let runtime: LanternRuntime<128, 512> = LanternRuntime::new(instructions);
+    let runtime: LanternRuntime<256, 512> = LanternRuntime::new(instructions);
     println!("running {file_name}");
     let before = Instant::now();
     match runtime.exec() {
