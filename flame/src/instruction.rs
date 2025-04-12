@@ -1,5 +1,61 @@
 use crate::{error::IndexOutOfBoundsErr, Address};
 
+#[macro_export]
+macro_rules! inst {
+    ($inst: expr; PUSHB $b: expr) => {
+        $inst.push($crate::instruction::Instruction::Pushu8($b))?;
+    };
+    ($inst: expr; PUSHU $u: expr) => {
+        $inst.push($crate::instruction::Instruction::Pushusize($u))?;
+    };
+    ($inst: expr; PUSHF $f: expr) => {
+        $inst.push($crate::instruction::Instruction::Pushf64($f))?;
+    };
+    ($inst: expr; POP $u: expr) => {
+        $inst.push($crate::instruction::Instruction::Pop($u))?;
+    };
+    ($inst: expr; COPY $f: expr, $s: expr, $t: expr) => {
+        $inst.push($crate::instruction::Instruction::Copy($f, $s, $t))?;
+    };
+    ($inst: expr; ADDF) => {
+        $inst.push($crate::instruction::Instruction::Addf)?;
+    };
+    ($inst: expr; SUBF) => {
+        $inst.push($crate::instruction::Instruction::Subf)?;
+    };
+    ($inst: expr; MULTF) => {
+        $inst.push($crate::instruction::Instruction::Multf)?;
+    };
+    ($inst: expr; DIVF) => {
+        $inst.push($crate::instruction::Instruction::Divf)?;
+    };
+    ($inst: expr; MODF) => {
+        $inst.push($crate::instruction::Instruction::Modf)?;
+    };
+    ($inst: expr; NEGF) => {
+        $inst.push($crate::instruction::Instruction::Negf)?;
+    };
+    ($inst: expr; NOT) => {
+        $inst.push($crate::instruction::Instruction::Not)?;
+    };
+    ($inst: expr; ALLOC) => {
+        $inst.push($crate::instruction::Instruction::Alloc)?;
+    };
+    ($inst: expr; DEALLOC) => {
+        $inst.push($crate::instruction::Instruction::Dealloc)?;
+    };
+    ($inst: expr; WRITE) => {
+        $inst.push($crate::instruction::Instruction::Write)?;
+    };
+    ($inst: expr; INV_NATIVE $n: literal) => {
+        $inst.push($crate::instruction::Instruction::InvokeNative($n))?;
+    };
+
+    ($inst: expr; $([$($tt: tt)+])*) => {
+        $($crate::inst!($inst; $($tt)+));*
+    };
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstructionSet<const S: usize> {
     inner: [Instruction; S],

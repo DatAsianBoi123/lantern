@@ -30,47 +30,49 @@ fn compile_expr<const S: usize>(expression: Expression, instructions: &mut Instr
         Expression::Literal(Literal { kind: LiteralKind::String(string) }) => {
             let len = string.len();
             for byte in string.into_bytes() {
-                instructions.push(Instruction::Pushu8(byte))?;
+                inst!(instructions; PUSHB byte);
             };
-            instructions.push(Instruction::Pushusize(1))?;
-            instructions.push(Instruction::Pushusize(len))?;
-            instructions.push(Instruction::Alloc)?;
-            instructions.push(Instruction::Pushusize(len))?;
-            instructions.push(Instruction::Write)?;
-            instructions.push(Instruction::Dealloc)?;
+            inst! { instructions;
+                [PUSHU 1]
+                [PUSHU len]
+                [ALLOC]
+                [PUSHU len]
+                [WRITE]
+                [DEALLOC]
+            };
         },
         Expression::BinaryAdd(lhs, rhs) => {
             compile_expr(*lhs, instructions)?;
             compile_expr(*rhs, instructions)?;
-            instructions.push(Instruction::Addf)?;
+            inst!(instructions; ADDF);
         },
         Expression::BinarySub(lhs, rhs) => {
             compile_expr(*lhs, instructions)?;
             compile_expr(*rhs, instructions)?;
-            instructions.push(Instruction::Subf)?;
+            inst!(instructions; SUBF);
         },
         Expression::BinaryMult(lhs, rhs) => {
             compile_expr(*lhs, instructions)?;
             compile_expr(*rhs, instructions)?;
-            instructions.push(Instruction::Multf)?;
+            inst!(instructions; MULTF);
         },
         Expression::BinaryDiv(lhs, rhs) => {
             compile_expr(*lhs, instructions)?;
             compile_expr(*rhs, instructions)?;
-            instructions.push(Instruction::Divf)?;
+            inst!(instructions; DIVF);
         },
         Expression::BinaryMod(lhs, rhs) => {
             compile_expr(*lhs, instructions)?;
             compile_expr(*rhs, instructions)?;
-            instructions.push(Instruction::Modf)?;
+            inst!(instructions; MODF);
         },
         Expression::UnaryNegate(expr) => {
             compile_expr(*expr, instructions)?;
-            instructions.push(Instruction::Negf)?;
+            inst!(instructions; NEGF);
         },
         Expression::UnaryNot(expr) => {
             compile_expr(*expr, instructions)?;
-            instructions.push(Instruction::Not)?;
+            inst!(instructions; NOT);
         },
         _ => todo!(),
     };
