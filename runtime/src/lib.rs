@@ -191,3 +191,8 @@ impl<const S: usize> Stack<S> {
     }
 }
 
+fn align_up(addr: *const u8, align: usize) -> *const u8 {
+    let addr = addr as usize;
+    ((addr + align - 1) & !(align - 1)) as *const u8
+}
+
