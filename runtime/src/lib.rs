@@ -1,4 +1,4 @@
-use std::{alloc::{handle_alloc_error, GlobalAlloc, Layout, System}, fmt::{Display, Formatter}, mem, slice};
+use std::{alloc::Layout, fmt::{Display, Formatter}, mem, slice};
 
 use error::{AccessUndefinedError, RuntimeError, StackOverflowError, StackUnderflowError};
 use flame::{instruction::{Instruction, InstructionSet}, Address};
@@ -39,6 +39,12 @@ macro_rules! args {
 
 pub mod error;
 
+#[repr(C)]
+struct HeapMetadata {
+    size: usize,
+    alignment: usize,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct LanternRuntime<const S: usize, const T: usize> {
     stack: Stack<S>,
@@ -56,22 +62,7 @@ impl<const S: usize, const T: usize> LanternRuntime<S, T> {
                 Instruction::Pushu8(u8) => { self.stack.push(u8)?; },
                 Instruction::Pushusize(usize) => { self.stack.push(usize)?; },
                 Instruction::Pushf64(f64) => { self.stack.push(f64)?; },
-                Instruction::PushHeap(size, align) => {
-                    if size == 0 { panic!("attempted to alloc 0 bytes"); };
-                    let layout = unsafe { Layout::from_size_align_unchecked(size, align) };
-                    let heap_ptr = unsafe { System.alloc(layout) };
-                    if heap_ptr.is_null() { handle_alloc_error(layout); };
-                    unsafe { std::ptr::copy_nonoverlapping(self.stack.access(self.stack.ptr - size)?, heap_ptr, size); };
-                    println!("allocated {layout:?} at {heap_ptr:?}, is {:02X?}", unsafe { slice::from_raw_parts(heap_ptr, size) });
-                    self.stack.pop(size)?;
-                    self.stack.push(heap_ptr)?;
-                },
                 Instruction::Pop(len) => { self.stack.pop(len)?; },
-                Instruction::PopHeap(address, size, align) => {
-                    let layout = unsafe { Layout::from_size_align_unchecked(size, align) };
-                    unsafe { System.dealloc(address as *mut u8, layout); };
-                    println!("deallocated {address:02X} ({layout:?})");
-                },
                 Instruction::Copy(from, len, to) => { self.stack.copy(from, len, to)?; },
                 Instruction::Addf => args!((f64, f64) in self.stack, (lhs, rhs) => lhs + rhs),
                 Instruction::Subf => args!((f64, f64) in self.stack, (lhs, rhs) => lhs - rhs),
@@ -80,6 +71,46 @@ impl<const S: usize, const T: usize> LanternRuntime<S, T> {
                 Instruction::Modf => args!((f64, f64) in self.stack, (lhs, rhs) => lhs % rhs),
                 Instruction::Negf => args!((f64) in self.stack, f64 => -f64),
                 Instruction::Not => args!((bool) in self.stack, bool => !bool),
+                Instruction::Alloc => args!((usize, usize) in self.stack, (alignment, size) => {
+                    let metadata_size = mem::size_of::<HeapMetadata>();
+                    let total_size = size + metadata_size + alignment;
+                    unsafe {
+                        let layout = Layout::from_size_align_unchecked(total_size, alignment.max(mem::align_of::<HeapMetadata>()));
+                        let ptr = std::alloc::alloc(layout);
+                        let data_ptr = align_up(ptr.byte_add(metadata_size), alignment);
+                        let meta_ptr = data_ptr.byte_sub(metadata_size) as *mut HeapMetadata;
+                        meta_ptr.write(HeapMetadata { size, alignment });
+
+                        data_ptr
+                    }
+                }),
+                Instruction::Dealloc => args!((usize) in self.stack, data_ptr => {
+                    unsafe {
+                        let meta_ptr = (data_ptr - mem::size_of::<HeapMetadata>()) as *mut HeapMetadata;
+                        let meta = &*meta_ptr;
+
+                        let total_size = meta.size + meta.alignment + mem::size_of::<HeapMetadata>();
+                        let layout = Layout::from_size_align_unchecked(total_size, meta.alignment.max(mem::align_of::<HeapMetadata>()));
+
+                        let ptr = meta_ptr.byte_sub(meta_ptr as usize % layout.align()) as *mut u8;
+                        std::alloc::dealloc(ptr, layout);
+                    };
+                }),
+                Instruction::Write => {
+                    unsafe {
+                        let size = *(self.stack.access(self.stack.ptr - mem::size_of::<usize>())? as *const usize);
+                        self.stack.pop(mem::size_of::<usize>())?;
+                        let ptr = *(self.stack.access(self.stack.ptr - mem::size_of::<usize>())? as *const usize);
+                        let ptr = ptr as *mut u8;
+                        self.stack.pop(mem::size_of::<usize>())?;
+                        let data = self.stack.access(self.stack.ptr - mem::size_of::<u8>() * size)?;
+                        self.stack.pop(mem::size_of::<u8>() * size)?;
+
+                        std::ptr::copy_nonoverlapping(data, ptr, size);
+
+                        self.stack.push(ptr)?;
+                    };
+                },
                 Instruction::InvokeNative(name) => {
                     match name {
                         "print_f64" => args!((f64) in self.stack, f64 => println!("{f64}")),

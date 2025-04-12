@@ -42,9 +42,7 @@ pub enum Instruction {
     Pushu8(u8),
     Pushusize(usize),
     Pushf64(f64),
-    PushHeap(usize, usize),
     Pop(usize),
-    PopHeap(Address, usize, usize),
     Copy(Address, usize, Address),
     Addf,
     Subf,
@@ -53,6 +51,17 @@ pub enum Instruction {
     Modf,
     Negf,
     Not,
+    /// POP     usize: size
+    /// POP     usize: alignment
+    /// PUSH    usize: heap data ptr
+    Alloc,
+    /// POP     usize: heap data ptr
+    Dealloc,
+    /// POP     usize: size
+    /// POP     usize: ptr
+    /// POP     u8 * size: bytes
+    /// PUSH    usize: heap data ptr
+    Write,
     InvokeNative(&'static str),
     NULL,
 }

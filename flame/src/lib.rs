@@ -29,11 +29,15 @@ fn compile_expr<const S: usize>(expression: Expression, instructions: &mut Instr
         Expression::Literal(Literal { kind: LiteralKind::Boolean(bool) }) => instructions.push(Instruction::Pushu8(bool as u8))?,
         Expression::Literal(Literal { kind: LiteralKind::String(string) }) => {
             let len = string.len();
-            instructions.push(Instruction::PushHeap(len, 1))?;
             for byte in string.into_bytes() {
                 instructions.push(Instruction::Pushu8(byte))?;
             };
+            instructions.push(Instruction::Pushusize(1))?;
             instructions.push(Instruction::Pushusize(len))?;
+            instructions.push(Instruction::Alloc)?;
+            instructions.push(Instruction::Pushusize(len))?;
+            instructions.push(Instruction::Write)?;
+            instructions.push(Instruction::Dealloc)?;
         },
         Expression::BinaryAdd(lhs, rhs) => {
             compile_expr(*lhs, instructions)?;
