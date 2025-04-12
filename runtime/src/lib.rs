@@ -139,7 +139,11 @@ impl<const S: usize> Default for Stack<S> {
 
 impl<const S: usize> Display for Stack<S> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        for byte in self.stack {
+        for (i, byte) in self.stack.iter().enumerate() {
+            if i != 0 {
+                if i % 16 == 0 { writeln!(f)?; }
+                else if i % 8 == 0 { write!(f, " ")?; };
+            };
             write!(f, "{byte:02X} ")?;
         }
         Ok(())
