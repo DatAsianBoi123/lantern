@@ -44,12 +44,23 @@ pub enum Instruction {
     Pushf64(f64),
     Pop(usize),
     Copy(Address, usize, Address),
+    /// POP     f64: rhs
+    /// POP     f64: lhs
+    /// PUSH    f64: result
     Addf,
+    /// f64 binary op, see [Instruction::Addf]
     Subf,
+    /// f64 binary op, see [Instruction::Addf]
     Multf,
+    /// f64 binary op, see [Instruction::Addf]
     Divf,
+    /// f64 binary op, see [Instruction::Addf]
     Modf,
+    /// POP     f64: value
+    /// PUSH    f64: -value
     Negf,
+    /// POP     bool: value
+    /// PUSH    bool: !value
     Not,
     /// POP     usize: size
     /// POP     usize: alignment
