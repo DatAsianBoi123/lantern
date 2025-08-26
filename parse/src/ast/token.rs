@@ -49,3 +49,8 @@ impl_token!(
     pub struct Using = "using"
 );
 
+impl_token!(
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Native = "native"
+);
+

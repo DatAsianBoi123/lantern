@@ -2,7 +2,7 @@ use std::{iter::Peekable, marker::PhantomData};
 
 use expr::Expression;
 use macros::Parse;
-use token::{Fun, Using, Val};
+use token::{Fun, Native, Using, Val};
 
 use crate::{diagnostic, lex::{Colon, Comma, Delimiter, Equals, Group, Ident, Period, Punct, TokenTree}, Parse, Result};
 
@@ -179,6 +179,7 @@ pub struct ValDeclaration {
 #[derive(Debug, Clone, PartialEq, Parse)]
 pub struct FunDefinition {
     pub fun: Fun,
+    pub native: Option<Native>,
     pub ident: Ident,
     pub args: ParenGroup<Punctuated<FunArg, Comma>>,
     pub body: Block,
