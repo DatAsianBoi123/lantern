@@ -139,7 +139,7 @@ impl_parse_token!(Ident: TokenTree::Ident(ident) = ident);
 
 impl Parse<char> for Ident {
     fn parse<I>(iter: &mut Peekable<I>) -> Result<Self>
-    where I: Iterator<Item = char> + Clone
+    where I: Iterator<Item = char>
     {
         let mut name = String::new();
 
