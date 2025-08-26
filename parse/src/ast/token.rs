@@ -14,13 +14,21 @@ macro_rules! impl_token {
 
         impl $crate::Parse<$crate::lex::TokenTree> for $ident {
             fn parse<I>(iter: &mut std::iter::Peekable<I>) -> Result<Self, $crate::error::Diagnostics>
-            where I: Iterator<Item = $crate::lex::TokenTree>
+            where I: Iterator<Item = $crate::lex::TokenTree> + Clone
+            {
+                Option::<$ident>::parse(iter)?.ok_or_else(|| $crate::diagnostic!("expected token `{}`", $name).into())
+            }
+        }
+
+        impl $crate::Parse<$crate::lex::TokenTree> for Option<$ident> {
+            fn parse<I>(iter: &mut std::iter::Peekable<I>) -> Result<Self, $crate::error::Diagnostics>
+            where I: Iterator<Item = $crate::lex::TokenTree> + Clone
             {
                 let Some($crate::lex::TokenTree::Ident($crate::lex::Ident { name })) = iter.next() else {
-                    return Err($crate::diagnostic!("expected token `{}`", $name).into());
+                    return Ok(None);
                 };
-                if name == $name { Ok(Self) }
-                else { Err($crate::diagnostic!("expected token `{}`", $name).into()) }
+                if name == $name { Ok(Some($ident)) }
+                else { Ok(None) }
             }
         }
     };
