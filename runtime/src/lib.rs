@@ -6,7 +6,7 @@ use flame::{instruction::{Instruction, InstructionSet}, Address};
 macro_rules! args {
     (@args ( $ty: ty ) in $stack: expr) => {{
         let total_size = std::mem::size_of::<$ty>();
-        (unsafe { *($stack.access($stack.ptr - total_size)? as *const $ty) }, total_size)
+        (unsafe { *($stack.read($stack.ptr - total_size)? as *const $ty) }, total_size)
     }};
     (@args ( $($ty: ty),+ $(,)? ) in $stack: expr) => {{
         let mut total_size = 0;
@@ -19,7 +19,7 @@ macro_rules! args {
         let args = (
             $(
                 {
-                    let arg = unsafe { *($stack.access(args_start + current_arg * std::mem::size_of::<$ty>())? as *const $ty) };
+                    let arg = unsafe { *($stack.read(args_start + current_arg * std::mem::size_of::<$ty>())? as *const $ty) };
                     current_arg += 1;
                     arg
                 }
@@ -98,12 +98,12 @@ impl<const S: usize, const T: usize> LanternRuntime<S, T> {
                 }),
                 Instruction::Write => {
                     unsafe {
-                        let size = *(self.stack.access(self.stack.ptr - mem::size_of::<usize>())? as *const usize);
+                        let size = *(self.stack.read(self.stack.ptr - mem::size_of::<usize>())? as *const usize);
                         self.stack.pop(mem::size_of::<usize>())?;
-                        let ptr = *(self.stack.access(self.stack.ptr - mem::size_of::<usize>())? as *const usize);
+                        let ptr = *(self.stack.read(self.stack.ptr - mem::size_of::<usize>())? as *const usize);
                         let ptr = ptr as *mut u8;
                         self.stack.pop(mem::size_of::<usize>())?;
-                        let data = self.stack.access(self.stack.ptr - mem::size_of::<u8>() * size)?;
+                        let data = self.stack.read(self.stack.ptr - mem::size_of::<u8>() * size)?;
                         self.stack.pop(mem::size_of::<u8>() * size)?;
 
                         std::ptr::copy_nonoverlapping(data, ptr, size);
@@ -155,7 +155,7 @@ impl<const S: usize> Stack<S> {
         Self { stack: [0; S], ptr: 0 }
     }
 
-    pub fn access(&self, addr: Address) -> Result<*const u8, AccessUndefinedError> {
+    pub fn read(&self, addr: Address) -> Result<*const u8, AccessUndefinedError> {
         if addr > self.ptr { return Err(AccessUndefinedError); };
 
         Ok(&self.stack[addr] as *const u8)
