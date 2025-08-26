@@ -13,10 +13,12 @@ struct Args {
     verbose: bool,
     #[arg(short, long)]
     no_run: bool,
+    #[arg(long)]
+    stack_dump: Option<String>,
 }
 
 fn main() {
-    let Args { file: file_name, verbose, no_run } = Args::parse();
+    let Args { file: file_name, verbose, no_run, stack_dump } = Args::parse();
 
     let Ok(mut file) = File::open(&file_name) else {
         eprintln!("file not found: `{file_name}`");
@@ -86,6 +88,12 @@ fn main() {
             println!("Finished executing in {:?}", Instant::now().duration_since(before));
             if verbose {
                 println!("stack dump:\n{stack}");
+            }
+
+            if let Some(stack_dump) = stack_dump {
+                if let Err(err) = std::fs::write(&stack_dump, stack.stack) {
+                    eprintln!("{err}");
+                }
             }
         },
         Err(err) => eprintln!("{err}"),
