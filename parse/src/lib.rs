@@ -1,3 +1,5 @@
+// TODO: handle newlines
+
 use std::iter::Peekable;
 
 use error::Diagnostics;

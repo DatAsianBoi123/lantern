@@ -227,6 +227,7 @@ impl Parse<char> for LiteralKind {
             };
         };
 
+        // TODO: hex and binary numbers
         if let Some((num, _)) = read_int(iter, next) {
             let mut num = num as f64;
             if iter.peek().copied() == Some('.') {
