@@ -4,7 +4,7 @@ use expr::Expression;
 use macros::Parse;
 use token::{Fun, Native, Using, Val};
 
-use crate::{diagnostic, lex::{Colon, Comma, Delimiter, Equals, Group, Ident, Period, Punct, TokenTree}, Parse, Result};
+use crate::{diagnostic, lex::{At, Colon, Comma, Delimiter, Equals, Group, Ident, Period, Punct, TokenTree}, Parse, Result};
 
 pub mod token;
 pub mod expr;
@@ -121,7 +121,7 @@ impl Parse<TokenTree> for Statement {
 
         if Val::is(peek) {
             Ok(Self::ValDeclaration(ValDeclaration::parse(iter)?))
-        } else if Fun::is(peek) {
+        } else if Fun::is(peek) || At::is(peek) {
             Ok(Self::FunDefinition(FunDefinition::parse(iter)?))
         } else if Using::is(peek) {
             Ok(Self::UsingStatement(UsingStatement::parse(iter)?))
@@ -178,6 +178,7 @@ pub struct ValDeclaration {
 
 #[derive(Debug, Clone, PartialEq, Parse)]
 pub struct FunDefinition {
+    pub annotations: Vec<ItemAnnotation>,
     pub fun: Fun,
     pub native: Option<Native>,
     pub ident: Ident,
@@ -190,5 +191,12 @@ pub struct FunArg {
     pub ident: Ident,
     pub colon: Colon,
     pub r#type: Path,
+}
+
+#[derive(Debug, Clone, PartialEq, Parse)]
+pub struct ItemAnnotation {
+    pub at: At,
+    pub ident: Ident,
+    pub args: ParenGroup<Punctuated<Expression, Comma>>,
 }
 

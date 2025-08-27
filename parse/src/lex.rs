@@ -269,6 +269,8 @@ punct_kind!(for Punct:
         Slash('/'),
         Percent('%'),
         Equals('='),
+
+        At('@'),
     }
 );
 
