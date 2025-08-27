@@ -111,6 +111,7 @@ pub enum Statement {
     UsingStatement(UsingStatement),
     ValDeclaration(ValDeclaration),
     FunDefinition(FunDefinition),
+    Expression(Expression),
 }
 
 impl Parse<TokenTree> for Statement {
@@ -126,7 +127,7 @@ impl Parse<TokenTree> for Statement {
         } else if Using::is(peek) {
             Ok(Self::UsingStatement(UsingStatement::parse(iter)?))
         } else {
-            Err(diagnostic!("unexpected token '{peek:?}'").into())
+            Ok(Self::Expression(Expression::parse(iter)?))
         }
     }
 }
