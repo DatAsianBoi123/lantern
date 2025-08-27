@@ -36,6 +36,18 @@ pub fn derive_parse(stream: TokenStream) -> TokenStream {
                         Ok(Self { #(#names),* })
                     }
                 }
+                impl crate::Parse<crate::lex::TokenTree> for ::std::vec::Vec<#ident> {
+                    fn parse<I>(iter: &mut ::std::iter::Peekable<I>) -> crate::Result<Self>
+                    where I: ::std::iter::Iterator<Item = crate::lex::TokenTree> + ::std::clone::Clone
+                    {
+                        let mut vec = ::std::vec::Vec::new();
+                        while let Ok(token) = <#ident as crate::Parse<crate::lex::TokenTree>>::parse(&mut iter.clone()) {
+                            let _ = <#ident as crate::Parse<crate::lex::TokenTree>>::parse(iter);
+                            vec.push(token);
+                        }
+                        Ok(vec)
+                    }
+                }
             }.into()
         },
         Data::Struct(DataStruct { fields: Fields::Unnamed(FieldsUnnamed { unnamed, .. }),  .. }) => {
