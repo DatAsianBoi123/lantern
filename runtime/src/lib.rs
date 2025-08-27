@@ -1,25 +1,27 @@
-use std::{alloc::Layout, fmt::{Display, Formatter}, mem, slice};
+use std::{alloc::Layout, fmt::{Display, Formatter}, mem, ops::Deref};
 
 use error::{AccessUndefinedError, RuntimeError, StackOverflowError, StackUnderflowError};
 use flame::{instruction::{Instruction, InstructionSet}, Address};
 
+use crate::error::CopyError;
+
 macro_rules! args {
     (@args ( $ty: ty ) in $stack: expr) => {{
-        let total_size = std::mem::size_of::<$ty>();
-        (unsafe { *($stack.read($stack.ptr - total_size)? as *const $ty) }, total_size)
+        (unsafe { *($stack.read($stack.len - SLOT_SIZE)? as *const $ty) }, SLOT_SIZE)
     }};
     (@args ( $($ty: ty),+ $(,)? ) in $stack: expr) => {{
         let mut total_size = 0;
         $(
-            total_size += std::mem::size_of::<$ty>();
+            let _ = std::mem::size_of::<$ty>(); // for repeat
+            total_size += SLOT_SIZE;
         )+
-        let args_start = $stack.ptr - total_size;
+        let args_start = $stack.len - total_size;
         let mut current_arg = 0;
         #[allow(unused_assignments)]
         let args = (
             $(
                 {
-                    let arg = unsafe { *($stack.read(args_start + current_arg * std::mem::size_of::<$ty>())? as *const $ty) };
+                    let arg = unsafe { *($stack.read(args_start + current_arg * SLOT_SIZE)? as *const $ty) };
                     current_arg += 1;
                     arg
                 }
@@ -39,6 +41,8 @@ macro_rules! args {
 
 pub mod error;
 
+pub const SLOT_SIZE: usize = 8;
+
 #[repr(C)]
 struct HeapMetadata {
     size: usize,
@@ -46,17 +50,17 @@ struct HeapMetadata {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct LanternRuntime<const S: usize, const T: usize> {
-    stack: Stack<S>,
+pub struct LanternRuntime<const T: usize> {
+    stack: Stack,
     text: InstructionSet<T>,
 }
 
-impl<const S: usize, const T: usize> LanternRuntime<S, T> {
-    pub fn new(instructions: InstructionSet<T>) -> Self {
-        Self { stack: Default::default(), text: instructions }
+impl<const T: usize> LanternRuntime<T> {
+    pub fn new(stack_size: usize, instructions: InstructionSet<T>) -> Self {
+        Self { stack: Stack::new(stack_size), text: instructions }
     }
 
-    pub fn exec(mut self) -> Result<Stack<S>, RuntimeError> {
+    pub fn exec(mut self) -> Result<Stack, RuntimeError> {
         for instruction in self.text {
             match instruction {
                 Instruction::Pushu8(u8) => { self.stack.push(u8)?; },
@@ -98,13 +102,13 @@ impl<const S: usize, const T: usize> LanternRuntime<S, T> {
                 }),
                 Instruction::Write => {
                     unsafe {
-                        let size = *(self.stack.read(self.stack.ptr - mem::size_of::<usize>())? as *const usize);
-                        self.stack.pop(mem::size_of::<usize>())?;
-                        let ptr = *(self.stack.read(self.stack.ptr - mem::size_of::<usize>())? as *const usize);
+                        let size = *(self.stack.read(self.stack.len - SLOT_SIZE)? as *const usize);
+                        self.stack.pop(SLOT_SIZE)?;
+                        let ptr = *(self.stack.read(self.stack.len - SLOT_SIZE)? as *const usize);
                         let ptr = ptr as *mut u8;
-                        self.stack.pop(mem::size_of::<usize>())?;
-                        let data = self.stack.read(self.stack.ptr - mem::size_of::<u8>() * size)?;
-                        self.stack.pop(mem::size_of::<u8>() * size)?;
+                        self.stack.pop(SLOT_SIZE)?;
+                        let data = self.stack.read(self.stack.len - SLOT_SIZE * size)?;
+                        self.stack.pop(SLOT_SIZE * size)?;
 
                         std::ptr::copy_nonoverlapping(data, ptr, size);
 
@@ -126,20 +130,25 @@ impl<const S: usize, const T: usize> LanternRuntime<S, T> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Stack<const S: usize> {
-    stack: [u8; S],
-    ptr: Address,
+pub struct Stack {
+    ptr: *mut u8,
+    cap: usize,
+    len: usize,
 }
 
-impl<const S: usize> Default for Stack<S> {
-    fn default() -> Self {
-        Self::new()
+impl Deref for Stack {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        unsafe {
+            std::slice::from_raw_parts(self.ptr, self.cap)
+        }
     }
 }
 
-impl<const S: usize> Display for Stack<S> {
+impl Display for Stack {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        for (i, byte) in self.stack.iter().enumerate() {
+        for (i, byte) in self.iter().enumerate() {
             if i != 0 {
                 if i % 16 == 0 { writeln!(f)?; }
                 else if i % 8 == 0 { write!(f, " ")?; };
@@ -150,42 +159,58 @@ impl<const S: usize> Display for Stack<S> {
     }
 }
 
-impl<const S: usize> Stack<S> {
-    pub fn new() -> Self {
-        Self { stack: [0; S], ptr: 0 }
+impl Stack {
+    pub fn new(size: usize) -> Self {
+        let layout = unsafe { Layout::from_size_align_unchecked(size, SLOT_SIZE) };
+        let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
+        if ptr.is_null() { std::alloc::handle_alloc_error(layout); };
+
+        Self {
+            ptr,
+            cap: size,
+            len: 0,
+        }
     }
 
     pub fn read(&self, addr: Address) -> Result<*const u8, AccessUndefinedError> {
-        if addr > self.ptr { return Err(AccessUndefinedError); };
+        if addr > self.len { return Err(AccessUndefinedError); };
 
-        Ok(&self.stack[addr] as *const u8)
+        unsafe { Ok(self.ptr.add(addr)) }
     }
 
     pub fn push<T>(&mut self, item: T) -> Result<usize, StackOverflowError> {
         let size = mem::size_of::<T>();
+        if size > SLOT_SIZE {
+            panic!("attempted to push more than {SLOT_SIZE} bytes");
+        }
 
-        let before = self.ptr;
-        self.ptr += size;
+        let before = self.len;
+        self.len += SLOT_SIZE;
 
-        if self.ptr >= self.stack.len() { return Err(StackOverflowError); };
+        if self.len >= self.cap { return Err(StackOverflowError); };
 
-        let bytes = unsafe { slice::from_raw_parts(&item as *const T as *const u8, size) };
-        self.stack[before..self.ptr].copy_from_slice(bytes);
+        unsafe {
+            std::ptr::write(self.ptr.add(before) as *mut T, item);
+        };
 
         Ok(size)
     }
 
     pub fn pop(&mut self, len: usize) -> Result<(), StackUnderflowError> {
-        if len > self.ptr { return Err(StackUnderflowError); };
-        self.ptr -= len;
+        if len > self.len { return Err(StackUnderflowError); };
+        self.len -= len;
         Ok(())
     }
 
-    pub fn copy(&mut self, from: Address, len: usize, to: Address) -> Result<(), AccessUndefinedError> {
-        if from + len > self.ptr { return Err(AccessUndefinedError); };
-        if to + len > self.ptr { return Err(AccessUndefinedError); };
+    pub fn copy(&mut self, src: Address, len: usize, dst: Address) -> Result<(), CopyError> {
+        if src + len > self.len { return Err(CopyError::AccessUndefined(AccessUndefinedError)); };
+        if dst + len > self.len { return Err(CopyError::AccessUndefined(AccessUndefinedError)); };
 
-        self.stack.copy_within(from..from + len, to);
+        if src + len > dst { return Err(CopyError::Overlapping); };
+
+        unsafe {
+            std::ptr::copy_nonoverlapping(self.ptr.add(src), self.ptr.add(dst), len);
+        };
 
         Ok(())
     }

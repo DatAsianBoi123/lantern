@@ -1,4 +1,4 @@
-use std::{fs::File, io::Read, time::Instant};
+use std::{fs::File, io::Read, ops::Deref, time::Instant};
 
 use clap::Parser;
 use parse::{ast::LanternFile, lex::lex, Parse};
@@ -80,7 +80,7 @@ fn main() {
 
     if no_run { return; }
 
-    let runtime: LanternRuntime<256, 512> = LanternRuntime::new(instructions);
+    let runtime: LanternRuntime<512> = LanternRuntime::new(256, instructions);
     println!("running {file_name}");
     let before = Instant::now();
     match runtime.exec() {
@@ -91,7 +91,7 @@ fn main() {
             }
 
             if let Some(stack_dump) = stack_dump {
-                if let Err(err) = std::fs::write(&stack_dump, stack.stack) {
+                if let Err(err) = std::fs::write(&stack_dump, stack.deref()) {
                     eprintln!("{err}");
                 }
             }
