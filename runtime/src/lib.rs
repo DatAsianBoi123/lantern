@@ -115,10 +115,11 @@ impl<const T: usize> LanternRuntime<T> {
                         self.stack.push(ptr)?;
                     };
                 },
-                Instruction::InvokeNative(name) => {
-                    match name {
-                        "print_f64" => args!((f64) in self.stack, f64 => println!("{f64}")),
-                        _ => panic!("unknown native function {name}"),
+                Instruction::InvokeNative(id) => {
+                    match id {
+                        // print
+                        0x0001 => args!((f64) in self.stack, f64 => println!("{f64}")),
+                        _ => panic!("unknown native function with id {id:#04X}"),
                     }
                 },
                 Instruction::NULL => break,

@@ -129,7 +129,7 @@ pub enum Instruction {
     /// POP     u8 * size: bytes
     /// PUSH    usize: heap data ptr
     Write,
-    InvokeNative(&'static str),
+    InvokeNative(u32),
     NULL,
 }
 
