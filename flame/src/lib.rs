@@ -1,5 +1,5 @@
 use error::IndexOutOfBoundsErr;
-use instruction::{Instruction, InstructionSet};
+use instruction::InstructionSet;
 use parse::{ast::{expr::Expression, LanternFile, Statement, ValDeclaration}, lex::{Literal, LiteralKind}};
 
 pub mod instruction;
@@ -25,8 +25,8 @@ pub fn ignite<const S: usize>(file: LanternFile) -> Result<InstructionSet<S>, In
 
 fn compile_expr<const S: usize>(expression: Expression, instructions: &mut InstructionSet<S>) -> Result<(), IndexOutOfBoundsErr> {
     match expression {
-        Expression::Literal(Literal { kind: LiteralKind::Number(number) }) => instructions.push(Instruction::Pushf64(number))?,
-        Expression::Literal(Literal { kind: LiteralKind::Boolean(bool) }) => instructions.push(Instruction::Pushu8(bool as u8))?,
+        Expression::Literal(Literal { kind: LiteralKind::Number(number) }) => inst!(instructions; PUSHF number),
+        Expression::Literal(Literal { kind: LiteralKind::Boolean(bool) }) => inst!(instructions; PUSHB bool as u8),
         Expression::Literal(Literal { kind: LiteralKind::String(string) }) => {
             let len = string.len();
             for byte in string.into_bytes() {
