@@ -24,11 +24,15 @@ macro_rules! impl_token {
             fn parse<I>(iter: &mut std::iter::Peekable<I>) -> Result<Self, $crate::error::Diagnostics>
             where I: Iterator<Item = $crate::lex::TokenTree> + Clone
             {
-                let Some($crate::lex::TokenTree::Ident($crate::lex::Ident { name })) = iter.next() else {
+                let Some($crate::lex::TokenTree::Ident($crate::lex::Ident { name })) = iter.peek() else {
                     return Ok(None);
                 };
-                if name == $name { Ok(Some($ident)) }
-                else { Ok(None) }
+                if name == $name {
+                    iter.next();
+                    Ok(Some($ident))
+                } else {
+                    Ok(None)
+                }
             }
         }
     };
