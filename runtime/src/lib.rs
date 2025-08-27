@@ -137,6 +137,15 @@ pub struct Stack {
     len: usize,
 }
 
+impl Drop for Stack {
+    fn drop(&mut self) {
+        unsafe {
+            let layout = Layout::from_size_align_unchecked(SLOT_SIZE * self.cap, SLOT_SIZE);
+            std::alloc::dealloc(self.ptr, layout);
+        }
+    }
+}
+
 impl Deref for Stack {
     type Target = [u8];
 
@@ -162,7 +171,7 @@ impl Display for Stack {
 
 impl Stack {
     pub fn new(size: usize) -> Self {
-        let layout = unsafe { Layout::from_size_align_unchecked(size, SLOT_SIZE) };
+        let layout = unsafe { Layout::from_size_align_unchecked(SLOT_SIZE * size, SLOT_SIZE) };
         let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
         if ptr.is_null() { std::alloc::handle_alloc_error(layout); };
 
