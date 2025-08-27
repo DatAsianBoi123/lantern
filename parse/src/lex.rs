@@ -33,6 +33,14 @@ macro_rules! punct_kind {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
         $vis struct $punct;
 
+        impl $punct {
+            pub fn is(token: &$crate::lex::TokenTree) -> bool {
+                match token {
+                    $crate::lex::TokenTree::$tt_ident($ident::$punct(_)) => true,
+                    _ => false,
+                }
+            }
+        }
         impl $crate::Parse<char> for $punct {
             fn parse<I>(iter: &mut std::iter::Peekable<I>) -> Result<Self>
             where I: std::iter::Iterator<Item = char>
