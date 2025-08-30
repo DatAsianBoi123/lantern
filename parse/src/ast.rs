@@ -12,7 +12,7 @@ pub mod expr;
 macro_rules! delimiter {
     ($name: literal : $(#[$meta: meta])* $vis: vis struct $ident: ident ( $delim: ident );) => {
         $(#[$meta])*
-        $vis struct $ident<T>(T);
+        $vis struct $ident<T>(pub T);
 
         impl<T: Parse<TokenTree>> Parse<TokenTree> for $ident<T> {
             fn parse<I>(iter: &mut Peekable<I>) -> Result<Self>
