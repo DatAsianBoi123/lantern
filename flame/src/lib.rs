@@ -30,15 +30,14 @@ fn compile_expr<const S: usize>(expression: Expression, instructions: &mut Instr
         Expression::Literal(Literal { kind: LiteralKind::String(string) }) => {
             let len = string.len();
             for byte in string.into_bytes() {
-                inst!(instructions; PUSHB byte);
+                inst!(instructions; BPUSH byte);
             };
             inst! { instructions;
                 [PUSHU 1]
                 [PUSHU len]
                 [ALLOC]
-                [PUSHU len]
                 [WRITE]
-                [DEALLOC]
+                [PUSHU len]
             };
         },
         Expression::BinaryAdd(lhs, rhs) => {

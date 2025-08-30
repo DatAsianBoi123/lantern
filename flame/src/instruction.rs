@@ -38,6 +38,9 @@ macro_rules! inst {
     ($inst: expr; NOT) => {
         $inst.push($crate::instruction::Instruction::Not)?
     };
+    ($inst: expr; BPUSH $b: expr) => {
+        $inst.push($crate::instruction::Instruction::BPush($b))?
+    };
     ($inst: expr; ALLOC) => {
         $inst.push($crate::instruction::Instruction::Alloc)?
     };
@@ -118,15 +121,15 @@ pub enum Instruction {
     /// POP     bool: value
     /// PUSH    bool: !value
     Not,
+    BPush(u8),
     /// POP     usize: size
     /// POP     usize: alignment
     /// PUSH    usize: heap data ptr
     Alloc,
     /// POP     usize: heap data ptr
     Dealloc,
-    /// POP     usize: size
     /// POP     usize: ptr
-    /// POP     u8 * size: bytes
+    /// BYTE FLUSH
     /// PUSH    usize: heap data ptr
     Write,
     InvokeNative(u32),

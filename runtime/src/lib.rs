@@ -52,12 +52,13 @@ struct HeapMetadata {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LanternRuntime<const T: usize> {
     stack: Stack,
+    byte_stack: ByteStack,
     text: InstructionSet<T>,
 }
 
 impl<const T: usize> LanternRuntime<T> {
     pub fn new(stack_size: usize, instructions: InstructionSet<T>) -> Self {
-        Self { stack: Stack::new(stack_size), text: instructions }
+        Self { stack: Stack::new(stack_size), byte_stack: ByteStack::new(), text: instructions }
     }
 
     pub fn exec(mut self) -> Result<Stack, RuntimeError> {
@@ -75,6 +76,7 @@ impl<const T: usize> LanternRuntime<T> {
                 Instruction::Modf => args!((f64, f64) in self.stack, (lhs, rhs) => lhs % rhs),
                 Instruction::Negf => args!((f64) in self.stack, f64 => -f64),
                 Instruction::Not => args!((bool) in self.stack, bool => !bool),
+                Instruction::BPush(byte) => self.byte_stack.push(byte)?,
                 Instruction::Alloc => args!((usize, usize) in self.stack, (alignment, size) => {
                     let metadata_size = mem::size_of::<HeapMetadata>();
                     let total_size = size + metadata_size + alignment;
@@ -100,21 +102,13 @@ impl<const T: usize> LanternRuntime<T> {
                         std::alloc::dealloc(ptr, layout);
                     };
                 }),
-                Instruction::Write => {
+                Instruction::Write => args!((*mut u8) in self.stack, ptr => {
+                    let bytes = self.byte_stack.flush();
                     unsafe {
-                        let size = *(self.stack.read(self.stack.len - SLOT_SIZE)? as *const usize);
-                        self.stack.pop(SLOT_SIZE)?;
-                        let ptr = *(self.stack.read(self.stack.len - SLOT_SIZE)? as *const usize);
-                        let ptr = ptr as *mut u8;
-                        self.stack.pop(SLOT_SIZE)?;
-                        let data = self.stack.read(self.stack.len - SLOT_SIZE * size)?;
-                        self.stack.pop(SLOT_SIZE * size)?;
-
-                        std::ptr::copy_nonoverlapping(data, ptr, size);
-
-                        self.stack.push(ptr)?;
+                        std::ptr::copy_nonoverlapping(bytes as *const _ as *const u8, ptr, bytes.len());
                     };
-                },
+                    ptr
+                }),
                 Instruction::InvokeNative(id) => {
                     match id {
                         // print
@@ -127,6 +121,40 @@ impl<const T: usize> LanternRuntime<T> {
         };
 
         Ok(self.stack)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ByteStack {
+    inner: [u8; 512],
+    len: usize,
+}
+
+impl Default for ByteStack {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ByteStack {
+    pub fn new() -> Self {
+        Self {
+            inner: [0; 512],
+            len: 0,
+        }
+    }
+
+    pub fn push(&mut self, byte: u8) -> Result<(), StackOverflowError> {
+        if self.len >= self.inner.len() { return Err(StackOverflowError); };
+        self.inner[self.len] = byte;
+        self.len += 1;
+        Ok(())
+    }
+    
+    pub fn flush(&mut self) -> &[u8] {
+        let bytes = &self.inner[0..self.len];
+        self.len = 0;
+        bytes
     }
 }
 
@@ -188,9 +216,8 @@ impl Stack {
         unsafe { Ok(self.ptr.add(addr)) }
     }
 
-    pub fn push<T>(&mut self, item: T) -> Result<usize, StackOverflowError> {
-        let size = mem::size_of::<T>();
-        if size > SLOT_SIZE {
+    pub fn push<T>(&mut self, item: T) -> Result<(), StackOverflowError> {
+        if mem::size_of::<T>() > SLOT_SIZE {
             panic!("attempted to push more than {SLOT_SIZE} bytes");
         }
 
@@ -203,7 +230,7 @@ impl Stack {
             std::ptr::write(self.ptr.add(before) as *mut T, item);
         };
 
-        Ok(size)
+        Ok(())
     }
 
     pub fn pop(&mut self, len: usize) -> Result<(), StackUnderflowError> {
