@@ -1,5 +1,5 @@
 use instruction::InstructionSet;
-use parse::{ast::{expr::Expression, LanternFile, Statement, ValDeclaration}, lex::{Literal, LiteralKind}};
+use parse::{ast::{expr::{Expression, FunCall}, LanternFile, Statement, ValDeclaration}, lex::{Literal, LiteralKind}};
 
 use crate::error::CompilerError;
 
@@ -13,10 +13,9 @@ pub fn ignite<const S: usize>(file: LanternFile) -> Result<InstructionSet<S>, Co
 
     for statement in file.statements {
         match statement {
-            Statement::ValDeclaration(ValDeclaration { init, .. }) => {
-                compile_expr(init, &mut instructions)?;
-            },
+            Statement::ValDeclaration(ValDeclaration { init, .. }) => compile_expr(init, &mut instructions)?,
             Statement::UsingStatement(_) => {},
+            Statement::Expression(expr) => compile_expr(expr, &mut instructions)?,
             _ => todo!(),
         }
     }
@@ -40,6 +39,14 @@ fn compile_expr<const S: usize>(expression: Expression, instructions: &mut Instr
                 [WRITE]
                 [PUSHU len]
             };
+        },
+        Expression::FunCall(FunCall { ident, mut args }) => {
+            if ident.name == "print" && args.0.items.len() == 1 {
+                compile_expr(args.0.items.pop().unwrap(), instructions)?;
+                inst!(instructions; INV_NATIVE 0x0001); // print
+            } else {
+                return Err(CompilerError::UnknownFunction(ident.name));
+            }
         },
         Expression::BinaryAdd(lhs, rhs) => {
             compile_expr(*lhs, instructions)?;
