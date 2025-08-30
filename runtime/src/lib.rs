@@ -112,7 +112,13 @@ impl<const T: usize> LanternRuntime<T> {
                 Instruction::InvokeNative(id) => {
                     match id {
                         // print
-                        0x0001 => args!((f64) in self.stack, f64 => println!("{f64}")),
+                        0x0001 => args!((*const u8, usize) in self.stack, (ptr, len) => {
+                            let string = unsafe {
+                                let slice = std::slice::from_raw_parts(ptr, len);
+                                str::from_utf8_unchecked(slice)
+                            };
+                            println!("{string}");
+                        }),
                         _ => panic!("unknown native function with id {id:#04X}"),
                     }
                 },

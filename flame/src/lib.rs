@@ -1,13 +1,14 @@
-use error::IndexOutOfBoundsErr;
 use instruction::InstructionSet;
 use parse::{ast::{expr::Expression, LanternFile, Statement, ValDeclaration}, lex::{Literal, LiteralKind}};
+
+use crate::error::CompilerError;
 
 pub mod instruction;
 pub mod error;
 
 pub type Address = usize;
 
-pub fn ignite<const S: usize>(file: LanternFile) -> Result<InstructionSet<S>, IndexOutOfBoundsErr> {
+pub fn ignite<const S: usize>(file: LanternFile) -> Result<InstructionSet<S>, CompilerError> {
     let mut instructions = InstructionSet::new();
 
     for statement in file.statements {
@@ -23,7 +24,7 @@ pub fn ignite<const S: usize>(file: LanternFile) -> Result<InstructionSet<S>, In
     Ok(instructions)
 }
 
-fn compile_expr<const S: usize>(expression: Expression, instructions: &mut InstructionSet<S>) -> Result<(), IndexOutOfBoundsErr> {
+fn compile_expr<const S: usize>(expression: Expression, instructions: &mut InstructionSet<S>) -> Result<(), CompilerError> {
     match expression {
         Expression::Literal(Literal { kind: LiteralKind::Number(number) }) => inst!(instructions; PUSHF number),
         Expression::Literal(Literal { kind: LiteralKind::Boolean(bool) }) => inst!(instructions; PUSHB bool as u8),
