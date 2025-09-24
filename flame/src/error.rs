@@ -3,8 +3,8 @@ pub enum CompilerError {
     #[error("Unknown function {0}")]
     UnknownFunction(String),
 
-    #[error(transparent)]
-    IndexOutOfBounds(#[from] IndexOutOfBoundsErr),
+    #[error("Instruction set overflowed")]
+    InstructionOverflow(#[from] IndexOutOfBoundsErr),
 }
 
 #[derive(thiserror::Error, Debug, Clone, Copy, PartialEq, Eq)]
