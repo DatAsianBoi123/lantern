@@ -1,57 +1,57 @@
-use crate::{error::IndexOutOfBoundsErr, Address};
+use crate::Address;
 
 #[macro_export]
 macro_rules! inst {
     ($inst: expr; PUSHB $b: expr) => {
-        $inst.push($crate::instruction::Instruction::Pushu8($b))?
+        $inst.push($crate::instruction::Instruction::Pushu8($b))
     };
     ($inst: expr; PUSHU $u: expr) => {
-        $inst.push($crate::instruction::Instruction::Pushusize($u))?
+        $inst.push($crate::instruction::Instruction::Pushusize($u))
     };
     ($inst: expr; PUSHF $f: expr) => {
-        $inst.push($crate::instruction::Instruction::Pushf64($f))?
+        $inst.push($crate::instruction::Instruction::Pushf64($f))
     };
     ($inst: expr; POP $u: expr) => {
-        $inst.push($crate::instruction::Instruction::Pop($u))?
+        $inst.push($crate::instruction::Instruction::Pop($u))
     };
     ($inst: expr; COPY $f: expr, $s: expr, $t: expr) => {
-        $inst.push($crate::instruction::Instruction::Copy($f, $s, $t))?
+        $inst.push($crate::instruction::Instruction::Copy($f, $s, $t))
     };
     ($inst: expr; ADDF) => {
-        $inst.push($crate::instruction::Instruction::Addf)?
+        $inst.push($crate::instruction::Instruction::Addf)
     };
     ($inst: expr; SUBF) => {
-        $inst.push($crate::instruction::Instruction::Subf)?
+        $inst.push($crate::instruction::Instruction::Subf)
     };
     ($inst: expr; MULTF) => {
-        $inst.push($crate::instruction::Instruction::Multf)?
+        $inst.push($crate::instruction::Instruction::Multf)
     };
     ($inst: expr; DIVF) => {
-        $inst.push($crate::instruction::Instruction::Divf)?
+        $inst.push($crate::instruction::Instruction::Divf)
     };
     ($inst: expr; MODF) => {
-        $inst.push($crate::instruction::Instruction::Modf)?
+        $inst.push($crate::instruction::Instruction::Modf)
     };
     ($inst: expr; NEGF) => {
-        $inst.push($crate::instruction::Instruction::Negf)?
+        $inst.push($crate::instruction::Instruction::Negf)
     };
     ($inst: expr; NOT) => {
-        $inst.push($crate::instruction::Instruction::Not)?
+        $inst.push($crate::instruction::Instruction::Not)
     };
     ($inst: expr; BPUSH $b: expr) => {
-        $inst.push($crate::instruction::Instruction::BPush($b))?
+        $inst.push($crate::instruction::Instruction::BPush($b))
     };
     ($inst: expr; ALLOC) => {
-        $inst.push($crate::instruction::Instruction::Alloc)?
+        $inst.push($crate::instruction::Instruction::Alloc)
     };
     ($inst: expr; DEALLOC) => {
-        $inst.push($crate::instruction::Instruction::Dealloc)?
+        $inst.push($crate::instruction::Instruction::Dealloc)
     };
     ($inst: expr; WRITE) => {
-        $inst.push($crate::instruction::Instruction::Write)?
+        $inst.push($crate::instruction::Instruction::Write)
     };
-    ($inst: expr; INV_NATIVE $n: literal) => {
-        $inst.push($crate::instruction::Instruction::InvokeNative($n))?
+    ($inst: expr; INV_NATIVE $n: expr) => {
+        $inst.push($crate::instruction::Instruction::InvokeNative($n))
     };
 
     ($inst: expr; $([$($tt: tt)+])*) => {
@@ -60,35 +60,30 @@ macro_rules! inst {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct InstructionSet<const S: usize> {
-    inner: [Instruction; S],
-    idx: usize,
+pub struct InstructionSet {
+    pub inner: Vec<Instruction>,
 }
 
-impl<const S: usize> Default for InstructionSet<S> {
+impl Default for InstructionSet {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<const S: usize> InstructionSet<S> {
+impl InstructionSet {
     pub fn new() -> Self {
         Self {
-            inner: [const { Instruction::NULL }; S],
-            idx: 0,
+            inner: Vec::new(),
         }
     }
 
-    pub fn push(&mut self, instruction: Instruction) -> Result<(), IndexOutOfBoundsErr> {
-        if self.idx >= self.inner.len() { return Err(IndexOutOfBoundsErr); };
-        self.inner[self.idx] = instruction;
-        self.idx += 1;
-        Ok(())
+    pub fn push(&mut self, instruction: Instruction) {
+        self.inner.push(instruction);
     }
 }
 
-impl<const S: usize> IntoIterator for InstructionSet<S> {
-    type IntoIter = std::array::IntoIter<Instruction, S>;
+impl IntoIterator for InstructionSet {
+    type IntoIter = std::vec::IntoIter<Instruction>;
     type Item = Instruction;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -133,6 +128,5 @@ pub enum Instruction {
     /// PUSH    usize: heap data ptr
     Write,
     InvokeNative(u32),
-    NULL,
 }
 

@@ -50,14 +50,14 @@ struct HeapMetadata {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct LanternRuntime<const T: usize> {
+pub struct LanternRuntime {
     stack: Stack,
     byte_stack: ByteStack,
-    text: InstructionSet<T>,
+    text: InstructionSet,
 }
 
-impl<const T: usize> LanternRuntime<T> {
-    pub fn new(stack_size: usize, instructions: InstructionSet<T>) -> Self {
+impl LanternRuntime {
+    pub fn new(stack_size: usize, instructions: InstructionSet) -> Self {
         Self { stack: Stack::new(stack_size), byte_stack: ByteStack::new(), text: instructions }
     }
 
@@ -122,7 +122,6 @@ impl<const T: usize> LanternRuntime<T> {
                         _ => panic!("unknown native function with id {id:#04X}"),
                     }
                 },
-                Instruction::NULL => break,
             };
         };
 

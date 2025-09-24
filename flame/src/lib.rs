@@ -8,7 +8,7 @@ pub mod error;
 
 pub type Address = usize;
 
-pub fn ignite<const S: usize>(file: LanternFile) -> Result<InstructionSet<S>, CompilerError> {
+pub fn ignite(file: LanternFile) -> Result<InstructionSet, CompilerError> {
     let mut instructions = InstructionSet::new();
 
     for statement in file.statements {
@@ -23,7 +23,7 @@ pub fn ignite<const S: usize>(file: LanternFile) -> Result<InstructionSet<S>, Co
     Ok(instructions)
 }
 
-fn compile_expr<const S: usize>(expression: Expression, instructions: &mut InstructionSet<S>) -> Result<(), CompilerError> {
+fn compile_expr(expression: Expression, instructions: &mut InstructionSet) -> Result<(), CompilerError> {
     match expression {
         Expression::Literal(Literal { kind: LiteralKind::Number(number) }) => inst!(instructions; PUSHF number),
         Expression::Literal(Literal { kind: LiteralKind::Boolean(bool) }) => inst!(instructions; PUSHB bool as u8),
