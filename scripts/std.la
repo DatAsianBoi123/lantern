@@ -1,0 +1,12 @@
+@NativeID(1) fun native print(x: std.str) {
+}
+
+fun print_hello() {
+  print("hello,")
+  print("world!")
+}
+
+print("hello, world!")
+
+print_hello()
+

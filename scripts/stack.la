@@ -1,0 +1,7 @@
+using std:{float, string}
+
+val a: float = 10
+val b: float = 483.22
+
+val c: string = "hi there"
+
