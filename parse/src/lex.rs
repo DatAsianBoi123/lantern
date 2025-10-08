@@ -152,7 +152,7 @@ impl Parse<char> for Ident {
         let mut name = String::new();
 
         while let Some(char) = iter.peek() {
-            if !char.is_ascii_alphanumeric() { break; };
+            if *char != '_' && !char.is_ascii_alphanumeric() { break; };
 
             name += &iter.next().expect("next iter").to_string();
         }

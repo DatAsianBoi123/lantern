@@ -93,17 +93,9 @@ impl Parse<TokenTree> for Path {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Parse, Debug, Clone, PartialEq)]
 pub struct LanternFile {
     pub statements: Vec<Statement>,
-}
-
-impl Parse<TokenTree> for LanternFile {
-    fn parse<I>(iter: &mut Peekable<I>) -> Result<Self>
-    where I: Iterator<Item = TokenTree> + Clone
-    {
-        Ok(Self { statements: Vec::parse(iter)? })
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

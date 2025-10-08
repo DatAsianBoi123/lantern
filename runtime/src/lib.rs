@@ -7,21 +7,21 @@ use crate::error::CopyError;
 
 macro_rules! args {
     (@args ( $ty: ty ) in $stack: expr) => {{
-        (unsafe { *($stack.read($stack.len - SLOT_SIZE)? as *const $ty) }, SLOT_SIZE)
+        (unsafe { *($stack.read($stack.len() - 1)? as *const $ty) }, 1)
     }};
     (@args ( $($ty: ty),+ $(,)? ) in $stack: expr) => {{
         let mut total_size = 0;
         $(
             let _ = std::mem::size_of::<$ty>(); // for repeat
-            total_size += SLOT_SIZE;
+            total_size += 1;
         )+
-        let args_start = $stack.len - total_size;
+        let args_start = $stack.len() - total_size;
         let mut current_arg = 0;
         #[allow(unused_assignments)]
         let args = (
             $(
                 {
-                    let arg = unsafe { *($stack.read(args_start + current_arg * SLOT_SIZE)? as *const $ty) };
+                    let arg = unsafe { *($stack.read(args_start + current_arg)? as *const $ty) };
                     current_arg += 1;
                     arg
                 }
@@ -122,6 +122,9 @@ impl LanternRuntime {
                         _ => panic!("unknown native function with id {id:#04X}"),
                     }
                 },
+
+                Instruction::StackPush => self.stack.push_frame()?,
+                Instruction::StackPop => self.stack.pop_frame()?,
             };
         };
 
@@ -168,6 +171,9 @@ pub struct Stack {
     ptr: *mut u8,
     cap: usize,
     len: usize,
+
+    frames: [Address; 256],
+    frame_len: usize,
 }
 
 impl Drop for Stack {
@@ -204,21 +210,33 @@ impl Display for Stack {
 
 impl Stack {
     pub fn new(size: usize) -> Self {
-        let layout = unsafe { Layout::from_size_align_unchecked(SLOT_SIZE * size, SLOT_SIZE) };
+        let layout = unsafe { Layout::from_size_align_unchecked(size * SLOT_SIZE, SLOT_SIZE) };
         let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
         if ptr.is_null() { std::alloc::handle_alloc_error(layout); };
 
         Self {
             ptr,
-            cap: size,
+            cap: size * SLOT_SIZE,
             len: 0,
+
+            frames: [0; 256],
+            frame_len: 0,
         }
     }
 
-    pub fn read(&self, addr: Address) -> Result<*const u8, AccessUndefinedError> {
-        if addr > self.len { return Err(AccessUndefinedError); };
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
 
-        unsafe { Ok(self.ptr.add(addr)) }
+    /// Returns the length of the stack in slots.
+    pub fn len(&self) -> usize {
+        self.len / 8
+    }
+
+    pub fn read(&self, addr: Address) -> Result<*const u8, AccessUndefinedError> {
+        if addr * SLOT_SIZE > self.len { return Err(AccessUndefinedError); };
+
+        unsafe { Ok(self.ptr.add(addr * SLOT_SIZE)) }
     }
 
     pub fn push<T>(&mut self, item: T) -> Result<(), StackOverflowError> {
@@ -239,12 +257,13 @@ impl Stack {
     }
 
     pub fn pop(&mut self, len: usize) -> Result<(), StackUnderflowError> {
-        if len > self.len { return Err(StackUnderflowError); };
-        self.len -= len;
+        if len * SLOT_SIZE > self.len { return Err(StackUnderflowError); };
+        self.len -= len * SLOT_SIZE;
         Ok(())
     }
 
     pub fn copy(&mut self, src: Address, len: usize, dst: Address) -> Result<(), CopyError> {
+        let (src, len, dst) = (src * SLOT_SIZE, len * SLOT_SIZE, dst * SLOT_SIZE);
         if src + len > self.len { return Err(CopyError::AccessUndefined(AccessUndefinedError)); };
         if dst + len > self.len { return Err(CopyError::AccessUndefined(AccessUndefinedError)); };
 
@@ -253,6 +272,22 @@ impl Stack {
         unsafe {
             std::ptr::copy_nonoverlapping(self.ptr.add(src), self.ptr.add(dst), len);
         };
+
+        Ok(())
+    }
+
+    pub fn push_frame(&mut self) -> Result<(), StackOverflowError> {
+        if self.frame_len >= self.frames.len() { return Err(StackOverflowError); };
+        self.frames[self.frame_len] = self.len;
+        self.frame_len += 1;
+
+        Ok(())
+    }
+
+    pub fn pop_frame(&mut self) -> Result<(), StackUnderflowError> {
+        if self.frame_len == 0 { return Err(StackUnderflowError); };
+        self.len = self.frames[self.frame_len];
+        self.frame_len -= 1;
 
         Ok(())
     }

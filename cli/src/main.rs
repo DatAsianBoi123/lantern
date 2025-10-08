@@ -66,9 +66,12 @@ fn main() {
     }
 
     let before = Instant::now();
-    let Ok(instructions) = flame::ignite(lantern_file) else {
-        eprintln!("instructions don't fit in txt space!");
-        return;
+    let instructions = match flame::ignite(lantern_file) {
+        Ok(instructions) => instructions,
+        Err(err) => {
+            eprintln!("{err}");
+            return;
+        },
     };
 
     if verbose {
@@ -80,7 +83,7 @@ fn main() {
 
     if no_run { return; }
 
-    let runtime: LanternRuntime = LanternRuntime::new(256, instructions);
+    let runtime: LanternRuntime = LanternRuntime::new(32, instructions);
     println!("running {file_name}");
     let before = Instant::now();
     match runtime.exec() {

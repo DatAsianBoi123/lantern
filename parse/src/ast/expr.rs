@@ -1,4 +1,4 @@
-use std::iter::Peekable;
+use std::{fmt::{Display, Formatter}, iter::Peekable};
 
 use macros::Parse;
 
@@ -157,6 +157,19 @@ pub enum BinaryOperator {
     Mod,
 }
 
+impl Display for BinaryOperator {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            Self::Add => "+",
+            Self::Sub => "-",
+            Self::Mult => "*",
+            Self::Div => "/",
+            Self::Mod => "%",
+        };
+        f.write_str(name)
+    }
+}
+
 impl BinaryOperator {
     pub fn order(&self) -> u8 {
         match self {
@@ -170,5 +183,14 @@ impl BinaryOperator {
 pub enum UnaryOperator {
     Negate,
     Not,
+}
+
+impl Display for UnaryOperator {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Negate => f.write_str("-"),
+            Self::Not => f.write_str("!"),
+        }
+    }
 }
 

@@ -53,6 +53,12 @@ macro_rules! inst {
     ($inst: expr; INV_NATIVE $n: expr) => {
         $inst.push($crate::instruction::Instruction::InvokeNative($n))
     };
+    ($inst: expr; STACK_PUSH) => {
+        $inst.push($crate::instruction::Instruction::StackPush)
+    };
+    ($inst: expr; STACK_POP) => {
+        $inst.push($crate::instruction::Instruction::StackPop)
+    };
 
     ($inst: expr; $([$($tt: tt)+])*) => {
         $($crate::inst!($inst; $($tt)+));*
@@ -116,6 +122,7 @@ pub enum Instruction {
     /// POP     bool: value
     /// PUSH    bool: !value
     Not,
+    /// BYTE P  u8: value
     BPush(u8),
     /// POP     usize: size
     /// POP     usize: alignment
@@ -128,5 +135,8 @@ pub enum Instruction {
     /// PUSH    usize: heap data ptr
     Write,
     InvokeNative(u32),
+
+    StackPush,
+    StackPop,
 }
 
