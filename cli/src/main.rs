@@ -1,7 +1,6 @@
-use std::{fs::File, io::Read, ops::Deref, time::Instant};
+use std::{fs::File, io::Read, time::Instant};
 
 use clap::Parser;
-use parse::{ast::LanternFile, lex::lex, Parse};
 use runtime::LanternRuntime;
 
 #[derive(Parser, Debug)]
@@ -30,10 +29,8 @@ fn main() {
         eprintln!("file contains invalid UTF-8");
         return;
     };
-    let mut input = content.chars().peekable();
     let before_compile = Instant::now();
-    let before = Instant::now();
-    let tokens = match lex(&mut input) {
+    let lantern_file = match parse::parse(content.trim()) {
         Ok(tokens) => tokens,
         Err(err) => {
             eprintln!("{err}");
@@ -41,28 +38,10 @@ fn main() {
         }
     };
 
-    if let Some(next) = input.next() {
-        eprintln!("invalid token {next}");
-        return;
-    };
-
     if verbose {
-        println!("{tokens:#?}");
-        println!("took {:?}", Instant::now().duration_since(before));
-    }
-
-    let before = Instant::now();
-    let lantern_file = match LanternFile::parse(&mut tokens.into_iter().peekable()) {
-        Ok(lantern_file) => lantern_file,
-        Err(err) => {
-            eprintln!("{err}");
-            return;
-        }
-    };
-
-    if verbose {
+        let took = Instant::now().duration_since(before_compile);
         println!("{lantern_file:#?}");
-        println!("took {:?}", Instant::now().duration_since(before));
+        println!("took {took:?}");
     }
 
     let before = Instant::now();
@@ -94,7 +73,7 @@ fn main() {
             }
 
             if let Some(stack_dump) = stack_dump {
-                if let Err(err) = std::fs::write(&stack_dump, stack.deref()) {
+                if let Err(err) = std::fs::write(&stack_dump, stack) {
                     eprintln!("{err}");
                 }
             }

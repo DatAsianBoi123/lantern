@@ -1,4 +1,4 @@
-use std::{alloc::Layout, fmt::{Display, Formatter}, mem, ops::Deref};
+use std::{alloc::Layout, fmt::{Display, Formatter}, mem};
 
 use error::{AccessUndefinedError, RuntimeError, StackOverflowError, StackUnderflowError};
 use flame::{instruction::{Instruction, InstructionSet}, Address};
@@ -185,10 +185,8 @@ impl Drop for Stack {
     }
 }
 
-impl Deref for Stack {
-    type Target = [u8];
-
-    fn deref(&self) -> &Self::Target {
+impl AsRef<[u8]> for Stack {
+    fn as_ref(&self) -> &[u8] {
         unsafe {
             std::slice::from_raw_parts(self.ptr, self.cap)
         }
@@ -197,7 +195,7 @@ impl Deref for Stack {
 
 impl Display for Stack {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        for (i, byte) in self.iter().enumerate() {
+        for (i, byte) in self.as_ref().iter().enumerate() {
             if i != 0 {
                 if i % 16 == 0 { writeln!(f)?; }
                 else if i % 8 == 0 { write!(f, " ")?; };
