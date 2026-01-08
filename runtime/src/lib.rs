@@ -1,298 +1,280 @@
-use std::{alloc::Layout, fmt::{Display, Formatter}, mem};
+#![feature(get_mut_unchecked)]
 
-use error::{AccessUndefinedError, RuntimeError, StackOverflowError, StackUnderflowError};
-use flame::{instruction::{Instruction, InstructionSet}, Address};
+use std::{fmt::{Display, Formatter}, rc::Rc};
 
-use crate::error::CopyError;
+use error::RuntimeError;
+use flame::{GeneratedFunction, instruction::Instruction};
+use parse::LanternFile;
+
+use crate::{flame::error::CompilerError, heap::{Heap, HeapArray, TypeInfo}, stack::LanternStack};
 
 macro_rules! args {
-    (@args ( $ty: ty ) in $stack: expr) => {{
-        (unsafe { *($stack.read($stack.len() - 1)? as *const $ty) }, 1)
-    }};
-    (@args ( $($ty: ty),+ $(,)? ) in $stack: expr) => {{
-        let mut total_size = 0;
-        $(
-            let _ = std::mem::size_of::<$ty>(); // for repeat
-            total_size += 1;
-        )+
-        let args_start = $stack.len() - total_size;
-        let mut current_arg = 0;
-        #[allow(unused_assignments)]
-        let args = (
-            $(
-                {
-                    let arg = unsafe { *($stack.read(args_start + current_arg)? as *const $ty) };
-                    current_arg += 1;
-                    arg
-                }
-            ),+
-        );
-        (args, total_size)
-    }};
-
     ( ( $($ty: ty),+ $(,)? ) in $stack: expr, $pat: pat => $ret: expr) => {{
-        let (args, total_size) = args!(@args ($($ty),+) in $stack);
+        let args = ( $( unsafe { *($stack.pop()?.read::<$ty>()) } ),+ );
 
         let $pat = args;
-        $stack.pop(total_size)?;
-        $stack.push($ret)?;
+        $stack.push_primitive($ret)?;
     }};
 }
 
+pub mod flame;
+pub mod stack;
+pub mod heap;
 pub mod error;
 
-pub const SLOT_SIZE: usize = 8;
-
-#[repr(C)]
-struct HeapMetadata {
-    size: usize,
-    alignment: usize,
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum SlotType {
+    #[default]
+    Primitive,
+    Ref,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct LanternRuntime {
-    stack: Stack,
-    byte_stack: ByteStack,
-    text: InstructionSet,
-}
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Slot(u64, SlotType);
 
-impl LanternRuntime {
-    pub fn new(stack_size: usize, instructions: InstructionSet) -> Self {
-        Self { stack: Stack::new(stack_size), byte_stack: ByteStack::new(), text: instructions }
-    }
-
-    pub fn exec(mut self) -> Result<Stack, RuntimeError> {
-        for instruction in self.text {
-            match instruction {
-                Instruction::Pushu8(u8) => { self.stack.push(u8)?; },
-                Instruction::Pushusize(usize) => { self.stack.push(usize)?; },
-                Instruction::Pushf64(f64) => { self.stack.push(f64)?; },
-                Instruction::Pop(len) => { self.stack.pop(len)?; },
-                Instruction::Copy(from, len, to) => { self.stack.copy(from, len, to)?; },
-                Instruction::Addf => args!((f64, f64) in self.stack, (lhs, rhs) => lhs + rhs),
-                Instruction::Subf => args!((f64, f64) in self.stack, (lhs, rhs) => lhs - rhs),
-                Instruction::Multf => args!((f64, f64) in self.stack, (lhs, rhs) => lhs * rhs),
-                Instruction::Divf => args!((f64, f64) in self.stack, (lhs, rhs) => lhs / rhs),
-                Instruction::Modf => args!((f64, f64) in self.stack, (lhs, rhs) => lhs % rhs),
-                Instruction::Negf => args!((f64) in self.stack, f64 => -f64),
-                Instruction::Not => args!((bool) in self.stack, bool => !bool),
-                Instruction::BPush(byte) => self.byte_stack.push(byte)?,
-                Instruction::Alloc => args!((usize, usize) in self.stack, (alignment, size) => {
-                    let metadata_size = mem::size_of::<HeapMetadata>();
-                    let total_size = size + metadata_size + alignment;
-                    unsafe {
-                        let layout = Layout::from_size_align_unchecked(total_size, alignment.max(mem::align_of::<HeapMetadata>()));
-                        let ptr = std::alloc::alloc(layout);
-                        let data_ptr = align_up(ptr.byte_add(metadata_size), alignment);
-                        let meta_ptr = data_ptr.byte_sub(metadata_size) as *mut HeapMetadata;
-                        meta_ptr.write(HeapMetadata { size, alignment });
-
-                        data_ptr
-                    }
-                }),
-                Instruction::Dealloc => args!((usize) in self.stack, data_ptr => {
-                    unsafe {
-                        let meta_ptr = (data_ptr - mem::size_of::<HeapMetadata>()) as *mut HeapMetadata;
-                        let meta = &*meta_ptr;
-
-                        let total_size = meta.size + meta.alignment + mem::size_of::<HeapMetadata>();
-                        let layout = Layout::from_size_align_unchecked(total_size, meta.alignment.max(mem::align_of::<HeapMetadata>()));
-
-                        let ptr = meta_ptr.byte_sub(meta_ptr as usize % layout.align()) as *mut u8;
-                        std::alloc::dealloc(ptr, layout);
-                    };
-                }),
-                Instruction::Write => args!((*mut u8) in self.stack, ptr => {
-                    let bytes = self.byte_stack.flush();
-                    unsafe {
-                        std::ptr::copy_nonoverlapping(bytes as *const _ as *const u8, ptr, bytes.len());
-                    };
-                    ptr
-                }),
-                Instruction::InvokeNative(id) => {
-                    match id {
-                        // print
-                        0x0001 => args!((*const u8, usize) in self.stack, (ptr, len) => {
-                            let string = unsafe {
-                                let slice = std::slice::from_raw_parts(ptr, len);
-                                str::from_utf8_unchecked(slice)
-                            };
-                            println!("{string}");
-                        }),
-                        _ => panic!("unknown native function with id {id:#04X}"),
-                    }
-                },
-
-                Instruction::StackPush => self.stack.push_frame()?,
-                Instruction::StackPop => self.stack.pop_frame()?,
-            };
-        };
-
-        Ok(self.stack)
+impl Display for Slot {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        for byte in self.0.to_ne_bytes() {
+            write!(f, "{byte:0<2x} ")?;
+        }
+        Ok(())
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ByteStack {
-    inner: [u8; 512],
-    len: usize,
+impl Slot {
+    pub fn new_primitive<T>(primitive: T) -> Self {
+        let mut slot = Self(0, SlotType::Primitive);
+        slot.write_primitive(primitive);
+        slot
+    }
+
+    pub fn new_ref(ptr: *const u8) -> Self {
+        Self(ptr as u64, SlotType::Ref)
+    }
+
+    pub fn write_ref(&mut self, ptr: *const u8) {
+        self.0 = ptr as u64;
+        self.1 = SlotType::Ref;
+    }
+
+    pub fn write_primitive<T>(&mut self, primitive: T) {
+        if size_of::<T>() > 8 {
+            panic!("attempted to write more than 8 bytes into a Slot");
+        }
+
+        self.1 = SlotType::Primitive;
+        unsafe {
+            (&mut self.0 as *mut _ as *mut T).write(primitive);
+        }
+    }
+
+    pub fn read<T>(&self) -> *const T {
+        &raw const self.0 as *const T
+    }
+
+    pub fn kind(&self) -> SlotType {
+        self.1
+    }
 }
 
-impl Default for ByteStack {
+#[derive(Debug, Clone)]
+pub struct VM<'a> {
+    frames: Vec<Frame<'a>>,
+    pub heap: Heap,
+
+    string_type_info: TypeInfo,
+}
+
+impl<'a> Default for VM<'a> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl ByteStack {
+impl<'a> VM<'a> {
     pub fn new() -> Self {
         Self {
-            inner: [0; 512],
-            len: 0,
+            frames: Vec::new(),
+            // 4 MiB
+            heap: Heap::new(4 * 2usize.pow(20)),
+
+            string_type_info: TypeInfo::Array { element_size: 1, is_ref: false },
         }
     }
 
-    pub fn push(&mut self, byte: u8) -> Result<(), StackOverflowError> {
-        if self.len >= self.inner.len() { return Err(StackOverflowError); };
-        self.inner[self.len] = byte;
-        self.len += 1;
-        Ok(())
+    pub fn ignite(&mut self, file: LanternFile) -> Result<GeneratedFunction, CompilerError> {
+        flame::ignite(file, &mut self.heap)
     }
-    
-    pub fn flush(&mut self) -> &[u8] {
-        let bytes = &self.inner[0..self.len];
-        self.len = 0;
-        bytes
+
+    pub fn push_frame(&mut self, fun: &'a GeneratedFunction) {
+        self.frames.push(Frame::new(fun));
     }
-}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Stack {
-    ptr: *mut u8,
-    cap: usize,
-    len: usize,
-
-    frames: [Address; 256],
-    frame_len: usize,
-}
-
-impl Drop for Stack {
-    fn drop(&mut self) {
-        unsafe {
-            let layout = Layout::from_size_align_unchecked(SLOT_SIZE * self.cap, SLOT_SIZE);
-            std::alloc::dealloc(self.ptr, layout);
+    pub fn alloc_string(&mut self, bytes: &[u8]) -> Result<HeapArray, RuntimeError> {
+        let mut array = self.heap.alloc_array(bytes.len(), &self.string_type_info)
+            .unwrap_or_else(|| {
+                self.heap.gc(&mut self.frames);
+                self.heap.alloc_array(bytes.len(), &self.string_type_info).expect("free heap space after gc")
+            });
+        for (i, byte) in bytes.iter().copied().enumerate() {
+            unsafe { array.set(i, &byte as *const u8); }
         }
+        Ok(array)
     }
-}
 
-impl AsRef<[u8]> for Stack {
-    fn as_ref(&self) -> &[u8] {
-        unsafe {
-            std::slice::from_raw_parts(self.ptr, self.cap)
-        }
-    }
-}
-
-impl Display for Stack {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        for (i, byte) in self.as_ref().iter().enumerate() {
-            if i != 0 {
-                if i % 16 == 0 { writeln!(f)?; }
-                else if i % 8 == 0 { write!(f, " ")?; };
-            };
-            write!(f, "{byte:02X} ")?;
+    pub fn exec(mut self) -> Result<(), RuntimeError> {
+        while !self.frames.is_empty() {
+            self.exec_one()?;
         }
         Ok(())
     }
+
+    pub fn exec_one(&mut self) -> Result<(), RuntimeError> {
+        let Some(ref mut frame) = self.frames.last_mut() else { return Ok(()); };
+
+        match frame.fun {
+            GeneratedFunction::Instructions { instructions, funs } => {
+                match instructions[frame.inst_ptr].clone() {
+                    Instruction::Pushu64(u64) => { frame.operand_stack.push_primitive(u64)?; },
+                    Instruction::Pushf64(f64) => { frame.operand_stack.push_primitive(f64)?; },
+                    Instruction::Pop => { frame.operand_stack.pop()?; },
+                    Instruction::Addf => args!((f64, f64) in frame.operand_stack, (rhs, lhs) => lhs + rhs),
+                    Instruction::Subf => args!((f64, f64) in frame.operand_stack, (rhs, lhs) => lhs - rhs),
+                    Instruction::Multf => args!((f64, f64) in frame.operand_stack, (rhs, lhs) => lhs * rhs),
+                    Instruction::Divf => args!((f64, f64) in frame.operand_stack, (rhs, lhs) => lhs / rhs),
+                    Instruction::Modf => args!((f64, f64) in frame.operand_stack, (rhs, lhs) => lhs % rhs),
+                    Instruction::Negf => args!((f64) in frame.operand_stack, f64 => -f64),
+                    Instruction::CompareLt => args!((f64, f64) in frame.operand_stack, (rhs, lhs) => bool_to_slot(lhs < rhs)),
+                    Instruction::CompareLe => args!((f64, f64) in frame.operand_stack, (rhs, lhs) => bool_to_slot(lhs <= rhs)),
+                    Instruction::CompareGt => args!((f64, f64) in frame.operand_stack, (rhs, lhs) => bool_to_slot(lhs > rhs)),
+                    Instruction::CompareGe => args!((f64, f64) in frame.operand_stack, (rhs, lhs) => bool_to_slot(lhs >= rhs)),
+                    Instruction::CompareEq => args!((f64, f64) in frame.operand_stack, (rhs, lhs) => bool_to_slot(lhs == rhs)),
+                    Instruction::Not => args!((bool) in frame.operand_stack, bool => bool_to_slot(!bool)),
+                    Instruction::AllocString(str) => {
+                        // TODO: figure out when to GC
+                        let mut array = self.heap.alloc_array(str.len(), &self.string_type_info).unwrap();
+                        for (i, byte) in str.bytes().enumerate() {
+                            unsafe { array.set(i, &byte as *const u8); }
+                        }
+                        frame.operand_stack.push_ref(array.as_ptr())?;
+                        println!("Allocated {} bytes @ {array:?}: {:?}, {:?}", array.size(), array.header(), array.type_info());
+                    },
+                    Instruction::LoadLocal(index) => frame.operand_stack.push_slot(frame.locals[index])?,
+                    Instruction::StoreLocal(index) => frame.locals[index] = frame.operand_stack.pop()?,
+                    // TODO: store functions on heap
+                    Instruction::LoadFun(index) => frame.operand_stack.push_primitive(Rc::as_ptr(&funs[index]))?,
+                    Instruction::Return => {
+                        let ret = frame.operand_stack.pop()?;
+                        if !frame.operand_stack.is_empty() {
+                            println!("WARNING: Returning from a frame with data left on its operand stack!");
+                            println!("{:?}", frame.operand_stack);
+                        }
+                        self.frames.pop();
+                        if let Some(frame) = self.frames.last_mut() {
+                            frame.operand_stack.push_slot(ret)?;
+                        };
+                        return Ok(());
+                    },
+                    Instruction::Invoke(num_args) => {
+                        frame.inst_ptr += 1;
+                        let mut locals = [Default::default(); 256];
+                        for i in 0..num_args {
+                            locals[num_args - i - 1] = frame.operand_stack.pop()?;
+                        }
+                        let ptr = frame.operand_stack.pop()?.read::<*const GeneratedFunction>();
+                        let fun = unsafe { &**ptr };
+                        let frame = Frame::with_locals(fun, locals);
+                        self.frames.push(frame);
+                        return Ok(());
+                    },
+                    Instruction::Goto(ptr) => {
+                        frame.inst_ptr = ptr;
+                        return Ok(());
+                    },
+                    Instruction::GotoIfTrue(ptr) => {
+                        if bool_from_slot(frame.operand_stack.peek()?) {
+                            frame.inst_ptr = ptr;
+                            return Ok(());
+                        }
+                    },
+                    Instruction::GotoIfFalse(ptr) => {
+                        if !bool_from_slot(frame.operand_stack.peek()?) {
+                            frame.inst_ptr = ptr;
+                            return Ok(());
+                        }
+                    },
+                    Instruction::PopGotoIfTrue(ptr) => {
+                        if bool_from_slot(frame.operand_stack.pop()?) {
+                            frame.inst_ptr = ptr;
+                            return Ok(());
+                        }
+                    },
+                    Instruction::PopGotoIfFalse(ptr) => {
+                        if !bool_from_slot(frame.operand_stack.pop()?) {
+                            frame.inst_ptr = ptr;
+                            return Ok(());
+                        }
+                    },
+                }
+
+                frame.inst_ptr += 1;
+                Ok(())
+            },
+            GeneratedFunction::Native(ptr) => {
+                let frame = self.frames.pop().expect("frame");
+                let ret = ptr(self, frame.locals)?;
+
+                if let Some(frame) = self.frames.last_mut() {
+                    frame.operand_stack.push_slot(ret)?;
+                };
+                Ok(())
+            },
+        }
+    }
 }
 
-impl Stack {
-    pub fn new(size: usize) -> Self {
-        let layout = unsafe { Layout::from_size_align_unchecked(size * SLOT_SIZE, SLOT_SIZE) };
-        let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
-        if ptr.is_null() { std::alloc::handle_alloc_error(layout); };
+#[derive(Debug, Clone)]
+pub struct Frame<'a> {
+    fun: &'a GeneratedFunction,
+    inst_ptr: usize,
+    locals: [Slot; 256],
+    operand_stack: LanternStack,
+}
 
+impl<'a> Frame<'a> {
+    pub fn new(fun: &'a GeneratedFunction) -> Self {
         Self {
-            ptr,
-            cap: size * SLOT_SIZE,
-            len: 0,
-
-            frames: [0; 256],
-            frame_len: 0,
+            fun,
+            inst_ptr: 0,
+            locals: [Default::default(); 256],
+            operand_stack: LanternStack::new(),
         }
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.len == 0
-    }
-
-    /// Returns the length of the stack in slots.
-    pub fn len(&self) -> usize {
-        self.len / 8
-    }
-
-    pub fn read(&self, addr: Address) -> Result<*const u8, AccessUndefinedError> {
-        if addr * SLOT_SIZE > self.len { return Err(AccessUndefinedError); };
-
-        unsafe { Ok(self.ptr.add(addr * SLOT_SIZE)) }
-    }
-
-    pub fn push<T>(&mut self, item: T) -> Result<(), StackOverflowError> {
-        if mem::size_of::<T>() > SLOT_SIZE {
-            panic!("attempted to push more than {SLOT_SIZE} bytes");
+    pub fn with_locals(fun: &'a GeneratedFunction, locals: [Slot; 256]) -> Self {
+        Self {
+            fun,
+            inst_ptr: 0,
+            locals,
+            operand_stack: LanternStack::new(),
         }
-
-        let before = self.len;
-        self.len += SLOT_SIZE;
-
-        if self.len >= self.cap { return Err(StackOverflowError); };
-
-        unsafe {
-            std::ptr::write(self.ptr.add(before) as *mut T, item);
-        };
-
-        Ok(())
-    }
-
-    pub fn pop(&mut self, len: usize) -> Result<(), StackUnderflowError> {
-        if len * SLOT_SIZE > self.len { return Err(StackUnderflowError); };
-        self.len -= len * SLOT_SIZE;
-        Ok(())
-    }
-
-    pub fn copy(&mut self, src: Address, len: usize, dst: Address) -> Result<(), CopyError> {
-        let (src, len, dst) = (src * SLOT_SIZE, len * SLOT_SIZE, dst * SLOT_SIZE);
-        if src + len > self.len { return Err(CopyError::AccessUndefined(AccessUndefinedError)); };
-        if dst + len > self.len { return Err(CopyError::AccessUndefined(AccessUndefinedError)); };
-
-        if src + len > dst { return Err(CopyError::Overlapping); };
-
-        unsafe {
-            std::ptr::copy_nonoverlapping(self.ptr.add(src), self.ptr.add(dst), len);
-        };
-
-        Ok(())
-    }
-
-    pub fn push_frame(&mut self) -> Result<(), StackOverflowError> {
-        if self.frame_len >= self.frames.len() { return Err(StackOverflowError); };
-        self.frames[self.frame_len] = self.len;
-        self.frame_len += 1;
-
-        Ok(())
-    }
-
-    pub fn pop_frame(&mut self) -> Result<(), StackUnderflowError> {
-        if self.frame_len == 0 { return Err(StackUnderflowError); };
-        self.len = self.frames[self.frame_len];
-        self.frame_len -= 1;
-
-        Ok(())
     }
 }
 
-fn align_up(addr: *const u8, align: usize) -> *const u8 {
-    let addr = addr as usize;
-    ((addr + align - 1) & !(align - 1)) as *const u8
+fn bool_to_slot(bool: bool) -> u64 {
+    if bool {
+        1
+    } else {
+        0
+    }
+}
+
+fn bool_from_slot(slot: Slot) -> bool {
+    match slot.0 {
+        1 => true,
+        0 => false,
+        _ => panic!("invalid bool {slot:?}"),
+    }
 }
 

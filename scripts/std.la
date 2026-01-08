@@ -1,12 +1,36 @@
-@NativeID(1) fun native print(x: std.str) {
+native fun print(x: std.str);
+native fun float_to_str(float: std.float) -> std.str;
+native fun input_float() -> std.float;
+
+val index: std.float = 1;
+val max: std.float = input_float();
+
+while (index <= max) {
+  fizzbuzz(index, print);
+  index = index + 1;
 }
 
-fun print_hello() {
-  print("hello,")
-  print("world!")
+val f: fun(std.str) = print_and_hello();
+f("World");
+
+fun fizzbuzz(x: std.float, print_fun: fun(std.str)) {
+  if (x % 5 == 0 && x % 3 == 0) {
+    print_fun("FizzBuzz");
+  } else if (x % 5 == 0) {
+    print_fun("Buzz");
+  } else if (x % 3 == 0) {
+    print_fun("Fizz");
+  } else {
+    print_fun(float_to_str(x));
+  }
 }
 
-print("hello, world!")
+fun print_and_hello() -> fun(std.str) {
+  fun inner(x: std.str) {
+    print(x);
+    print("Hello");
+  }
 
-print_hello()
+  return inner;
+}
 

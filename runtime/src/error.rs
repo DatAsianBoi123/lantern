@@ -16,16 +16,7 @@ macro_rules! runtime_err_from {
 #[error("Lantern runtime crashed: {0}")]
 pub struct RuntimeError(#[from] pub Box<dyn Error>);
 
-runtime_err_from![CopyError, StackOverflowError, StackUnderflowError, AccessUndefinedError];
-
-#[derive(thiserror::Error, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CopyError {
-    #[error("The source and destination overlap")]
-    Overlapping,
-
-    #[error(transparent)]
-    AccessUndefined(#[from] AccessUndefinedError),
-}
+runtime_err_from![StackOverflowError, StackUnderflowError, AccessUndefinedError];
 
 #[derive(thiserror::Error, Default, Debug, Clone, Copy, PartialEq, Eq)]
 #[error("Stack overflow")]

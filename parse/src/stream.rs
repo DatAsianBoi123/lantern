@@ -375,11 +375,11 @@ impl<T: ParseTokens> ParseTokens for Box<T> {
 
 impl<T: ParseTokens> ParseTokens for Option<T> {
     fn parse(stream: &mut StreamBranch) -> Result<Self> {
-        let mark = stream.cursor;
+        let mark = stream.location();
         match T::parse(stream) {
             Ok(item) => Ok(Some(item)),
             Err(_) => {
-                stream.cursor = mark;
+                stream.goto(mark);
                 Ok(None)
             },
         }
@@ -395,6 +395,12 @@ impl<T: ParseTokens> ParseTokens for Vec<T> {
 impl<A: ParseTokens, B: ParseTokens> ParseTokens for (A, B) {
     fn parse(stream: &mut StreamBranch) -> Result<Self> {
         Ok((A::parse(stream)?, B::parse(stream)?))
+    }
+}
+
+impl<A: ParseTokens, B: ParseTokens, C: ParseTokens> ParseTokens for (A, B, C) {
+    fn parse(stream: &mut StreamBranch) -> Result<Self> {
+        Ok((A::parse(stream)?, B::parse(stream)?, C::parse(stream)?))
     }
 }
 

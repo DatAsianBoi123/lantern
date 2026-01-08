@@ -1,5 +1,5 @@
 macro_rules! keywords {
-    ($( $vis: vis struct $ident: ident = $name: literal ; )+) => {
+    ($( $vis: vis $ident: ident = $name: literal ; )+) => {
         pub fn is_keyword(str: &str) -> bool {
             match str {
             $(
@@ -33,12 +33,17 @@ macro_rules! keywords {
 }
 
 keywords! {
-    pub struct True = "true";
-    pub struct False = "false";
-    pub struct Val = "val";
-    pub struct Fun = "fun";
-    pub struct Using = "using";
-    pub struct Native = "native";
-    pub struct Return = "return";
+    pub True = "true";
+    pub False = "false";
+    pub Val = "val";
+    pub If = "if";
+    pub Else = "else";
+    pub While = "while";
+    pub Fun = "fun";
+    pub Using = "using";
+    pub Native = "native";
+    pub Struct = "struct";
+    pub Return = "return";
+    pub Break = "break";
 }
 

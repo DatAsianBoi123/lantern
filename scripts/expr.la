@@ -1,2 +1,0 @@
-val x: float = max(5 + 3, rand()) + -rand()
-

@@ -1,7 +1,7 @@
 use std::{fs::File, io::Read, time::Instant};
 
 use clap::Parser;
-use runtime::LanternRuntime;
+use runtime::VM;
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
@@ -12,12 +12,10 @@ struct Args {
     verbose: bool,
     #[arg(short, long)]
     no_run: bool,
-    #[arg(long)]
-    stack_dump: Option<String>,
 }
 
 fn main() {
-    let Args { file: file_name, verbose, no_run, stack_dump } = Args::parse();
+    let Args { file: file_name, verbose, no_run } = Args::parse();
 
     let Ok(mut file) = File::open(&file_name) else {
         eprintln!("file not found: `{file_name}`");
@@ -41,11 +39,13 @@ fn main() {
     if verbose {
         let took = Instant::now().duration_since(before_compile);
         println!("{lantern_file:#?}");
-        println!("took {took:?}");
+        println!("Parsed in {took:?}");
     }
 
+    let mut vm = VM::new();
+
     let before = Instant::now();
-    let instructions = match flame::ignite(lantern_file) {
+    let root = match vm.ignite(lantern_file) {
         Ok(instructions) => instructions,
         Err(err) => {
             eprintln!("{err}");
@@ -54,30 +54,19 @@ fn main() {
     };
 
     if verbose {
-        println!("{instructions:?}");
-        println!("took {:?}", Instant::now().duration_since(before));
+        println!("{root}");
+        println!("Compiled in {:?}", Instant::now().duration_since(before));
     }
 
     println!("finished compiling in {:?}", Instant::now().duration_since(before_compile));
 
     if no_run { return; }
 
-    let runtime: LanternRuntime = LanternRuntime::new(32, instructions);
-    println!("running {file_name}");
-    let before = Instant::now();
-    match runtime.exec() {
-        Ok(stack) => {
-            println!("Finished executing in {:?}", Instant::now().duration_since(before));
-            if verbose {
-                println!("stack dump:\n{stack}");
-            }
+    vm.push_frame(&root);
 
-            if let Some(stack_dump) = stack_dump {
-                if let Err(err) = std::fs::write(&stack_dump, stack) {
-                    eprintln!("{err}");
-                }
-            }
-        },
+    println!("running {file_name}");
+    match vm.exec() {
+        Ok(_) => {},
         Err(err) => eprintln!("{err}"),
     }
 }

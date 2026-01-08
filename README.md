@@ -4,6 +4,8 @@ A fast, typed, interpreted programming language.
 
 **This is not a full-fledged language yet! Many features are missing, including an fully functional runtime. Expect bugs!**
 
+**Also! The runtime is likely broken on 32 bit systems due to pointer size, though this was not tested and may still function properly**
+
 ## Installation
 
 ### From Source
@@ -26,30 +28,26 @@ Arguments:
   <FILE>  
 
 Options:
-  -v, --verbose                  
-  -n, --no-run                   
-      --stack-dump <STACK_DUMP>  
-  -h, --help                     Print help
-  -V, --version                  Print version
+  -v, --verbose  
+  -n, --no-run   
+  -h, --help     Print help
+  -V, --version  Print version
 ```
 
 A basic syntax file for `neovim` can be found at `syntax/la.vim`.
 
-A treesitter server and LSP server is coming soon(tm).
+A treesitter server and LSP server are coming soon(tm).
 
 For examples on basic syntax, please check out the files in the `scripts` directory.
 
 ## Architecture Details
 
-A `lantern` file is first lexed and parsed into a list of statements, separated by newlines.
+A `lantern` is first parsed into a list of statements.
 These statements are then compiled into the language-specific bytecode, called `flame`.
 Finally, the runtime executes these `flame` instructions as simple, low-level instructions.
 
-The `lantern` stack is made up of 8-byte slots, where each piece of data takes up 1 full slot.
-This was mainly used in order to simplify alignment issues, not requiring the calculation of padding bytes.
-This decision mimicks other interpreted languages, such as python (CPython), JS, and Java.
+The `lantern` stack is made up of 16-byte slots, where each piece of data takes up 1 full slot.
+The first 8 bytes are the data itself, while the next byte indicates whether the data is a primitive or a reference for GC purposes. The last 7 bytes are padding to keep alignment.
 
-The stack is essentially a fixed-size array that lives in the rust heap (though, if you look at the code the implementation is much more low-level and is similar to rust's `Vec` struct).
-This was done both to allow more flexibility within the code (no `const` generics), but also in order to guarantee that the stack is aligned to 8 bytes.
-The performance impact of this decision is minimal, since the stack never needs to be reallocated and only allocates once per runtime.
+The GC is a simple implementation of [Cheney's algorithm](https://en.wikipedia.org/wiki/Cheney%27s_algorithm), with plans of a generational GC in the future.
 

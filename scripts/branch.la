@@ -1,0 +1,11 @@
+native fun print(x: std.str);
+
+10 + 20 > 5 && print_true();
+
+print("after");
+
+fun print_true() -> bool {
+  print("true!");
+  return true;
+}
+

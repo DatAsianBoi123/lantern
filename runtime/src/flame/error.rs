@@ -1,47 +1,48 @@
-use parse::{Ident, error::Span, expr::{BinaryOperator, UnaryOperator}};
+use parse::{Ident, Type, error::Span, expr::{BinaryOperator, UnaryOperator}};
 
-use crate::r#type::LanternType;
+use crate::flame::r#type::LanternType;
 
-#[derive(thiserror::Error, Debug, Clone, )]
+#[derive(thiserror::Error, Debug, Clone)]
 #[error("{kind} (line {}, col {})", span.line, span.col)]
 pub struct CompilerError {
     pub span: Span,
-    pub kind: CompilerErrorKind,
+    pub kind: Box<CompilerErrorKind>,
 }
 
 impl CompilerError {
     pub fn new(kind: CompilerErrorKind, span: Span) -> Self {
-        Self { span, kind }
+        Self { span, kind: Box::new(kind) }
     }
 }
 
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
 pub enum CompilerErrorKind {
-    #[error("Unknown function '{}'", _0.0)]
-    UnknownFunction(Ident),
+    #[error("Unknown variable '{0}'")]
+    UnknownVariable(Ident),
 
     #[error("Unknown type '{0}'")]
-    UnknownType(String),
+    UnknownType(Type),
 
-    #[error("Function '{0}' is missing an @NativeID annotation")]
-    BadNative(String),
+    #[error("Unknown native function '{0}'")]
+    UnknownNative(Ident),
 
-    #[error("Function '{}' expects {expects} args, but got {got} instead", ident.0)]
+    #[error("Item '{0}' already declared")]
+    ItemAlreadyDeclared(Ident),
+
+    #[error("Function expects {expects} args, but got {got} instead")]
     MismatchedFunctionArgs {
-        ident: Ident,
         expects: usize,
         got: usize,
     },
 
-    #[error("Type error: {0}")]
-    TypeError(#[from] TypeError),
-}
+    #[error("'return' not allowed here")]
+    BadReturn,
 
-#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
-pub enum TypeError {
-    #[error("Expected arg of type {expected}, but got {got} instead for function {}", ident.0)]
-    FunctionArgs {
-        ident: Ident,
+    #[error("'break' can only be used in loops")]
+    BadBreak,
+
+    #[error("Expected type {expected}, but got {got} instead")]
+    TypeError {
         expected: LanternType,
         got: LanternType,
     },

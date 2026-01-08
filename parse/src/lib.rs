@@ -1,7 +1,9 @@
+use std::fmt::{Display, Formatter};
+
 use error::Diagnostics;
 use macros::Parse;
 
-use crate::{error::Span, expr::{Expr, ExprBlock}, keyword::{False, Fun, True, Using, Val}, punct::{ClosedBrace, ClosedParen, Colon, Comma, Equals, OpenBrace, OpenParen, Period, Semi, Spaced, Touching}, stream::{AlphabeticWord, AlphanumericWord, Char, Digit, Not2, Punctuated, Repetition, StreamBranch, TokenStream, TrailingDenied, Whitespace}};
+use crate::{error::Span, expr::{Expr, ExprBlock}, keyword::{Break, Else, False, Fun, If, Native, Return, Struct, True, Using, Val, While}, punct::{ArrowRight, ClosedBrace, ClosedParen, Colon, Comma, DoubleSlash, Equals, OpenBrace, OpenParen, Period, Semi}, stream::{AlphabeticWord, AlphanumericWord, Char, Digit, Not, Not2, Punctuated, Repetition, StreamBranch, TokenStream, TrailingDenied, Whitespace}};
 
 pub mod stream;
 pub mod punct;
@@ -53,50 +55,120 @@ impl ParseTokens for LanternFile {
 pub enum Item {
     Fun(ItemFun),
     Using(ItemUsing),
+    Struct(ItemStruct),
+    Native(ItemNative),
 }
 
 #[derive(Parse, Debug, Clone, PartialEq)]
 pub struct ItemFun {
     pub fun: Fun,
     pub ident: Ident,
-    pub open_paren: OpenParen<Spaced>,
-    pub args: Punctuated<0, FunArg, Comma<Spaced>>,
-    pub closed_paren: ClosedParen<Spaced>,
+    pub open_paren: OpenParen,
+    pub args: Punctuated<0, FunArg, Comma>,
+    pub closed_paren: ClosedParen,
+    pub ret: Option<(ArrowRight, Type)>,
     pub block: ExprBlock,
+}
+
+#[derive(Parse, Debug, Clone, PartialEq)]
+pub struct ItemNative {
+    pub native: Native,
+    pub fun: Fun,
+    pub ident: Ident,
+    pub open_paren: OpenParen,
+    pub args: Punctuated<0, FunArg, Comma>,
+    pub closed_paren: ClosedParen,
+    pub ret: Option<(ArrowRight, Type)>,
+    pub semi: Semi,
 }
 
 #[derive(Parse, Debug, Clone, PartialEq)]
 pub struct FunArg {
     pub ident: Ident,
-    pub colon: Colon<Spaced>,
-    pub r#type: Path,
+    pub colon: Colon,
+    pub r#type: Type,
 }
 
 #[derive(Parse, Debug, Clone, PartialEq, Eq)]
 pub struct ItemUsing {
     pub using: Using,
     pub path: Path,
-    pub colon: Colon<Spaced>,
-    pub open_brace: OpenBrace<Spaced>,
-    pub items: Punctuated<1, Ident, Comma<Spaced>>,
-    pub closed_brace: ClosedBrace<Spaced>,
+    pub colon: Colon,
+    pub open_brace: OpenBrace,
+    pub items: Punctuated<1, Ident, Comma>,
+    pub closed_brace: ClosedBrace,
+}
+
+#[derive(Parse, Debug, Clone, PartialEq, Eq)]
+pub struct ItemStruct {
+    pub r#struct: Struct,
+    pub ident: Ident,
+    pub open_brace: OpenBrace,
+    pub fields: Punctuated<0, StructField, Comma>,
+    pub closed_brace: ClosedBrace,
+}
+
+#[derive(Parse, Debug, Clone, PartialEq, Eq)]
+pub struct StructField {
+    pub ident: Ident,
+    pub colon: Colon,
+    pub r#type: Type,
 }
 
 #[derive(Parse, Debug, Clone, PartialEq)]
 pub enum Stmt {
     Item(Item),
+    IfStmt(IfStmt),
+    WhileStmt(WhileStmt),
     ValDeclaration(ValDeclaration),
-    Expr(Expr, Semi<Spaced>),
+    Comment(DoubleSlash, Vec<Not<'\n'>>),
+    Reassign(Reassign),
+    Return(Return, Expr, Semi),
+    Break(Break, Semi),
+    Expr(Expr, Semi),
 }
 
 #[derive(Parse, Debug, Clone, PartialEq)]
 pub struct ValDeclaration {
     pub val: Val,
     pub ident: Ident,
-    pub colon: Colon<Spaced>,
-    pub r#type: Path,
-    pub init: Option<(Equals<Spaced>, Expr)>,
-    pub semi: Semi<Spaced>,
+    pub colon: Colon,
+    pub r#type: Type,
+    pub init: Option<(Equals, Expr)>,
+    pub semi: Semi,
+}
+
+#[derive(Parse, Debug, Clone, PartialEq)]
+pub struct IfStmt {
+    pub r#if: If,
+    pub open_paren: OpenParen,
+    pub condition: Expr,
+    pub closed_paren: ClosedParen,
+    pub block: ExprBlock,
+    pub branch: Option<(Else, Box<IfBranch>)>,
+}
+
+#[derive(Parse, Debug, Clone, PartialEq)]
+pub struct WhileStmt {
+    pub r#while: While,
+    pub open_paren: OpenParen,
+    pub condition: Expr,
+    pub closed_paren: ClosedParen,
+    pub block: ExprBlock,
+}
+
+#[derive(Parse, Debug, Clone, PartialEq)]
+pub enum IfBranch {
+    ElseIf(IfStmt),
+    Else(ExprBlock),
+}
+
+#[derive(Parse, Debug, Clone, PartialEq)]
+pub struct Reassign {
+    pub ident: Ident,
+    pub eq: Equals,
+    pub expr: Expr,
+    pub semi: Semi,
 }
 
 #[derive(Parse, Debug, Clone, PartialEq)]
@@ -172,7 +244,7 @@ impl From<NumberRaw> for Number {
 #[derive(Parse, Debug, Clone, PartialEq, Eq)]
 struct NumberRaw {
     whole: Repetition<1, Digit>,
-    decimal: Option<(Period<Touching>, Repetition<1, Digit>)>,
+    decimal: Option<(Char<'.'>, Repetition<1, Digit>)>,
 }
 
 #[derive(Parse, Debug, Clone, PartialEq, Eq)]
@@ -181,9 +253,57 @@ pub enum Boolean {
     False(False),
 }
 
+impl Boolean {
+    pub fn span(&self) -> &Span {
+        match self {
+            Self::True(True(span)) | Self::False(False(span)) => span,
+        }
+    }
+}
+
+#[derive(Parse, Debug, Clone, PartialEq, Eq)]
+pub enum Type {
+    Fun(FunType),
+    Path(Path),
+}
+
+impl Display for Type {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Fun(FunType { args, ret, .. }) => {
+                write!(f, "fun({})", args.0.iter().map(|arg| arg.to_string()).collect::<Vec<_>>().join(", "))?;
+                if let Some((_, ret)) = ret {
+                    write!(f, " -> {ret}")?;
+                }
+                Ok(())
+            },
+            Self::Path(path) => path.fmt(f),
+        }
+    }
+}
+
+#[derive(Parse, Debug, Clone, PartialEq, Eq)]
+pub struct FunType {
+    pub fun: Fun,
+    pub open_paren: OpenParen,
+    pub args: Punctuated<0, Type, Comma>,
+    pub closed_paren: ClosedParen,
+    pub ret: Option<(ArrowRight, Box<Type>)>,
+}
+
 #[derive(Parse, Debug, Clone, PartialEq, Eq)]
 pub struct Path {
-    pub items: Punctuated<1, Ident, Period<Touching>, TrailingDenied>,
+    pub items: Punctuated<1, Ident, Period, TrailingDenied>,
+}
+
+impl Display for Path {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        self.items.0.iter()
+            .take(self.items.0.len() - 1)
+            .try_for_each(|item| write!(f, "{}.", item.0))?;
+        write!(f, "{}", self.items.0.last().expect("path has at least 1 item").0)?;
+        Ok(())
+    }
 }
 
 impl Path {
@@ -198,6 +318,12 @@ impl Path {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ident(pub String, pub Span);
+
+impl Display for Ident {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
 
 impl ParseTokens for Ident {
     fn parse(stream: &mut StreamBranch) -> Result<Self> {

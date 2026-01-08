@@ -1,5 +1,0 @@
-fun add(l: number, r: number) {
-  val thing: num = 10
-  val other: str = 'hi'
-}
-

@@ -1,88 +1,78 @@
-macro_rules! puncts {
-    ($($vis: vis struct $ident: ident = $lit: literal ;)+) => {
-        $(
-
+macro_rules! punct {
+    ($ident: ident = $lit: literal) => {
         #[derive(Debug, Clone, PartialEq, Eq)]
-        $vis struct $ident<T: PunctSpacing>(pub $crate::error::Span, std::marker::PhantomData<T>);
+        pub struct $ident(pub $crate::error::Span);
 
-        impl<T: PunctSpacing> std::fmt::Display for $ident<T> {
+        impl std::fmt::Display for $ident {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 std::fmt::Write::write_char(f, $lit)
             }
         }
 
-        impl $crate::ParseTokens for $ident<Spaced> {
+        impl $crate::ParseTokens for $ident {
             fn parse(stream: &mut $crate::stream::StreamBranch) -> $crate::Result<Self> {
                 let _ = $crate::stream::Repetition::<0, $crate::stream::Whitespace>::parse(stream);
-                let res = stream.try_read_one(|char, span| {
-                    if char == $lit {
-                        Ok(Self(span, std::marker::PhantomData))
-                    } else {
-                        Err($crate::diagnostic!(span, "expected `{}`", $lit).into())
-                    }
-                });
+                let punct = $crate::stream::Char::<$lit>::parse(stream)?;
                 let _ = $crate::stream::Repetition::<0, $crate::stream::Whitespace>::parse(stream);
 
-                res
+                Ok(Self(punct.1))
+            }
+        }
+    };
+
+    ($ident: ident ($left: literal, $right: literal)) => {
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        pub struct $ident(pub $crate::error::Span);
+
+        impl std::fmt::Display for $ident {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                std::write!(f, "{}{}", $left, $right)
             }
         }
 
-        impl $crate::ParseTokens for $ident<Touching> {
+        impl $crate::ParseTokens for $ident {
             fn parse(stream: &mut $crate::stream::StreamBranch) -> $crate::Result<Self> {
-                stream.try_read_one(|char, span| {
-                    if char == $lit {
-                        Ok(Self(span, std::marker::PhantomData))
-                    } else {
-                        Err($crate::diagnostic!(span, "expected `{}`", $lit).into())
-                    }
-                })
+                let _ = $crate::stream::Repetition::<0, $crate::stream::Whitespace>::parse(stream);
+                let first = $crate::stream::Char::<$left>::parse(stream)?;
+                let _ = $crate::stream::Char::<$right>::parse(stream)?;
+                let _ = $crate::stream::Repetition::<0, $crate::stream::Whitespace>::parse(stream);
+                
+                Ok(Self(first.1))
             }
         }
-
-        )+
     };
 }
 
-macro_rules! punct_spacing {
-    ($vis: vis struct $ident: ident) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-        $vis struct $ident;
-        impl private::Sealed for $ident {}
-        impl PunctSpacing for $ident {}
-    };
-}
+punct!(DoubleSlash('/', '/'));
 
-mod private {
-    pub trait Sealed {}
-}
+punct!(Comma = ',');
+punct!(Semi = ';');
+punct!(Colon = ':');
+punct!(Period = '.');
+punct!(Bang = '!');
 
-pub trait PunctSpacing: private::Sealed {}
+punct!(Plus = '+');
+punct!(Hyphen = '-');
+punct!(Asterisk = '*');
+punct!(Slash = '/');
+punct!(Percent = '%');
+punct!(Equals = '=');
 
-punct_spacing!(pub struct Spaced);
-punct_spacing!(pub struct Touching);
+punct!(Less = '<');
+punct!(Greater = '>');
+punct!(LessEq('<', '='));
+punct!(GreaterEq('>', '='));
+punct!(EqualsEquals('=', '='));
 
-puncts! {
-    pub struct Comma = ',';
-    pub struct Semi = ';';
-    pub struct Colon = ':';
-    pub struct Period = '.';
-    pub struct Question = '?';
-    pub struct Bang = '!';
+punct!(And('&', '&'));
+punct!(Or('|', '|'));
 
-    pub struct Plus = '+';
-    pub struct Hyphen = '-';
-    pub struct Asterisk = '*';
-    pub struct Slash = '/';
-    pub struct Percent = '%';
-    pub struct Equals = '=';
+punct!(ArrowRight('-', '>'));
 
-    pub struct At = '@';
-
-    pub struct OpenParen = '(';
-    pub struct ClosedParen = ')';
-    pub struct OpenBracket = '[';
-    pub struct ClosedBracket = ']';
-    pub struct OpenBrace = '{';
-    pub struct ClosedBrace = '}';
-}
+punct!(OpenParen = '(');
+punct!(ClosedParen = ')');
+punct!(OpenBracket = '[');
+punct!(ClosedBracket = ']');
+punct!(OpenBrace = '{');
+punct!(ClosedBrace = '}');
 
