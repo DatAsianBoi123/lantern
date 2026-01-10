@@ -7,7 +7,7 @@ use crate::{Ident, Literal, Number, ParseTokens, QuotedString, Stmt, error::Span
 #[derive(Parse, Debug, Clone, PartialEq)]
 enum PrimaryExpr {
     Literal(Literal),
-    Variable(Ident),
+    Identifier(Ident),
     Paren(ExprParen),
     Block(ExprBlock),
 }
@@ -15,7 +15,7 @@ enum PrimaryExpr {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Literal(Literal),
-    Variable(Ident),
+    Identifier(Ident),
     Field(ExprField),
     FunCall(ExprFunCall),
     Paren(ExprParen),
@@ -28,7 +28,7 @@ impl From<PrimaryExpr> for Expr {
     fn from(value: PrimaryExpr) -> Self {
         match value {
             PrimaryExpr::Literal(literal) => Self::Literal(literal),
-            PrimaryExpr::Variable(ident) => Self::Variable(ident),
+            PrimaryExpr::Identifier(ident) => Self::Identifier(ident),
             PrimaryExpr::Paren(expr) => Self::Paren(expr),
             PrimaryExpr::Block(block) => Self::Block(block),
         }
@@ -42,7 +42,7 @@ impl Expr {
             Expr::Literal(Literal::Number(Number(_, span))) => span,
             Expr::Literal(Literal::Boolean(bool)) => bool.span(),
             Expr::Literal(Literal::String(QuotedString(_, span))) => span,
-            Expr::Variable(Ident(_, span)) => span,
+            Expr::Identifier(Ident(_, span)) => span,
             Expr::Field(ExprField { expr, .. }) => expr.span(),
             Expr::FunCall(ExprFunCall { expr, .. }) => expr.span(),
             Expr::Paren(ExprParen { open_paren, .. }) => &open_paren.0,

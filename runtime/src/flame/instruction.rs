@@ -56,9 +56,6 @@ macro_rules! inst {
     ($inst: expr; LOAD_LOCAL $i: expr) => {
         $inst.push($crate::flame::instruction::Instruction::LoadLocal($i))
     };
-    ($inst: expr; LOAD_FUN $i: expr) => {
-        $inst.push($crate::flame::instruction::Instruction::LoadFun($i))
-    };
     ($inst: expr; RET) => {
         $inst.push($crate::flame::instruction::Instruction::Return)
     };
@@ -163,8 +160,6 @@ pub enum Instruction {
     StoreLocal(usize),
     LoadLocal(usize),
 
-    LoadFun(usize),
-
     Return,
 
     Invoke(usize),
@@ -197,7 +192,6 @@ impl Display for Instruction {
             Self::AllocString(str) => write!(f, "{:20}{str:?}", "ALLOC_STR"),
             Self::StoreLocal(index) => write!(f, "{:20}{index}", "STORE_LOCAL"),
             Self::LoadLocal(index) => write!(f, "{:20}{index}", "LOAD_LOCAL"),
-            Self::LoadFun(index) => write!(f, "{:20}{index}", "LOAD_FUN"),
             Self::Return => write!(f, "RET"),
             Self::Invoke(num_args) => write!(f, "{:20}{num_args}", "INV"),
             Self::Goto(index) => write!(f, "{:20}{index}", "GOTO"),

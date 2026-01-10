@@ -42,11 +42,9 @@ fn main() {
         println!("Parsed in {took:?}");
     }
 
-    let mut vm = VM::new();
-
     let before = Instant::now();
-    let root = match vm.ignite(lantern_file) {
-        Ok(instructions) => instructions,
+    let vm = match VM::new(lantern_file) {
+        Ok(vm) => vm,
         Err(err) => {
             eprintln!("{err}");
             return;
@@ -54,15 +52,15 @@ fn main() {
     };
 
     if verbose {
-        println!("{root}");
+        vm.funs().iter().enumerate().for_each(|(i, fun)| {
+            println!("Generated {i}:\n{fun}");
+        });
         println!("Compiled in {:?}", Instant::now().duration_since(before));
     }
 
     println!("finished compiling in {:?}", Instant::now().duration_since(before_compile));
 
     if no_run { return; }
-
-    vm.push_frame(&root);
 
     println!("running {file_name}");
     match vm.exec() {

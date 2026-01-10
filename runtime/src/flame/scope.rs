@@ -1,6 +1,6 @@
-use std::{collections::{HashMap, hash_map}, rc::Rc};
+use std::{collections::{HashMap, hash_map}};
 
-use crate::flame::{GeneratedFunction, LanternFunction, LanternVariable, GenerateFunPtr, instruction::InstructionSet, r#type::LanternType};
+use crate::flame::{GeneratedFunction, LanternFunction, LanternVariable, instruction::InstructionSet, r#type::LanternType};
 
 #[derive(Debug, Clone)]
 pub struct Scope<'a> {
@@ -40,15 +40,6 @@ impl<'a> Scope<'a> {
                     .or_else(|| parent.function(name))
             }
         }
-    }
-
-    /// # Safety
-    ///
-    /// See [Rc::get_mut_unchecked]
-    pub unsafe fn write_gen_function(&mut self, name: &str, r#gen: GeneratedFunction) -> Option<()> {
-        let rc = &mut self.functions.get_mut(name)?.r#gen;
-        unsafe { Rc::get_mut_unchecked(rc).write(r#gen); };
-        Some(())
     }
 
     pub fn insert_function(&mut self, name: String, fun: LanternFunction) -> Option<()> {
@@ -102,7 +93,6 @@ pub enum ScopeKind<'a> {
 #[derive(Debug, Clone)]
 pub struct StackFrame {
     pub instructions: InstructionSet,
-    pub funs: Vec<GenerateFunPtr>,
     locals: Vec<String>,
     pub ret_type: Option<LanternType>,
 }
@@ -111,7 +101,6 @@ impl StackFrame {
     pub fn new_module() -> Self {
         Self {
             instructions: InstructionSet::new(),
-            funs: Vec::new(),
             locals: Vec::new(),
             ret_type: None,
         }
@@ -120,7 +109,6 @@ impl StackFrame {
     pub fn new_fun(ret_type: LanternType) -> Self {
         Self {
             instructions: InstructionSet::new(),
-            funs: Vec::new(),
             locals: Vec::new(),
             ret_type: Some(ret_type),
         }
@@ -139,7 +127,7 @@ impl StackFrame {
     }
 
     pub fn into_gen(self) -> GeneratedFunction {
-        GeneratedFunction::Instructions { instructions: self.instructions, funs: self.funs.into_boxed_slice() }
+        GeneratedFunction::Instructions(self.instructions)
     }
 }
 

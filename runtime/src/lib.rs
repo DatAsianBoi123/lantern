@@ -1,6 +1,6 @@
 #![feature(get_mut_unchecked)]
 
-use std::{fmt::{Display, Formatter}, rc::Rc};
+use std::{fmt::{Display, Formatter}};
 
 use error::RuntimeError;
 use flame::{GeneratedFunction, instruction::Instruction};
@@ -79,36 +79,35 @@ impl Slot {
 }
 
 #[derive(Debug, Clone)]
-pub struct VM<'a> {
-    frames: Vec<Frame<'a>>,
+pub struct VM {
+    frames: Vec<Frame>,
+    funs: Vec<GeneratedFunction>,
     pub heap: Heap,
 
     string_type_info: TypeInfo,
 }
 
-impl<'a> Default for VM<'a> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<'a> VM<'a> {
-    pub fn new() -> Self {
-        Self {
-            frames: Vec::new(),
+impl VM {
+    pub fn new(file: LanternFile) -> Result<Self, CompilerError> {
+        let mut funs = Vec::new();
+        let root = flame::ignite(file, &mut funs)?;
+        funs.push(root);
+        Ok(Self {
+            frames: vec![Frame::new(funs.len() - 1)],
+            funs,
             // 4 MiB
             heap: Heap::new(4 * 2usize.pow(20)),
 
             string_type_info: TypeInfo::Array { element_size: 1, is_ref: false },
-        }
+        })
     }
 
-    pub fn ignite(&mut self, file: LanternFile) -> Result<GeneratedFunction, CompilerError> {
-        flame::ignite(file, &mut self.heap)
+    pub fn funs(&self) -> &[GeneratedFunction] {
+        &self.funs
     }
 
-    pub fn push_frame(&mut self, fun: &'a GeneratedFunction) {
-        self.frames.push(Frame::new(fun));
+    pub fn root(&self) -> &GeneratedFunction {
+        self.funs.last().expect("root fun")
     }
 
     pub fn alloc_string(&mut self, bytes: &[u8]) -> Result<HeapArray, RuntimeError> {
@@ -133,8 +132,9 @@ impl<'a> VM<'a> {
     pub fn exec_one(&mut self) -> Result<(), RuntimeError> {
         let Some(ref mut frame) = self.frames.last_mut() else { return Ok(()); };
 
-        match frame.fun {
-            GeneratedFunction::Instructions { instructions, funs } => {
+        let fun = &self.funs[frame.fun_index];
+        match fun {
+            GeneratedFunction::Instructions(instructions) => {
                 match instructions[frame.inst_ptr].clone() {
                     Instruction::Pushu64(u64) => { frame.operand_stack.push_primitive(u64)?; },
                     Instruction::Pushf64(f64) => { frame.operand_stack.push_primitive(f64)?; },
@@ -162,8 +162,6 @@ impl<'a> VM<'a> {
                     },
                     Instruction::LoadLocal(index) => frame.operand_stack.push_slot(frame.locals[index])?,
                     Instruction::StoreLocal(index) => frame.locals[index] = frame.operand_stack.pop()?,
-                    // TODO: store functions on heap
-                    Instruction::LoadFun(index) => frame.operand_stack.push_primitive(Rc::as_ptr(&funs[index]))?,
                     Instruction::Return => {
                         let ret = frame.operand_stack.pop()?;
                         if !frame.operand_stack.is_empty() {
@@ -182,9 +180,8 @@ impl<'a> VM<'a> {
                         for i in 0..num_args {
                             locals[num_args - i - 1] = frame.operand_stack.pop()?;
                         }
-                        let ptr = frame.operand_stack.pop()?.read::<*const GeneratedFunction>();
-                        let fun = unsafe { &**ptr };
-                        let frame = Frame::with_locals(fun, locals);
+                        let index = unsafe { *frame.operand_stack.pop()?.read::<usize>() };
+                        let frame = Frame::with_locals(index, locals);
                         self.frames.push(frame);
                         return Ok(());
                     },
@@ -235,26 +232,26 @@ impl<'a> VM<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub struct Frame<'a> {
-    fun: &'a GeneratedFunction,
+pub struct Frame {
+    fun_index: usize,
     inst_ptr: usize,
     locals: [Slot; 256],
     operand_stack: LanternStack,
 }
 
-impl<'a> Frame<'a> {
-    pub fn new(fun: &'a GeneratedFunction) -> Self {
+impl Frame {
+    pub fn new(fun_index: usize) -> Self {
         Self {
-            fun,
+            fun_index,
             inst_ptr: 0,
             locals: [Default::default(); 256],
             operand_stack: LanternStack::new(),
         }
     }
 
-    pub fn with_locals(fun: &'a GeneratedFunction, locals: [Slot; 256]) -> Self {
+    pub fn with_locals(fun_index: usize, locals: [Slot; 256]) -> Self {
         Self {
-            fun,
+            fun_index,
             inst_ptr: 0,
             locals,
             operand_stack: LanternStack::new(),
