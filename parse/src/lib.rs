@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter};
 use error::Diagnostics;
 use macros::Parse;
 
-use crate::{error::Span, expr::{Expr, ExprBlock}, keyword::{Break, Else, False, Fun, If, Native, Return, Struct, True, Using, Val, While}, punct::{ArrowRight, ClosedBrace, ClosedParen, Colon, Comma, DoubleSlash, Equals, OpenBrace, OpenParen, Period, Semi}, stream::{AlphabeticWord, AlphanumericWord, Char, Digit, Not, Not2, Punctuated, Repetition, StreamBranch, TokenStream, TrailingDenied, Whitespace}};
+use crate::{error::Span, expr::{Expr, ExprBlock}, keyword::{Break, Else, False, Fun, If, Native, Return, Struct, True, Using, Val, While}, punct::{ArrowRight, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, DoubleSlash, Equals, OpenBrace, OpenBracket, OpenParen, Period, Semi}, stream::{AlphabeticWord, AlphanumericWord, Char, Digit, Not, Not2, Punctuated, Repetition, StreamBranch, TokenStream, TrailingDenied, Whitespace}};
 
 pub mod stream;
 pub mod punct;
@@ -263,6 +263,7 @@ impl Boolean {
 
 #[derive(Parse, Debug, Clone, PartialEq, Eq)]
 pub enum Type {
+    Array(OpenBracket, Box<Type>, ClosedBracket),
     Fun(FunType),
     Path(Path),
 }
@@ -270,6 +271,7 @@ pub enum Type {
 impl Display for Type {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Array(_, inner, _) => write!(f, "[{inner}]"),
             Self::Fun(FunType { args, ret, .. }) => {
                 write!(f, "fun({})", args.0.iter().map(|arg| arg.to_string()).collect::<Vec<_>>().join(", "))?;
                 if let Some((_, ret)) = ret {

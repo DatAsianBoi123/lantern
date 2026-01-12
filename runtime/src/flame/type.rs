@@ -9,6 +9,7 @@ pub enum LanternType {
     Number,
     Bool,
     String,
+    Array(Box<LanternType>),
     Function {
         args: Vec<LanternType>,
         ret: Box<LanternType>,
@@ -22,6 +23,7 @@ impl Display for LanternType {
             Self::Number => f.write_str("number"),
             Self::Bool => f.write_str("bool"),
             Self::String => f.write_str("string"),
+            Self::Array(inner) => write!(f, "[{inner}]"),
             Self::Function { args, ret, .. } => {
                 write!(f, "fun({}) -> {}", args.iter().map(|r#type| r#type.to_string()).collect::<Vec<String>>().join(", "), ret)
             },
@@ -33,6 +35,7 @@ impl Display for LanternType {
 impl LanternType {
     pub fn from_type(r#type: &Type) -> Result<Self, CompilerError> {
         match r#type {
+            Type::Array(_, inner, _) => Ok(Self::Array(Box::new(Self::from_type(inner)?))),
             Type::Fun(FunType { args, ret, .. }) => {
                 let args = args.0.iter().map(LanternType::from_type).collect::<Result<_, _>>()?;
                 let ret = ret.as_ref()
@@ -60,6 +63,7 @@ impl LanternType {
             Self::Number => 8,
             Self::Bool => 1,
             Self::String => 8,
+            Self::Array(..) => 8,
             Self::Function { .. } => 8,
             Self::Null => 8,
         }
@@ -70,6 +74,7 @@ impl LanternType {
             Self::Number => 8,
             Self::Bool => 1,
             Self::String => 8,
+            Self::Array(..) => 8,
             Self::Function { .. } => 8,
             Self::Null => 8,
         }
