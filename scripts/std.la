@@ -1,9 +1,9 @@
 native fun print(x: std.str);
-native fun float_to_str(float: std.float) -> std.str;
-native fun input_float() -> std.float;
+native fun int_to_str(int: std.int) -> std.str;
+native fun input_int() -> std.int;
 
-val index: std.float = 1;
-val max: std.float = input_float();
+val index: std.int = 1;
+val max: std.int = input_int();
 
 while (index <= max) {
   fizzbuzz(index, print);
@@ -13,7 +13,7 @@ while (index <= max) {
 val f: fun(std.str) = print_and_hello();
 f("World");
 
-fun fizzbuzz(x: std.float, print_fun: fun(std.str)) {
+fun fizzbuzz(x: std.int, print_fun: fun(std.str)) {
   if (x % 5 == 0 && x % 3 == 0) {
     print_fun("FizzBuzz");
   } else if (x % 5 == 0) {
@@ -21,7 +21,7 @@ fun fizzbuzz(x: std.float, print_fun: fun(std.str)) {
   } else if (x % 3 == 0) {
     print_fun("Fizz");
   } else {
-    print_fun(float_to_str(x));
+    print_fun(int_to_str(x));
   }
 }
 

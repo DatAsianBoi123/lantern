@@ -1,6 +1,6 @@
 use std::{collections::{HashMap, hash_map}};
 
-use crate::flame::{GeneratedFunction, LanternFunction, LanternVariable, instruction::InstructionSet, r#type::LanternType};
+use crate::{flame::{GeneratedFunction, LanternFunction, LanternVariable, instruction::InstructionSet, r#type::LanternType}, heap::TypeInfo};
 
 #[derive(Debug, Clone)]
 pub struct Scope<'a> {
@@ -129,5 +129,11 @@ impl StackFrame {
     pub fn into_gen(self) -> GeneratedFunction {
         GeneratedFunction::Instructions(self.instructions)
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct Globals {
+    pub funs: Vec<GeneratedFunction>,
+    pub types: Vec<TypeInfo>,
 }
 

@@ -14,14 +14,14 @@ pub mod r#type;
 pub mod scope;
 pub mod native;
 
-pub fn ignite(file: LanternFile, funs: &mut Vec<GeneratedFunction>) -> Result<GeneratedFunction, CompilerError> {
+pub fn ignite(file: LanternFile, globals: &mut Globals) -> Result<GeneratedFunction, CompilerError> {
     let mut frame = StackFrame::new_module();
-    compile_stmts(file.stmts, Scope::new(), &mut frame, funs)?;
+    compile_stmts(file.stmts, Scope::new(), &mut frame, globals)?;
     Ok(frame.into_gen())
 }
 
-fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame, funs: &mut Vec<GeneratedFunction>) -> Result<(), CompilerError> {
-    let mut next_fun_index = funs.len();
+fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame, globals: &mut Globals) -> Result<(), CompilerError> {
+    let mut next_fun_index = globals.funs.len();
     statements.iter()
         .filter_map(|statement| {
             if let Stmt::Item(item) = statement {
@@ -75,7 +75,7 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
                     match current_branch {
                         IfBranch::ElseIf(IfStmt { condition, block, branch, .. }) => {
                             let condition_span = condition.span().clone();
-                            let r#type = compile_expr(condition, &scope, frame, funs)?;
+                            let r#type = compile_expr(condition, &scope, frame, globals)?;
                             if r#type != LanternType::Bool {
                                 return Err(CompilerError::new(CompilerErrorKind::TypeError { expected: LanternType::Bool, got: r#type }, condition_span));
                             }
@@ -84,7 +84,7 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
                             inst!(frame.instructions; GOTO_IF_FALSE 0);
 
                             let block_scope = scope.child_block();
-                            compile_stmts(block.stmts, block_scope, frame, funs)?;
+                            compile_stmts(block.stmts, block_scope, frame, globals)?;
                             end_indices.push(frame.instructions.len());
                             inst!(frame.instructions; GOTO 0);
                             frame.instructions[false_index] = Instruction::PopGotoIfFalse(frame.instructions.len());
@@ -96,7 +96,7 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
                         },
                         IfBranch::Else(block) => {
                             let block_scope = scope.child_block();
-                            compile_stmts(block.stmts, block_scope, frame, funs)?;
+                            compile_stmts(block.stmts, block_scope, frame, globals)?;
                             break;
                         },
                     }
@@ -110,7 +110,7 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
                 let condition_span = condition.span().clone();
                 let head = frame.instructions.len();
 
-                let r#type = compile_expr(condition, &scope, frame, funs)?;
+                let r#type = compile_expr(condition, &scope, frame, globals)?;
                 if r#type != LanternType::Bool {
                     return Err(CompilerError::new(CompilerErrorKind::TypeError { expected: LanternType::Bool, got: r#type }, condition_span));
                 }
@@ -118,7 +118,7 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
                 inst!(frame.instructions; POP_GOTO_IF_FALSE 0);
 
                 let block_scope = scope.child_block();
-                compile_stmts(block.stmts, block_scope, frame, funs)?;
+                compile_stmts(block.stmts, block_scope, frame, globals)?;
                 inst!(frame.instructions; GOTO head);
 
                 frame.instructions[break_index] = Instruction::PopGotoIfFalse(frame.instructions.len());
@@ -137,7 +137,7 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
             Stmt::ValDeclaration(ValDeclaration { ident, r#type, init: Some((_, init)), .. }) => {
                 let ident_span = ident.1.clone();
                 let init_span = init.span().clone();
-                let init_type = compile_expr(init, &scope, frame, funs)?;
+                let init_type = compile_expr(init, &scope, frame, globals)?;
 
                 let var_type = LanternType::from_type(&r#type)?;
                 if var_type != init_type {
@@ -152,7 +152,7 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
                 let var = scope.variable(&ident.0)
                     .ok_or(CompilerError::new(CompilerErrorKind::UnknownVariable(ident.clone()), ident.1.clone()))?;
 
-                let r#type = compile_expr(expr, &scope, frame, funs)?;
+                let r#type = compile_expr(expr, &scope, frame, globals)?;
                 if var.r#type != r#type {
                     return Err(CompilerError::new(CompilerErrorKind::TypeError { expected: var.r#type, got: r#type }, ident.1.clone()));
                 }
@@ -164,7 +164,7 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
                     Some(ret) => ret.clone(),
                     _ => return Err(CompilerError::new(CompilerErrorKind::BadReturn, span)),
                 };
-                let ret = compile_expr(expr, &scope, frame, funs)?;
+                let ret = compile_expr(expr, &scope, frame, globals)?;
                 if expected_ret != ret {
                     return Err(CompilerError::new(CompilerErrorKind::TypeError { expected: expected_ret.clone(), got: ret }, span));
                 }
@@ -175,7 +175,7 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
                 todo!()
             },
             Stmt::Expr(expr, _) => {
-                compile_expr(expr, &scope, frame, funs)?;
+                compile_expr(expr, &scope, frame, globals)?;
                 inst!(frame.instructions; POP);
             },
             Stmt::Item(Item::Using(_)) => todo!(),
@@ -199,11 +199,11 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
                             })
                     })?;
 
-                let current_index = funs.len();
-                funs.push(GeneratedFunction::Instructions(InstructionSet::default()));
-                compile_stmts(block.stmts, fun_scope, &mut fun_frame, funs)?;
+                let current_index = globals.funs.len();
+                globals.funs.push(GeneratedFunction::Instructions(InstructionSet::default()));
+                compile_stmts(block.stmts, fun_scope, &mut fun_frame, globals)?;
 
-                funs[current_index] = fun_frame.into_gen();
+                globals.funs[current_index] = fun_frame.into_gen();
             },
             Stmt::Item(Item::Native(ItemNative { ident, .. })) => {
                 let ptr = native::get_native_fn(&ident.0).ok_or_else(|| {
@@ -211,7 +211,7 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
                     CompilerError::new(CompilerErrorKind::UnknownNative(ident.clone()), span)
                 })?;
 
-                funs.push(GeneratedFunction::Native(ptr));
+                globals.funs.push(GeneratedFunction::Native(ptr));
             },
             Stmt::Item(Item::Struct(_)) => {},
         }
@@ -229,11 +229,15 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
     Ok(())
 }
 
-fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, funs: &mut Vec<GeneratedFunction>) -> Result<LanternType, CompilerError> {
+fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals: &mut Globals) -> Result<LanternType, CompilerError> {
     match expression {
-        Expr::Literal(Literal::Number(number)) => {
-            inst!(frame.instructions; PUSHF number.0);
-            Ok(LanternType::Number)
+        Expr::Literal(Literal::Number(Number::Integer(int, _))) => {
+            inst!(frame.instructions; PUSHI int);
+            Ok(LanternType::Integer)
+        },
+        Expr::Literal(Literal::Number(Number::Float(float, _))) => {
+            inst!(frame.instructions; PUSHF float);
+            Ok(LanternType::Float)
         },
         Expr::Literal(Literal::Boolean(bool)) => {
             match bool {
@@ -248,7 +252,7 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, funs: &
         },
         Expr::FunCall(ExprFunCall { expr, args, .. }) => {
             let span = expr.span().clone();
-            let r#type = compile_expr(*expr, scope, frame, funs)?;
+            let r#type = compile_expr(*expr, scope, frame, globals)?;
             if let LanternType::Function { args: fun_args, ret } = r#type {
                 let fun_args_len = fun_args.len();
                 if args.0.len() != fun_args_len {
@@ -257,7 +261,7 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, funs: &
 
                 for (expr, r#type) in args.0.into_iter().zip(fun_args) {
                     let expr_span = expr.span().clone();
-                    let expr_type = compile_expr(expr, scope, frame, funs)?;
+                    let expr_type = compile_expr(expr, scope, frame, globals)?;
                     if expr_type != r#type {
                         return Err(CompilerError::new(CompilerErrorKind::TypeError { expected: r#type.clone(), got: expr_type }, expr_span));
                     }
@@ -275,7 +279,7 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, funs: &
         Expr::Binary(ExprBinary { lhs, op, rhs }) => {
             match op {
                 BinaryOperator::And(_) | BinaryOperator::Or(_) => {
-                    let lhs_type = compile_expr(*lhs, scope, frame, funs)?;
+                    let lhs_type = compile_expr(*lhs, scope, frame, globals)?;
                     let goto_index = frame.instructions.len();
 
                     match op {
@@ -285,7 +289,7 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, funs: &
                     };
                     inst!(frame.instructions; POP);
 
-                    let rhs_type = compile_expr(*rhs, scope, frame, funs)?;
+                    let rhs_type = compile_expr(*rhs, scope, frame, globals)?;
 
                     let goto_inst = match op {
                         BinaryOperator::And(_) => Instruction::GotoIfFalse(frame.instructions.len()),
@@ -304,48 +308,88 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, funs: &
                 _ => {},
             }
 
-            let lhs = compile_expr(*lhs, scope, frame, funs)?;
-            let rhs = compile_expr(*rhs, scope, frame, funs)?;
+            let lhs = compile_expr(*lhs, scope, frame, globals)?;
+            let rhs = compile_expr(*rhs, scope, frame, globals)?;
 
             match (lhs, op, rhs) {
-                (LanternType::Number, BinaryOperator::Add(_), LanternType::Number) => {
+                (LanternType::Float, BinaryOperator::Add(_), LanternType::Float) => {
                     inst!(frame.instructions; ADDF);
-                    Ok(LanternType::Number)
+                    Ok(LanternType::Float)
                 },
-                (LanternType::Number, BinaryOperator::Sub(_), LanternType::Number) => {
+                (LanternType::Integer, BinaryOperator::Add(_), LanternType::Integer) => {
+                    inst!(frame.instructions; ADDI);
+                    Ok(LanternType::Integer)
+                },
+                (LanternType::Float, BinaryOperator::Sub(_), LanternType::Float) => {
                     inst!(frame.instructions; SUBF);
-                    Ok(LanternType::Number)
+                    Ok(LanternType::Float)
                 },
-                (LanternType::Number, BinaryOperator::Mult(_), LanternType::Number) => {
+                (LanternType::Integer, BinaryOperator::Sub(_), LanternType::Integer) => {
+                    inst!(frame.instructions; SUBI);
+                    Ok(LanternType::Integer)
+                },
+                (LanternType::Float, BinaryOperator::Mult(_), LanternType::Float) => {
                     inst!(frame.instructions; MULTF);
-                    Ok(LanternType::Number)
+                    Ok(LanternType::Float)
                 },
-                (LanternType::Number, BinaryOperator::Div(_), LanternType::Number) => {
+                (LanternType::Integer, BinaryOperator::Mult(_), LanternType::Integer) => {
+                    inst!(frame.instructions; MULTI);
+                    Ok(LanternType::Integer)
+                },
+                (LanternType::Float, BinaryOperator::Div(_), LanternType::Float) => {
                     inst!(frame.instructions; DIVF);
-                    Ok(LanternType::Number)
+                    Ok(LanternType::Float)
                 },
-                (LanternType::Number, BinaryOperator::Mod(_), LanternType::Number) => {
+                (LanternType::Integer, BinaryOperator::Div(_), LanternType::Integer) => {
+                    inst!(frame.instructions; DIVI);
+                    Ok(LanternType::Integer)
+                },
+                (LanternType::Float, BinaryOperator::Mod(_), LanternType::Float) => {
                     inst!(frame.instructions; MODF);
-                    Ok(LanternType::Number)
+                    Ok(LanternType::Float)
                 },
-                (LanternType::Number, BinaryOperator::Lt(_), LanternType::Number) => {
-                    inst!(frame.instructions; COMP_LT);
+                (LanternType::Integer, BinaryOperator::Mod(_), LanternType::Integer) => {
+                    inst!(frame.instructions; MODI);
+                    Ok(LanternType::Integer)
+                },
+                (LanternType::Float, BinaryOperator::Lt(_), LanternType::Float) => {
+                    inst!(frame.instructions; FCOMP_LT);
                     Ok(LanternType::Bool)
                 },
-                (LanternType::Number, BinaryOperator::Le(_), LanternType::Number) => {
-                    inst!(frame.instructions; COMP_LE);
+                (LanternType::Integer, BinaryOperator::Lt(_), LanternType::Integer) => {
+                    inst!(frame.instructions; ICOMP_LT);
                     Ok(LanternType::Bool)
                 },
-                (LanternType::Number, BinaryOperator::Gt(_), LanternType::Number) => {
-                    inst!(frame.instructions; COMP_GT);
+                (LanternType::Float, BinaryOperator::Le(_), LanternType::Float) => {
+                    inst!(frame.instructions; FCOMP_LE);
                     Ok(LanternType::Bool)
                 },
-                (LanternType::Number, BinaryOperator::Ge(_), LanternType::Number) => {
-                    inst!(frame.instructions; COMP_GE);
+                (LanternType::Integer, BinaryOperator::Le(_), LanternType::Integer) => {
+                    inst!(frame.instructions; ICOMP_LE);
                     Ok(LanternType::Bool)
                 },
-                (LanternType::Number, BinaryOperator::Eq(_), LanternType::Number) => {
-                    inst!(frame.instructions; COMP_EQ);
+                (LanternType::Float, BinaryOperator::Gt(_), LanternType::Float) => {
+                    inst!(frame.instructions; FCOMP_GT);
+                    Ok(LanternType::Bool)
+                },
+                (LanternType::Integer, BinaryOperator::Gt(_), LanternType::Integer) => {
+                    inst!(frame.instructions; ICOMP_GT);
+                    Ok(LanternType::Bool)
+                },
+                (LanternType::Float, BinaryOperator::Ge(_), LanternType::Float) => {
+                    inst!(frame.instructions; FCOMP_GE);
+                    Ok(LanternType::Bool)
+                },
+                (LanternType::Integer, BinaryOperator::Ge(_), LanternType::Integer) => {
+                    inst!(frame.instructions; ICOMP_GE);
+                    Ok(LanternType::Bool)
+                },
+                (LanternType::Float, BinaryOperator::Eq(_), LanternType::Float) => {
+                    inst!(frame.instructions; FCOMP_EQ);
+                    Ok(LanternType::Bool)
+                },
+                (LanternType::Integer, BinaryOperator::Eq(_), LanternType::Integer) => {
+                    inst!(frame.instructions; ICOMP_EQ);
                     Ok(LanternType::Bool)
                 },
                 (_, BinaryOperator::And(_) | BinaryOperator::Or(_), _) => unreachable!(),
@@ -356,10 +400,14 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, funs: &
             }
         },
         Expr::Unary(ExprUnary { op, expr }) => {
-            match (op, compile_expr(*expr, scope, frame, funs)?) {
-                (UnaryOperator::Negate(_), LanternType::Number) => {
+            match (op, compile_expr(*expr, scope, frame, globals)?) {
+                (UnaryOperator::Negate(_), LanternType::Float) => {
                     inst!(frame.instructions; NEGF);
-                    Ok(LanternType::Number)
+                    Ok(LanternType::Float)
+                },
+                (UnaryOperator::Negate(_), LanternType::Integer) => {
+                    inst!(frame.instructions; NEGI);
+                    Ok(LanternType::Integer)
                 },
                 (UnaryOperator::Not(_), LanternType::Bool) => {
                     inst!(frame.instructions; NOT);
@@ -371,10 +419,10 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, funs: &
                 },
             }
         },
-        Expr::Paren(ExprParen { expr, .. }) => compile_expr(*expr, scope, frame, funs),
+        Expr::Paren(ExprParen { expr, .. }) => compile_expr(*expr, scope, frame, globals),
         Expr::Block(ExprBlock { stmts, .. }) => {
             let block_scope = scope.child_block();
-            compile_stmts(stmts, block_scope, frame, funs)?;
+            compile_stmts(stmts, block_scope, frame, globals)?;
             inst!(frame.instructions; PUSHU 0);
             Ok(LanternType::Null)
         },

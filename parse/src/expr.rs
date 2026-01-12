@@ -39,7 +39,7 @@ impl Expr {
     pub fn span(&self) -> &Span {
         // TODO: ended span
         match self {
-            Expr::Literal(Literal::Number(Number(_, span))) => span,
+            Expr::Literal(Literal::Number(number)) => number.span(),
             Expr::Literal(Literal::Boolean(bool)) => bool.span(),
             Expr::Literal(Literal::String(QuotedString(_, span))) => span,
             Expr::Identifier(Ident(_, span)) => span,

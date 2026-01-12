@@ -5,6 +5,9 @@ macro_rules! inst {
     ($inst: expr; PUSHU $b: expr) => {
         $inst.push($crate::flame::instruction::Instruction::Pushu64($b))
     };
+    ($inst: expr; PUSHI $i: expr) => {
+        $inst.push($crate::flame::instruction::Instruction::Pushi64($i))
+    };
     ($inst: expr; PUSHF $f: expr) => {
         $inst.push($crate::flame::instruction::Instruction::Pushf64($f))
     };
@@ -14,35 +17,68 @@ macro_rules! inst {
     ($inst: expr; ADDF) => {
         $inst.push($crate::flame::instruction::Instruction::Addf)
     };
+    ($inst: expr; ADDI) => {
+        $inst.push($crate::flame::instruction::Instruction::Addi)
+    };
     ($inst: expr; SUBF) => {
         $inst.push($crate::flame::instruction::Instruction::Subf)
+    };
+    ($inst: expr; SUBI) => {
+        $inst.push($crate::flame::instruction::Instruction::Subi)
     };
     ($inst: expr; MULTF) => {
         $inst.push($crate::flame::instruction::Instruction::Multf)
     };
+    ($inst: expr; MULTI) => {
+        $inst.push($crate::flame::instruction::Instruction::Multi)
+    };
     ($inst: expr; DIVF) => {
         $inst.push($crate::flame::instruction::Instruction::Divf)
+    };
+    ($inst: expr; DIVI) => {
+        $inst.push($crate::flame::instruction::Instruction::Divi)
     };
     ($inst: expr; MODF) => {
         $inst.push($crate::flame::instruction::Instruction::Modf)
     };
+    ($inst: expr; MODI) => {
+        $inst.push($crate::flame::instruction::Instruction::Modi)
+    };
     ($inst: expr; NEGF) => {
         $inst.push($crate::flame::instruction::Instruction::Negf)
     };
-    ($inst: expr; COMP_LT) => {
-        $inst.push($crate::flame::instruction::Instruction::CompareLt)
+    ($inst: expr; NEGI) => {
+        $inst.push($crate::flame::instruction::Instruction::Negi)
     };
-    ($inst: expr; COMP_LE) => {
-        $inst.push($crate::flame::instruction::Instruction::CompareLe)
+    ($inst: expr; FCOMP_LT) => {
+        $inst.push($crate::flame::instruction::Instruction::FCompareLt)
     };
-    ($inst: expr; COMP_GT) => {
-        $inst.push($crate::flame::instruction::Instruction::CompareGt)
+    ($inst: expr; ICOMP_LT) => {
+        $inst.push($crate::flame::instruction::Instruction::ICompareLt)
     };
-    ($inst: expr; COMP_GE) => {
-        $inst.push($crate::flame::instruction::Instruction::CompareGe)
+    ($inst: expr; FCOMP_LE) => {
+        $inst.push($crate::flame::instruction::Instruction::FCompareLe)
     };
-    ($inst: expr; COMP_EQ) => {
-        $inst.push($crate::flame::instruction::Instruction::CompareEq)
+    ($inst: expr; ICOMP_LE) => {
+        $inst.push($crate::flame::instruction::Instruction::ICompareLe)
+    };
+    ($inst: expr; FCOMP_GT) => {
+        $inst.push($crate::flame::instruction::Instruction::FCompareGt)
+    };
+    ($inst: expr; ICOMP_GT) => {
+        $inst.push($crate::flame::instruction::Instruction::ICompareGt)
+    };
+    ($inst: expr; FCOMP_GE) => {
+        $inst.push($crate::flame::instruction::Instruction::FCompareGe)
+    };
+    ($inst: expr; ICOMP_GE) => {
+        $inst.push($crate::flame::instruction::Instruction::ICompareGe)
+    };
+    ($inst: expr; FCOMP_EQ) => {
+        $inst.push($crate::flame::instruction::Instruction::FCompareEq)
+    };
+    ($inst: expr; ICOMP_EQ) => {
+        $inst.push($crate::flame::instruction::Instruction::ICompareEq)
     };
     ($inst: expr; NOT) => {
         $inst.push($crate::flame::instruction::Instruction::Not)
@@ -128,29 +164,41 @@ impl InstructionSet {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
     Pushu64(u64),
+    Pushi64(i64),
     Pushf64(f64),
     Pop,
     /// POP     f64: rhs
     /// POP     f64: lhs
     /// PUSH    f64: result
     Addf,
+    Addi,
     /// f64 binary op, see [Instruction::Addf]
     Subf,
+    Subi,
     /// f64 binary op, see [Instruction::Addf]
     Multf,
+    Multi,
     /// f64 binary op, see [Instruction::Addf]
     Divf,
+    Divi,
     /// f64 binary op, see [Instruction::Addf]
     Modf,
+    Modi,
     /// POP     f64: value
     /// PUSH    f64: -value
     Negf,
+    Negi,
 
-    CompareLt,
-    CompareLe,
-    CompareGt,
-    CompareGe,
-    CompareEq,
+    FCompareLt,
+    ICompareLt,
+    FCompareLe,
+    ICompareLe,
+    FCompareGt,
+    ICompareGt,
+    FCompareGe,
+    ICompareGe,
+    FCompareEq,
+    ICompareEq,
     /// POP     bool: value
     /// PUSH    bool: !value
     Not,
@@ -175,19 +223,31 @@ impl Display for Instruction {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Pushu64(u64) => write!(f, "{:20}{u64}", "PUSHU"),
+            Self::Pushi64(i64) => write!(f, "{:20}{i64}", "PUSHI"),
             Self::Pushf64(f64) => write!(f, "{:20}{f64}", "PUSHF"),
             Self::Pop => write!(f, "POP"),
             Self::Addf => write!(f, "ADDF"),
+            Self::Addi => write!(f, "ADDI"),
             Self::Subf => write!(f, "SUBF"),
+            Self::Subi => write!(f, "SUBI"),
             Self::Multf => write!(f, "MULTF"),
+            Self::Multi => write!(f, "MULTI"),
             Self::Divf => write!(f, "DIVF"),
+            Self::Divi => write!(f, "DIVI"),
             Self::Modf => write!(f, "MODF"),
+            Self::Modi => write!(f, "MODI"),
             Self::Negf => write!(f, "NEGF"),
-            Self::CompareLt => write!(f, "COMP_LT"),
-            Self::CompareLe => write!(f, "COMP_LE"),
-            Self::CompareGt => write!(f, "COMP_GT"),
-            Self::CompareGe => write!(f, "COMP_GE"),
-            Self::CompareEq => write!(f, "COMP_EQ"),
+            Self::Negi => write!(f, "NEGI"),
+            Self::FCompareLt => write!(f, "FCOMP_LT"),
+            Self::ICompareLt => write!(f, "ICOMP_LT"),
+            Self::FCompareLe => write!(f, "FCOMP_LE"),
+            Self::ICompareLe => write!(f, "ICOMP_LE"),
+            Self::FCompareGt => write!(f, "FCOMP_GT"),
+            Self::ICompareGt => write!(f, "ICOMP_GT"),
+            Self::FCompareGe => write!(f, "FCOMP_GE"),
+            Self::ICompareGe => write!(f, "ICOMP_GE"),
+            Self::FCompareEq => write!(f, "FCOMP_EQ"),
+            Self::ICompareEq => write!(f, "ICOMP_EQ"),
             Self::Not => write!(f, "NOT"),
             Self::AllocString(str) => write!(f, "{:20}{str:?}", "ALLOC_STR"),
             Self::StoreLocal(index) => write!(f, "{:20}{index}", "STORE_LOCAL"),

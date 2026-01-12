@@ -6,7 +6,7 @@ use error::RuntimeError;
 use flame::{GeneratedFunction, instruction::Instruction};
 use parse::LanternFile;
 
-use crate::{flame::error::CompilerError, heap::{Heap, HeapArray, TypeInfo}, stack::LanternStack};
+use crate::{flame::{error::CompilerError, scope::Globals}, heap::{Heap, HeapArray, TypeInfo}, stack::LanternStack};
 
 macro_rules! args {
     ( ( $($ty: ty),+ $(,)? ) in $stack: expr, $pat: pat => $ret: expr) => {{
@@ -82,23 +82,25 @@ impl Slot {
 pub struct VM {
     frames: Vec<Frame>,
     funs: Vec<GeneratedFunction>,
+    types: Vec<TypeInfo>,
     pub heap: Heap,
-
-    string_type_info: TypeInfo,
 }
 
 impl VM {
     pub fn new(file: LanternFile) -> Result<Self, CompilerError> {
-        let mut funs = Vec::new();
-        let root = flame::ignite(file, &mut funs)?;
-        funs.push(root);
+        let mut globals = Globals {
+            funs: Vec::new(),
+            // TODO: better way of string type info
+            types: vec![TypeInfo::Array { element_size: 1, is_ref: false }],
+        };
+        let root = flame::ignite(file, &mut globals)?;
+        globals.funs.push(root);
         Ok(Self {
-            frames: vec![Frame::new(funs.len() - 1)],
-            funs,
+            frames: vec![Frame::new(globals.funs.len() - 1)],
+            funs: globals.funs,
+            types: globals.types,
             // 4 MiB
             heap: Heap::new(4 * 2usize.pow(20)),
-
-            string_type_info: TypeInfo::Array { element_size: 1, is_ref: false },
         })
     }
 
@@ -111,10 +113,10 @@ impl VM {
     }
 
     pub fn alloc_string(&mut self, bytes: &[u8]) -> Result<HeapArray, RuntimeError> {
-        let mut array = self.heap.alloc_array(bytes.len(), &self.string_type_info)
+        let mut array = self.heap.alloc_array(bytes.len(), &self.types[0])
             .unwrap_or_else(|| {
                 self.heap.gc(&mut self.frames);
-                self.heap.alloc_array(bytes.len(), &self.string_type_info).expect("free heap space after gc")
+                self.heap.alloc_array(bytes.len(), &self.types[0]).expect("free heap space after gc")
             });
         for (i, byte) in bytes.iter().copied().enumerate() {
             unsafe { array.set(i, &byte as *const u8); }
@@ -137,23 +139,35 @@ impl VM {
             GeneratedFunction::Instructions(instructions) => {
                 match instructions[frame.inst_ptr].clone() {
                     Instruction::Pushu64(u64) => { frame.operand_stack.push_primitive(u64)?; },
+                    Instruction::Pushi64(i64) => { frame.operand_stack.push_primitive(i64)?; },
                     Instruction::Pushf64(f64) => { frame.operand_stack.push_primitive(f64)?; },
                     Instruction::Pop => { frame.operand_stack.pop()?; },
                     Instruction::Addf => args!((f64, f64) in frame.operand_stack, (rhs, lhs) => lhs + rhs),
+                    Instruction::Addi => args!((i64, i64) in frame.operand_stack, (rhs, lhs) => lhs + rhs),
                     Instruction::Subf => args!((f64, f64) in frame.operand_stack, (rhs, lhs) => lhs - rhs),
+                    Instruction::Subi => args!((i64, i64) in frame.operand_stack, (rhs, lhs) => lhs - rhs),
                     Instruction::Multf => args!((f64, f64) in frame.operand_stack, (rhs, lhs) => lhs * rhs),
+                    Instruction::Multi => args!((i64, i64) in frame.operand_stack, (rhs, lhs) => lhs * rhs),
                     Instruction::Divf => args!((f64, f64) in frame.operand_stack, (rhs, lhs) => lhs / rhs),
+                    Instruction::Divi => args!((i64, i64) in frame.operand_stack, (rhs, lhs) => lhs / rhs),
                     Instruction::Modf => args!((f64, f64) in frame.operand_stack, (rhs, lhs) => lhs % rhs),
-                    Instruction::Negf => args!((f64) in frame.operand_stack, f64 => -f64),
-                    Instruction::CompareLt => args!((f64, f64) in frame.operand_stack, (rhs, lhs) => bool_to_slot(lhs < rhs)),
-                    Instruction::CompareLe => args!((f64, f64) in frame.operand_stack, (rhs, lhs) => bool_to_slot(lhs <= rhs)),
-                    Instruction::CompareGt => args!((f64, f64) in frame.operand_stack, (rhs, lhs) => bool_to_slot(lhs > rhs)),
-                    Instruction::CompareGe => args!((f64, f64) in frame.operand_stack, (rhs, lhs) => bool_to_slot(lhs >= rhs)),
-                    Instruction::CompareEq => args!((f64, f64) in frame.operand_stack, (rhs, lhs) => bool_to_slot(lhs == rhs)),
+                    Instruction::Modi => args!((i64, i64) in frame.operand_stack, (rhs, lhs) => lhs % rhs),
+                    Instruction::Negf => args!((f64) in frame.operand_stack, rhs => -rhs),
+                    Instruction::Negi => args!((i64) in frame.operand_stack, rhs => -rhs),
+                    Instruction::FCompareLt => args!((f64, f64) in frame.operand_stack, (rhs, lhs) => bool_to_slot(lhs < rhs)),
+                    Instruction::ICompareLt => args!((i64, i64) in frame.operand_stack, (rhs, lhs) => bool_to_slot(lhs < rhs)),
+                    Instruction::FCompareLe => args!((f64, f64) in frame.operand_stack, (rhs, lhs) => bool_to_slot(lhs <= rhs)),
+                    Instruction::ICompareLe => args!((i64, i64) in frame.operand_stack, (rhs, lhs) => bool_to_slot(lhs <= rhs)),
+                    Instruction::FCompareGt => args!((f64, f64) in frame.operand_stack, (rhs, lhs) => bool_to_slot(lhs > rhs)),
+                    Instruction::ICompareGt => args!((i64, i64) in frame.operand_stack, (rhs, lhs) => bool_to_slot(lhs > rhs)),
+                    Instruction::FCompareGe => args!((f64, f64) in frame.operand_stack, (rhs, lhs) => bool_to_slot(lhs >= rhs)),
+                    Instruction::ICompareGe => args!((i64, i64) in frame.operand_stack, (rhs, lhs) => bool_to_slot(lhs >= rhs)),
+                    Instruction::FCompareEq => args!((f64, f64) in frame.operand_stack, (rhs, lhs) => bool_to_slot(lhs == rhs)),
+                    Instruction::ICompareEq => args!((i64, i64) in frame.operand_stack, (rhs, lhs) => bool_to_slot(lhs == rhs)),
                     Instruction::Not => args!((bool) in frame.operand_stack, bool => bool_to_slot(!bool)),
                     Instruction::AllocString(str) => {
                         // TODO: figure out when to GC
-                        let mut array = self.heap.alloc_array(str.len(), &self.string_type_info).unwrap();
+                        let mut array = self.heap.alloc_array(str.len(), &self.types[0]).unwrap();
                         for (i, byte) in str.bytes().enumerate() {
                             unsafe { array.set(i, &byte as *const u8); }
                         }

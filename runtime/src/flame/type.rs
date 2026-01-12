@@ -6,7 +6,8 @@ use crate::flame::error::{CompilerError, CompilerErrorKind};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LanternType {
-    Number,
+    Integer,
+    Float,
     Bool,
     String,
     Array(Box<LanternType>),
@@ -20,7 +21,8 @@ pub enum LanternType {
 impl Display for LanternType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Number => f.write_str("number"),
+            Self::Integer => f.write_str("int"),
+            Self::Float => f.write_str("float"),
             Self::Bool => f.write_str("bool"),
             Self::String => f.write_str("string"),
             Self::Array(inner) => write!(f, "[{inner}]"),
@@ -45,7 +47,8 @@ impl LanternType {
             },
             Type::Path(path) => {
                 match path.last().0.as_str() {
-                    "float" => Ok(Self::Number),
+                    "int" => Ok(Self::Integer),
+                    "float" => Ok(Self::Float),
                     "bool" => Ok(Self::Bool),
                     "str" => Ok(Self::String),
                     "none" => Ok(Self::Null),
@@ -60,7 +63,8 @@ impl LanternType {
 
     pub fn size(&self) -> usize {
         match self {
-            Self::Number => 8,
+            Self::Integer => 8,
+            Self::Float => 8,
             Self::Bool => 1,
             Self::String => 8,
             Self::Array(..) => 8,
@@ -71,7 +75,8 @@ impl LanternType {
 
     pub fn alignment(&self) -> usize {
         match self {
-            Self::Number => 8,
+            Self::Integer => 8,
+            Self::Float => 8,
             Self::Bool => 1,
             Self::String => 8,
             Self::Array(..) => 8,

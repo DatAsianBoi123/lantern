@@ -48,10 +48,19 @@ natives![for vm,
         let float = unsafe { *float.read::<f64>() };
         Ok(Slot::new_ref(vm.alloc_string(float.to_string().as_bytes())?.as_ptr()))
     },
+    "int_to_str" = (int) => {
+        let int = unsafe { *int.read::<i64>() };
+        Ok(Slot::new_ref(vm.alloc_string(int.to_string().as_bytes())?.as_ptr()))
+    },
     "input_float" = () => {
         let mut input = String::new();
         std::io::stdin().read_line(&mut input).unwrap();
-        Ok(Slot::new_primitive(input.trim().parse::<f64>().map_err(|_| RuntimeError(anyhow!("not a float").into()))?.to_bits()))
+        Ok(Slot::new_primitive(input.trim().parse::<f64>().map_err(|_| RuntimeError(anyhow!("not a float").into()))?))
+    },
+    "input_int" = () => {
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input).unwrap();
+        Ok(Slot::new_primitive(input.trim().parse::<i64>().map_err(|_| RuntimeError(anyhow!("not an integer").into()))?))
     },
 ];
 

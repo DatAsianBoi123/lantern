@@ -225,19 +225,34 @@ enum EscapeChar {
 
 #[derive(Parse, Debug, Clone, PartialEq)]
 #[from(NumberRaw)]
-pub struct Number(pub f64, pub Span);
+pub enum Number {
+    Integer(i64, Span),
+    Float(f64, Span),
+}
+
+impl Number {
+    pub fn span(&self) -> &Span {
+        match self {
+            Self::Integer(_, span) => span,
+            Self::Float(_, span) => span,
+        }
+    }
+}
 
 impl From<NumberRaw> for Number {
     fn from(value: NumberRaw) -> Self {
         let whole = value.whole.0.into_iter()
             .fold(0, |acc, digit| acc * 10 + digit.0);
-        let decimal = value.decimal
-            .map(|decimal| decimal.1.0.into_iter()
-                .fold((0, 0), |(acc, i), digit| (acc * 10 + digit.0, i + 1)))
-            .map(|(decimal, places)| decimal as f64 / 10f64.powi(places))
-            .unwrap_or(0.0);
-
-        Self(whole as f64 + decimal, value.whole.1)
+        match value.decimal {
+            Some(decimal) => {
+                let (decimal, places) = decimal.1.0.into_iter()
+                    .fold((0, 0), |(acc, i), digit| (acc * 10 + digit.0, i + 1));
+                Self::Float(whole as f64 + (decimal as f64 / 10f64.powi(places)), value.whole.1)
+            },
+            None => {
+                Self::Integer(whole as i64, value.whole.1)
+            },
+        }
     }
 }
 
@@ -364,24 +379,24 @@ mod tests {
 
     #[test]
     fn test_number() {
-        assert_ok_empty("123", Number(123.0, Span::new(1, 1)));
-        assert_ok_empty("0", Number(0.0, Span::new(1, 1)));
-        assert_ok_empty("2", Number(2.0, Span::new(1, 1)));
-        assert_ok_empty("32000", Number(32000.0, Span::new(1, 1)));
-        assert_ok_empty("00076", Number(76.0, Span::new(1, 1)));
+        assert_ok_empty("123", Number::Integer(123, Span::new(1, 1)));
+        assert_ok_empty("0", Number::Integer(0, Span::new(1, 1)));
+        assert_ok_empty("2", Number::Integer(2, Span::new(1, 1)));
+        assert_ok_empty("32000", Number::Integer(32000, Span::new(1, 1)));
+        assert_ok_empty("00076", Number::Integer(76, Span::new(1, 1)));
 
-        assert_ok_empty("3.22", Number(3.22, Span::new(1, 1)));
-        assert_ok_empty("0.51", Number(0.51, Span::new(1, 1)));
-        assert_ok_empty("2.0001", Number(2.0001, Span::new(1, 1)));
-        assert_ok_empty("999.99", Number(999.99, Span::new(1, 1)));
-        assert_ok_empty("5.800", Number(5.8, Span::new(1, 1)));
+        assert_ok_empty("3.22", Number::Float(3.22, Span::new(1, 1)));
+        assert_ok_empty("0.51", Number::Float(0.51, Span::new(1, 1)));
+        assert_ok_empty("2.0001", Number::Float(2.0001, Span::new(1, 1)));
+        assert_ok_empty("999.99", Number::Float(999.99, Span::new(1, 1)));
+        assert_ok_empty("5.800", Number::Float(5.8, Span::new(1, 1)));
 
-        assert_ok_partial("3.", Number(3.0, Span::new(1, 1)));
-        assert_ok_partial("9..", Number(9.0, Span::new(1, 1)));
-        assert_ok_partial("9.200.", Number(9.2, Span::new(1, 1)));
-        assert_ok_partial("58.abc", Number(58.0, Span::new(1, 1)));
-        assert_ok_partial("5,300.22", Number(5.0, Span::new(1, 1)));
-        assert_ok_partial("20 .11", Number(20.0, Span::new(1, 1)));
+        assert_ok_partial("3.", Number::Integer(3, Span::new(1, 1)));
+        assert_ok_partial("9..", Number::Integer(9, Span::new(1, 1)));
+        assert_ok_partial("9.200.", Number::Float(9.2, Span::new(1, 1)));
+        assert_ok_partial("58.abc", Number::Integer(58, Span::new(1, 1)));
+        assert_ok_partial("5,300.22", Number::Integer(5, Span::new(1, 1)));
+        assert_ok_partial("20 .11", Number::Integer(20, Span::new(1, 1)));
 
         assert_err::<Number>("a100");
         assert_err::<Number>("");
