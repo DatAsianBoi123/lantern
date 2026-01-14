@@ -212,6 +212,13 @@ impl HeapArray {
         unsafe { &*(self.header().type_info) }
     }
 
+    pub fn is_ref(&self) -> bool {
+        match self.type_info() {
+            TypeInfo::Array { is_ref, .. } => *is_ref,
+            _ => unreachable!(),
+        }
+    }
+
     pub fn element_size(&self) -> usize {
         match self.type_info() {
             TypeInfo::Array { element_size, .. } => *element_size,

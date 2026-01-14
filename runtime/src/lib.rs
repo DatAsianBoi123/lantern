@@ -2,6 +2,7 @@
 
 use std::{fmt::{Display, Formatter}};
 
+use anyhow::anyhow;
 use error::RuntimeError;
 use flame::{GeneratedFunction, instruction::Instruction};
 use parse::LanternFile;
@@ -90,8 +91,8 @@ impl VM {
     pub fn new(file: LanternFile) -> Result<Self, CompilerError> {
         let mut globals = Globals {
             funs: Vec::new(),
-            // TODO: better way of string type info
-            types: vec![TypeInfo::Array { element_size: 1, is_ref: false }],
+            // TODO: better way of array type info
+            types: vec![TypeInfo::Array { element_size: 1, is_ref: false }, TypeInfo::Array { element_size: 8, is_ref: false }],
         };
         let root = flame::ignite(file, &mut globals)?;
         globals.funs.push(root);
@@ -174,6 +175,17 @@ impl VM {
                         frame.operand_stack.push_ref(array.as_ptr())?;
                         println!("Allocated {} bytes @ {array:?}: {:?}, {:?}", array.size(), array.header(), array.type_info());
                     },
+                    Instruction::AllocArray(len) => {
+                        let type_index = unsafe { *frame.operand_stack.pop()?.read::<usize>() };
+                        // TODO: figure out when to GC
+                        let mut array = self.heap.alloc_array(len, &self.types[type_index]).unwrap();
+                        for i in 1..=len {
+                            let element = &frame.operand_stack.pop()?.0 as *const _ as *const u8;
+                            unsafe { array.set(len - i, element); }
+                        }
+                        frame.operand_stack.push_ref(array.as_ptr())?;
+                        println!("Allocated {} bytes @ {array:?}: {:?}, {:?}", array.size(), array.header(), array.type_info());
+                    },
                     Instruction::LoadLocal(index) => frame.operand_stack.push_slot(frame.locals[index])?,
                     Instruction::StoreLocal(index) => frame.locals[index] = frame.operand_stack.pop()?,
                     Instruction::Return => {
@@ -198,6 +210,28 @@ impl VM {
                         let frame = Frame::with_locals(index, locals);
                         self.frames.push(frame);
                         return Ok(());
+                    },
+                    Instruction::Index => {
+                        let index = unsafe { *frame.operand_stack.pop()?.read::<i64>() };
+                        let ptr = unsafe { *frame.operand_stack.pop()?.read::<*mut u8>() };
+
+                        let array = unsafe { HeapArray::from_raw(ptr) };
+                        let ptr = if index >= 0 {
+                            array.get(index as usize).ok_or(RuntimeError(anyhow!("index out of bounds").into()))?
+                        } else {
+                            let index = array.len().checked_sub(index.unsigned_abs()as usize).ok_or(RuntimeError(anyhow!("index out of bounds").into()))?;
+                            array.get(index).expect("index in range")
+                        };
+                        let slice = unsafe { std::slice::from_raw_parts(ptr, array.element_size()) };
+                        let mut element_bytes = [0; 8];
+                        let (data, _) = element_bytes.split_at_mut(slice.len());
+                        data.copy_from_slice(slice);
+                        let element = u64::from_ne_bytes(element_bytes);
+                        if array.is_ref() {
+                            frame.operand_stack.push_ref(element as *const u8)?;
+                        } else {
+                            frame.operand_stack.push_primitive(element)?;
+                        }
                     },
                     Instruction::Goto(ptr) => {
                         frame.inst_ptr = ptr;

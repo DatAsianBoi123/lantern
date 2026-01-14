@@ -1,0 +1,23 @@
+native fun print(str: std.str);
+native fun int_to_str(int: std.int) -> std.str;
+
+fun print_each(arr: [std.int], len: std.int) {
+  val i: std.int = 0;
+
+  while (i < len) {
+    print(int_to_str(arr[i]));
+    i = i + 1;
+  }
+}
+
+val ints: [std.int] = [1, 2, 3, 4, 5];
+val str: std.str = "Hello, World!";
+
+print_each(ints, 5);
+
+val i: std.int = 0;
+while (i < 13) {
+  print(int_to_str(str[i]));
+  i = i + 1;
+}
+

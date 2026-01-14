@@ -1,9 +1,9 @@
 use std::{fmt::{Display, Formatter}, mem::MaybeUninit, rc::Rc};
 
 use instruction::InstructionSet;
-use parse::{Boolean, FunArg, Ident, IfBranch, IfStmt, Item, ItemFun, ItemNative, LanternFile, Literal, QuotedString, Reassign, Stmt, ValDeclaration, WhileStmt, error::Span, expr::{BinaryOperator, Expr, ExprBinary, ExprBlock, ExprFunCall, ExprParen, ExprUnary, UnaryOperator}, keyword::{Break, Return}};
+use parse::{Boolean, FunArg, Ident, IfBranch, IfStmt, Item, ItemFun, ItemNative, LanternFile, Literal, Number, QuotedString, Reassign, Stmt, ValDeclaration, WhileStmt, error::Span, expr::{BinaryOperator, Expr, ExprArray, ExprBinary, ExprBlock, ExprFunCall, ExprIndex, ExprParen, ExprUnary, UnaryOperator}, keyword::{Break, Return}};
 
-use crate::{Slot, VM, error::RuntimeError, flame::{error::{CompilerError, CompilerErrorKind}, instruction::Instruction, scope::{Scope, ScopeKind, StackFrame}, r#type::LanternType}, inst};
+use crate::{Slot, VM, error::RuntimeError, flame::{error::{CompilerError, CompilerErrorKind}, instruction::Instruction, scope::{Globals, Scope, ScopeKind, StackFrame}, r#type::LanternType}, inst};
 
 pub type GenerateFunPtr = Rc<MaybeUninit<GeneratedFunction>>;
 pub type NativeFn = fn(&mut VM, [Slot; 256]) -> Result<Slot, RuntimeError>;
@@ -425,6 +425,45 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
             compile_stmts(stmts, block_scope, frame, globals)?;
             inst!(frame.instructions; PUSHU 0);
             Ok(LanternType::Null)
+        },
+        Expr::Array(ExprArray { elements, .. }) => {
+            let len = elements.0.len();
+            let inner = elements.0.into_iter().try_fold(None, |acc, curr| {
+                let span = curr.span().clone();
+                match (acc, compile_expr(curr, scope, frame, globals)) {
+                    (None, Ok(r#type)) => Ok(Some(r#type)),
+                    (Some(r#type), Ok(expr_type)) if r#type == expr_type => Ok(Some(r#type)),
+                    (Some(r#type), Ok(expr_type)) => Err(CompilerError::new(CompilerErrorKind::TypeError { expected: r#type, got: expr_type }, span)),
+                    (_, Err(err)) => Err(err),
+                }
+            })?;
+
+            inst! { frame.instructions;
+                [PUSHU 1]
+                [ALLOC_ARR len]
+            }
+            match inner {
+                Some(inner) => Ok(LanternType::Array(Box::new(inner))),
+                // TODO: type hint
+                None => Ok(LanternType::Array(Box::new(LanternType::Null))),
+            }
+        },
+        Expr::Index(ExprIndex { expr, index, .. }) => {
+            let expr_span = expr.span().clone();
+            let r#type = compile_expr(*expr, scope, frame, globals)?;
+            let inner = match r#type {
+                LanternType::Array(inner) => *inner,
+                LanternType::String => LanternType::Integer,
+                _ => return Err(CompilerError::new(CompilerErrorKind::TypeError { expected: LanternType::Array(Box::new(LanternType::Null)), got: r#type }, expr_span)),
+            };
+            let index_span = index.span().clone();
+            let index_type = compile_expr(*index, scope, frame, globals)?;
+            if index_type != LanternType::Integer {
+                return Err(CompilerError::new(CompilerErrorKind::TypeError { expected: LanternType::Integer, got: index_type }, index_span));
+            }
+
+            inst!(frame.instructions; INDEX);
+            Ok(inner)
         },
         Expr::Identifier(ident) => {
             let span = ident.1.clone();

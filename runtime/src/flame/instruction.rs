@@ -86,6 +86,9 @@ macro_rules! inst {
     ($inst: expr; ALLOC_STR $str: expr) => {
         $inst.push($crate::flame::instruction::Instruction::AllocString($str))
     };
+    ($inst: expr; ALLOC_ARR $i: expr) => {
+        $inst.push($crate::flame::instruction::Instruction::AllocArray($i))
+    };
     ($inst: expr; STORE_LOCAL $i: expr) => {
         $inst.push($crate::flame::instruction::Instruction::StoreLocal($i))
     };
@@ -97,6 +100,9 @@ macro_rules! inst {
     };
     ($inst: expr; INV $i: expr) => {
         $inst.push($crate::flame::instruction::Instruction::Invoke($i))
+    };
+    ($inst: expr; INDEX) => {
+        $inst.push($crate::flame::instruction::Instruction::Index)
     };
     ($inst: expr; GOTO $j: expr) => {
         $inst.push($crate::flame::instruction::Instruction::Goto($j))
@@ -204,6 +210,7 @@ pub enum Instruction {
     Not,
 
     AllocString(String),
+    AllocArray(usize),
 
     StoreLocal(usize),
     LoadLocal(usize),
@@ -211,6 +218,7 @@ pub enum Instruction {
     Return,
 
     Invoke(usize),
+    Index,
 
     Goto(usize),
     GotoIfTrue(usize),
@@ -250,10 +258,12 @@ impl Display for Instruction {
             Self::ICompareEq => write!(f, "ICOMP_EQ"),
             Self::Not => write!(f, "NOT"),
             Self::AllocString(str) => write!(f, "{:20}{str:?}", "ALLOC_STR"),
+            Self::AllocArray(len) => write!(f, "{:20}{len:?}", "ALLOC_ARRAY"),
             Self::StoreLocal(index) => write!(f, "{:20}{index}", "STORE_LOCAL"),
             Self::LoadLocal(index) => write!(f, "{:20}{index}", "LOAD_LOCAL"),
             Self::Return => write!(f, "RET"),
             Self::Invoke(num_args) => write!(f, "{:20}{num_args}", "INV"),
+            Self::Index => write!(f, "INDEX"),
             Self::Goto(index) => write!(f, "{:20}{index}", "GOTO"),
             Self::GotoIfTrue(index) => write!(f, "{:20}{index}", "GOTO_IF_TRUE"),
             Self::GotoIfFalse(index) => write!(f, "{:20}{index}", "GOTO_IF_FALSE"),

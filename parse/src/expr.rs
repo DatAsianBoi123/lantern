@@ -2,7 +2,7 @@ use std::fmt::{Display, Formatter};
 
 use macros::Parse;
 
-use crate::{Ident, Literal, Number, ParseTokens, QuotedString, Stmt, error::Span, punct::{And, Asterisk, Bang, ClosedBrace, ClosedParen, Comma, EqualsEquals, Greater, GreaterEq, Hyphen, Less, LessEq, OpenBrace, OpenParen, Or, Percent, Period, Plus, Slash}, stream::{Punctuated, StreamBranch}};
+use crate::{Ident, Literal, ParseTokens, QuotedString, Stmt, error::Span, punct::{And, Asterisk, Bang, ClosedBrace, ClosedBracket, ClosedParen, Comma, EqualsEquals, Greater, GreaterEq, Hyphen, Less, LessEq, OpenBrace, OpenBracket, OpenParen, Or, Percent, Period, Plus, Slash}, stream::{Punctuated, StreamBranch}};
 
 #[derive(Parse, Debug, Clone, PartialEq)]
 enum PrimaryExpr {
@@ -10,6 +10,7 @@ enum PrimaryExpr {
     Identifier(Ident),
     Paren(ExprParen),
     Block(ExprBlock),
+    Array(ExprArray),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -20,6 +21,8 @@ pub enum Expr {
     FunCall(ExprFunCall),
     Paren(ExprParen),
     Block(ExprBlock),
+    Array(ExprArray),
+    Index(ExprIndex),
     Binary(ExprBinary),
     Unary(ExprUnary),
 }
@@ -31,6 +34,7 @@ impl From<PrimaryExpr> for Expr {
             PrimaryExpr::Identifier(ident) => Self::Identifier(ident),
             PrimaryExpr::Paren(expr) => Self::Paren(expr),
             PrimaryExpr::Block(block) => Self::Block(block),
+            PrimaryExpr::Array(array) => Self::Array(array),
         }
     }
 }
@@ -47,6 +51,8 @@ impl Expr {
             Expr::FunCall(ExprFunCall { expr, .. }) => expr.span(),
             Expr::Paren(ExprParen { open_paren, .. }) => &open_paren.0,
             Expr::Block(ExprBlock { open_brace, .. }) => &open_brace.0,
+            Expr::Array(ExprArray { open_bracket, .. }) => &open_bracket.0,
+            Expr::Index(ExprIndex { expr, .. }) => expr.span(),
             Expr::Binary(ExprBinary { lhs, .. }) => lhs.span(),
             Expr::Unary(ExprUnary { op, .. }) => op.span(),
         }
@@ -80,6 +86,14 @@ impl Expr {
                 // highest BP
 
                 lhs = Self::FunCall(ExprFunCall { expr: Box::new(lhs), open_paren, args: ParseTokens::parse(stream)?, closed_paren: ClosedParen::parse(stream)? });
+
+                continue;
+            }
+
+            if let Ok(open_bracket) = OpenBracket::parse(stream) {
+                // highest BP
+
+                lhs = Self::Index(ExprIndex { expr: Box::new(lhs), open_bracket, index: ParseTokens::parse(stream)?, closed_bracket: ClosedBracket::parse(stream)? });
 
                 continue;
             }
@@ -143,6 +157,21 @@ pub struct ExprBlock {
     pub open_brace: OpenBrace,
     pub stmts: Vec<Stmt>,
     pub closed_brace: ClosedBrace,
+}
+
+#[derive(Parse, Debug, Clone, PartialEq)]
+pub struct ExprArray {
+    pub open_bracket: OpenBracket,
+    pub elements: Punctuated<0, Expr, Comma>,
+    pub closed_bracket: ClosedBracket,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExprIndex {
+    pub expr: Box<Expr>,
+    pub open_bracket: OpenBracket,
+    pub index: Box<Expr>,
+    pub closed_bracket: ClosedBracket,
 }
 
 #[derive(Debug, Clone, PartialEq)]
