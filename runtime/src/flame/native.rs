@@ -52,6 +52,25 @@ natives![for vm,
         let int = unsafe { *int.read::<i64>() };
         Ok(Slot::new_ref(vm.alloc_string(int.to_string().as_bytes())?.as_ptr()))
     },
+    "set_int_array" = (array, i, value) => {
+        let mut array = unsafe { HeapArray::from_raw(*array.read::<*mut u8>()) };
+        let i = unsafe { *i.read::<i64>() };
+        let value = value.read::<u8>();
+
+        if i.is_negative() {
+            return Err(RuntimeError(anyhow!("i cannot be negative").into()));
+        }
+        if i as usize >= array.len() {
+            return Err(RuntimeError(anyhow!("index out of bounds").into()));
+        }
+
+        unsafe { array.set(i as usize, value); };
+        Ok(Slot::new_primitive(0))
+    },
+    "len" = (array) => {
+        let array = unsafe { HeapArray::from_raw(*array.read::<*mut u8>()) };
+        Ok(Slot::new_primitive(array.len() as i64))
+    },
     "input_float" = () => {
         let mut input = String::new();
         std::io::stdin().read_line(&mut input).unwrap();
