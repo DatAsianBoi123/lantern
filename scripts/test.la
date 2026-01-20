@@ -1,2 +1,0 @@
-thing.one(arg).two("hi") + two();
-

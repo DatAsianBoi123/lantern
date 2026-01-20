@@ -1,23 +1,62 @@
 native fun print(str: std.str);
 native fun int_to_str(int: std.int) -> std.str;
+native fun len(array: [std.int]) -> std.int;
+native fun set_int_array(array: [std.int], i: std.int, value: std.int);
 
-fun print_each(arr: [std.int], len: std.int) {
+fun print_array(array: [std.int]) {
   val i: std.int = 0;
-
-  while (i < len) {
-    print(int_to_str(arr[i]));
+  while (i < len(array)) {
+    print(int_to_str(array[i]));
     i = i + 1;
   }
 }
 
-val ints: [std.int] = [1, 2, 3, 4, 5];
-val str: std.str = "Hello, World!";
-
-print_each(ints, 5);
-
-val i: std.int = 0;
-while (i < 13) {
-  print(int_to_str(str[i]));
-  i = i + 1;
+fun fold(array: [std.int], init: std.int, acc: fun(std.int, std.int) -> std.int) -> std.int {
+  val i: std.int = 0;
+  while (i < len(array)) {
+    init = acc(init, array[i]);
+    i = i + 1;
+  }
+  return init;
 }
+
+fun map(array: [std.int], mapper: fun(std.int) -> std.int) {
+  val i: std.int = 0;
+  while (i < len(array)) {
+    set_int_array(array, i, mapper(array[i]));
+    i = i + 1;
+  }
+}
+
+fun sum(l: std.int, r: std.int) -> std.int {
+  return l + r;
+}
+
+fun largest(l: std.int, r: std.int) -> std.int {
+  if (l > r) {
+    return l;
+  } else {
+    return r;
+  }
+}
+
+fun double(value: std.int) -> std.int {
+  return value * 2;
+}
+
+val array: [std.int] = [3, 8, 11, -28];
+print_array(array);
+print("");
+
+print("Sum is: ");
+print(int_to_str(fold(array, 0, sum)));
+print("");
+
+print("Largest is: ");
+print(int_to_str(fold(array, 0, largest)));
+print("");
+
+map(array, double);
+print("Doubled is: ");
+print_array(array);
 

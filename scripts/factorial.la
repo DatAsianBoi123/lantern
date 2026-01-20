@@ -1,0 +1,17 @@
+native fun print(x: std.str);
+native fun int_to_str(x: std.int) -> std.str;
+native fun input_int() -> std.int;
+
+fun factorial(num: std.int) -> std.int {
+  if (num == 0 || num == 1) {
+    return 1;
+  }
+
+  return num * factorial(num - 1);
+}
+
+print("Enter number:");
+val num: std.int = input_int();
+print("Factorial is:");
+print(int_to_str(factorial(num)));
+

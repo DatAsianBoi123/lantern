@@ -1,5 +1,0 @@
-struct Position {
-  x: std.float,
-  y: std.float,
-}
-
