@@ -173,7 +173,6 @@ impl VM {
                             unsafe { array.set(i, &byte as *const u8); }
                         }
                         frame.operand_stack.push_ref(array.as_ptr())?;
-                        println!("Allocated {} bytes @ {array:?}: {:?}, {:?}", array.size(), array.header(), array.type_info());
                     },
                     Instruction::AllocArray(len) => {
                         let type_index = unsafe { *frame.operand_stack.pop()?.read::<usize>() };
@@ -184,16 +183,11 @@ impl VM {
                             unsafe { array.set(len - i, element); }
                         }
                         frame.operand_stack.push_ref(array.as_ptr())?;
-                        println!("Allocated {} bytes @ {array:?}: {:?}, {:?}", array.size(), array.header(), array.type_info());
                     },
                     Instruction::LoadLocal(index) => frame.operand_stack.push_slot(frame.locals[index])?,
                     Instruction::StoreLocal(index) => frame.locals[index] = frame.operand_stack.pop()?,
                     Instruction::Return => {
                         let ret = frame.operand_stack.pop()?;
-                        if !frame.operand_stack.is_empty() {
-                            println!("WARNING: Returning from a frame with data left on its operand stack!");
-                            println!("{:?}", frame.operand_stack);
-                        }
                         self.frames.pop();
                         if let Some(frame) = self.frames.last_mut() {
                             frame.operand_stack.push_slot(ret)?;
