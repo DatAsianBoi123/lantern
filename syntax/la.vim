@@ -4,7 +4,7 @@ sy keyword Keyword val fun using native return break if else while struct
 sy keyword Boolean true false
 
 sy match Identifier /\w\+/
-sy match Function /\w\+\ze\s*(.*)/
+sy match Function /\w\+\ze\s*(\_.*)/
 sy match Operator /[=+\-*/%<>]\|==\|||\|&&/
 sy match Delimiter /[;:.,(){}\[\]]\|->/
 sy match Type /\(\(:\s*\)\@<=\w\+\)/
