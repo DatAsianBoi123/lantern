@@ -1,5 +1,7 @@
 use std::{collections::{HashMap, hash_map}};
 
+use parse::error::Span;
+
 use crate::{flame::{GeneratedFunction, LanternFunction, LanternVariable, instruction::InstructionSet, r#type::LanternType}, heap::TypeInfo};
 
 #[derive(Debug, Clone)]
@@ -24,8 +26,12 @@ impl<'a> Scope<'a> {
         }
     }
 
-    pub fn kind(&self) -> &ScopeKind<'_> {
+    pub fn kind(&self) -> &ScopeKind<'a> {
         &self.kind
+    }
+
+    pub fn into_kind(self) -> ScopeKind<'a> {
+        self.kind
     }
 
     pub fn functions(&self) -> hash_map::Values<'_, String, LanternFunction> {
@@ -35,7 +41,7 @@ impl<'a> Scope<'a> {
     pub fn function(&self, name: &str) -> Option<&LanternFunction> {
         match self.kind {
             ScopeKind::Module => self.functions.get(name),
-            ScopeKind::Block(parent) | ScopeKind::Function(parent) => {
+            ScopeKind::Block(parent) | ScopeKind::Function(parent, _) => {
                 self.functions.get(name)
                     .or_else(|| parent.function(name))
             }
@@ -50,7 +56,7 @@ impl<'a> Scope<'a> {
 
     pub fn variable(&self, name: &str) -> Option<LanternVariable> {
         match self.kind {
-            ScopeKind::Module | ScopeKind::Function(_) => self.variables.get(name).cloned(),
+            ScopeKind::Module | ScopeKind::Function(..) => self.variables.get(name).cloned(),
             ScopeKind::Block(parent) => {
                 self.variables.get(name).cloned()
                     .or_else(|| parent.variable(name))
@@ -74,11 +80,11 @@ impl<'a: 'b, 'b> Scope<'a> {
         }
     }
 
-    pub fn child_function(&'a self) -> Scope<'b> {
+    pub fn child_function(&'a self, span: Span) -> Scope<'b> {
         Self {
             functions: HashMap::new(),
             variables: HashMap::new(),
-            kind: ScopeKind::Function(self),
+            kind: ScopeKind::Function(self, span),
         }
     }
 }
@@ -86,7 +92,7 @@ impl<'a: 'b, 'b> Scope<'a> {
 #[derive(Debug, Clone)]
 pub enum ScopeKind<'a> {
     Module,
-    Function(&'a Scope<'a>),
+    Function(&'a Scope<'a>, Span),
     Block(&'a Scope<'a>),
 }
 
