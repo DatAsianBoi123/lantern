@@ -54,9 +54,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.95"
+version = "1.0.101"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34ac096ce696dc2fcabef30516bb13c0a68a11d30131d3df6f04711467681b04"
+checksum = "5f0e0fee31ef5ed1ba1316088939cea399010ed7731dba877ed44aeb407a75ea"
 
 [[package]]
 name = "clap"
@@ -103,6 +103,7 @@ name = "cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "diagnostic",
  "parse",
  "runtime",
 ]
@@ -112,6 +113,13 @@ name = "colorchoice"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b63caa9aa9397e2d9480a9b13673856c78d8ac123288526c37d7839f2a86990"
+
+[[package]]
+name = "diagnostic"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
 
 [[package]]
 name = "heck"
@@ -124,6 +132,14 @@ name = "is_terminal_polyfill"
 version = "1.70.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7943c866cc5cd64cbc25b2e01621d07fa8eb2a1a23160ee81ce38704e97b8ecf"
+
+[[package]]
+name = "lex"
+version = "0.1.0"
+dependencies = [
+ "diagnostic",
+ "thiserror",
+]
 
 [[package]]
 name = "macros"
@@ -144,9 +160,9 @@ checksum = "945462a4b81e43c4e3ba96bd7b49d834c6f61198356aa858733bc4acf3cbe62e"
 name = "parse"
 version = "0.1.0"
 dependencies = [
- "anyhow",
+ "diagnostic",
+ "lex",
  "macros",
- "thiserror",
 ]
 
 [[package]]
@@ -172,6 +188,7 @@ name = "runtime"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "diagnostic",
  "parse",
  "thiserror",
 ]

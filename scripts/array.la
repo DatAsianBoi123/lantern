@@ -1,7 +1,6 @@
 native fun print(str: std.str);
 native fun int_to_str(int: std.int) -> std.str;
 native fun len(array: [std.int]) -> std.int;
-native fun set_int_array(array: [std.int], i: std.int, value: std.int);
 
 fun print_array(array: [std.int]) {
   val i: std.int = 0;
@@ -23,7 +22,7 @@ fun fold(array: [std.int], init: std.int, acc: fun(std.int, std.int) -> std.int)
 fun map(array: [std.int], mapper: fun(std.int) -> std.int) {
   val i: std.int = 0;
   while (i < len(array)) {
-    set_int_array(array, i, mapper(array[i]));
+    array[i] = mapper(array[i]);
     i = i + 1;
   }
 }

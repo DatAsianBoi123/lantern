@@ -1,37 +1,39 @@
 use std::fmt::{Display, Formatter};
 
-use error::Diagnostics;
+use diagnostic::{Diagnostic, error};
+use lex::{ArrowRight, Break, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Else, Equals, Fun, Ident, If, Native, OpenBrace, OpenBracket, OpenParen, Period, Return, Semi, Struct, Token, TokenKind, Using, Val, While};
 use macros::Parse;
 
-use crate::{error::Span, expr::{Expr, ExprBlock}, keyword::{Break, Else, False, Fun, If, Native, Return, Struct, True, Using, Val, While}, punct::{ArrowRight, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, DoubleSlash, Equals, OpenBrace, OpenBracket, OpenParen, Period, Semi}, stream::{AlphabeticWord, AlphanumericWord, Char, Digit, Not, Not2, Punctuated, Repetition, StreamBranch, TokenStream, TrailingDenied, Whitespace}};
+use crate::{expr::{Expr, ExprBlock}, stream::{Punctuated, TokenStream, TrailingDenied}};
+
+pub use lex;
+
+pub type Result<T> = std::result::Result<T, Diagnostic>;
 
 pub mod stream;
-pub mod punct;
-pub mod keyword;
 pub mod expr;
-pub mod error;
 
-pub type Result<T> = std::result::Result<T, Diagnostics>;
+pub trait ParseTokens: Sized {
+    fn parse(stream: &mut TokenStream) -> Result<Self>;
 
-pub trait ParseTokens {
-    fn parse(stream: &mut StreamBranch) -> Result<Self>
-    where Self: Sized;
+    fn can_parse(peek: &Token) -> bool;
+}
+
+// TODO: find impl for Box<T>, Option<T>, and (A, B, ...)
+impl<T: TokenKind> ParseTokens for T {
+    fn parse(stream: &mut TokenStream) -> Result<Self> {
+        let next = stream.next_token()?;
+        let span = next.span();
+        T::from_token(next).ok_or(error!(span => "expected {}", T::name()))
+    }
+
+    fn can_parse(peek: &Token) -> bool {
+        T::is_token(peek)
+    }
 }
 
 pub fn parse(content: &str) -> Result<LanternFile> {
-    parse_stream(TokenStream::from_input(content))
-}
-
-pub fn parse_stream(mut input: TokenStream) -> Result<LanternFile> {
-    let mut branch = input.branch();
-
-    let file = LanternFile::parse(&mut branch)?;
-    branch.commit();
-
-    match input.peek() {
-        Some(char) => Err(diagnostic!(input.span(), "unexpected token `{char}`").into()),
-        None => Ok(file),
-    }
+    LanternFile::parse(&mut TokenStream::from_input(content))
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -40,14 +42,19 @@ pub struct LanternFile {
 }
 
 impl ParseTokens for LanternFile {
-    fn parse(stream: &mut StreamBranch) -> Result<Self> {
+    fn parse(stream: &mut TokenStream) -> Result<Self> {
         let mut stmts = Vec::new();
-        while !stream.is_empty() {
-            let _ = <Repetition<0, Whitespace>>::parse(stream);
+        while !stream.is_eof()? {
+            if matches!(stream.peek()?, Token::Comment(_)) {
+                continue;
+            }
             stmts.push(Stmt::parse(stream)?);
-            let _ = <Repetition<0, Whitespace>>::parse(stream);
         }
         Ok(Self { stmts })
+    }
+
+    fn can_parse(token: &Token) -> bool {
+        !matches!(token, Token::Eof(_))
     }
 }
 
@@ -66,6 +73,13 @@ pub struct ItemFun {
     pub open_paren: OpenParen,
     pub args: Punctuated<0, FunArg, Comma>,
     pub closed_paren: ClosedParen,
+    #[parse({
+        if ArrowRight::can_parse(stream.peek()?) {
+            Some((ArrowRight::parse(stream)?, Type::parse(stream)?))
+        } else {
+            None
+        }
+    })]
     pub ret: Option<(ArrowRight, Type)>,
     pub block: ExprBlock,
 }
@@ -78,6 +92,13 @@ pub struct ItemNative {
     pub open_paren: OpenParen,
     pub args: Punctuated<0, FunArg, Comma>,
     pub closed_paren: ClosedParen,
+    #[parse({
+        if ArrowRight::can_parse(stream.peek()?) {
+            Some((ArrowRight::parse(stream)?, Type::parse(stream)?))
+        } else {
+            None
+        }
+    })]
     pub ret: Option<(ArrowRight, Type)>,
     pub semi: Semi,
 }
@@ -121,8 +142,6 @@ pub enum Stmt {
     IfStmt(IfStmt),
     WhileStmt(WhileStmt),
     ValDeclaration(ValDeclaration),
-    Comment(DoubleSlash, Vec<Not<'\n'>>),
-    Reassign(Reassign),
     Return(Return, Expr, Semi),
     Break(Break, Semi),
     Expr(Expr, Semi),
@@ -134,6 +153,13 @@ pub struct ValDeclaration {
     pub ident: Ident,
     pub colon: Colon,
     pub r#type: Type,
+    #[parse({
+        if Equals::can_parse(stream.peek()?) {
+            Some((Equals::parse(stream)?, Expr::parse(stream)?))
+        } else {
+            None
+        }
+    })]
     pub init: Option<(Equals, Expr)>,
     pub semi: Semi,
 }
@@ -145,6 +171,13 @@ pub struct IfStmt {
     pub condition: Expr,
     pub closed_paren: ClosedParen,
     pub block: ExprBlock,
+    #[parse({
+        if Else::can_parse(stream.peek()?) {
+            Some((Else::parse(stream)?, Box::new(IfBranch::parse(stream)?)))
+        } else {
+            None
+        }
+    })]
     pub branch: Option<(Else, Box<IfBranch>)>,
 }
 
@@ -163,122 +196,9 @@ pub enum IfBranch {
     Else(ExprBlock),
 }
 
-#[derive(Parse, Debug, Clone, PartialEq)]
-pub struct Reassign {
-    pub ident: Ident,
-    pub eq: Equals,
-    pub expr: Expr,
-    pub semi: Semi,
-}
-
-#[derive(Parse, Debug, Clone, PartialEq)]
-pub enum Literal {
-    String(QuotedString),
-    Number(Number),
-    Boolean(Boolean),
-}
-
-#[derive(Parse, Debug, Clone, PartialEq, Eq)]
-#[from(QuotedStringRaw)]
-pub struct QuotedString(pub String, pub Span);
-
-impl From<QuotedStringRaw> for QuotedString {
-    fn from(value: QuotedStringRaw) -> Self {
-        let string = value.chars.0.into_iter()
-            .fold(String::new(), |mut acc, curr| {
-                match curr {
-                    QuotedStringCharRaw::EscapeChar(_, EscapeChar::Newline(_)) => acc.push('\n'),
-                    QuotedStringCharRaw::EscapeChar(_, EscapeChar::CarriageReturn(_)) => acc.push('\r'),
-                    QuotedStringCharRaw::EscapeChar(_, EscapeChar::Tab(_)) => acc.push('\t'),
-                    QuotedStringCharRaw::EscapeChar(_, EscapeChar::Backslash(_)) => acc.push('\\'),
-                    QuotedStringCharRaw::EscapeChar(_, EscapeChar::Quote(_)) => acc.push('\"'),
-                    QuotedStringCharRaw::Char(Not2(char, _)) => acc.push(char),
-                };
-                acc
-            });
-
-        Self(string, value.open_quote.1)
-    }
-}
-
-#[derive(Parse, Debug, Clone, PartialEq, Eq)]
-struct QuotedStringRaw {
-    open_quote: Char<'"'>,
-    chars: Repetition<0, QuotedStringCharRaw>,
-    end_quote: Char<'"'>,
-}
-
-#[derive(Parse, Debug, Clone, PartialEq, Eq)]
-enum QuotedStringCharRaw {
-    EscapeChar(Char<'\\'>, EscapeChar),
-    Char(Not2<'\\', '"'>),
-}
-
-#[derive(Parse, Debug, Clone, PartialEq, Eq)]
-enum EscapeChar {
-    Newline(Char<'n'>),
-    CarriageReturn(Char<'r'>),
-    Tab(Char<'t'>),
-    Backslash(Char<'\\'>),
-    Quote(Char<'"'>),
-}
-
-#[derive(Parse, Debug, Clone, PartialEq)]
-#[from(NumberRaw)]
-pub enum Number {
-    Integer(i64, Span),
-    Float(f64, Span),
-}
-
-impl Number {
-    pub fn span(&self) -> &Span {
-        match self {
-            Self::Integer(_, span) => span,
-            Self::Float(_, span) => span,
-        }
-    }
-}
-
-impl From<NumberRaw> for Number {
-    fn from(value: NumberRaw) -> Self {
-        let whole = value.whole.0.into_iter()
-            .fold(0, |acc, digit| acc * 10 + digit.0);
-        match value.decimal {
-            Some(decimal) => {
-                let (decimal, places) = decimal.1.0.into_iter()
-                    .fold((0, 0), |(acc, i), digit| (acc * 10 + digit.0, i + 1));
-                Self::Float(whole as f64 + (decimal as f64 / 10f64.powi(places)), value.whole.1)
-            },
-            None => {
-                Self::Integer(whole as i64, value.whole.1)
-            },
-        }
-    }
-}
-
-#[derive(Parse, Debug, Clone, PartialEq, Eq)]
-struct NumberRaw {
-    whole: Repetition<1, Digit>,
-    decimal: Option<(Char<'.'>, Repetition<1, Digit>)>,
-}
-
-#[derive(Parse, Debug, Clone, PartialEq, Eq)]
-pub enum Boolean {
-    True(True),
-    False(False),
-}
-
-impl Boolean {
-    pub fn span(&self) -> &Span {
-        match self {
-            Self::True(True(span)) | Self::False(False(span)) => span,
-        }
-    }
-}
-
 #[derive(Parse, Debug, Clone, PartialEq, Eq)]
 pub enum Type {
-    Array(OpenBracket, Box<Type>, ClosedBracket),
+    Array(OpenBracket, #[parse(Box::new(Type::parse(stream)?))] Box<Type>, ClosedBracket),
     Fun(FunType),
     Path(Path),
 }
@@ -305,6 +225,13 @@ pub struct FunType {
     pub open_paren: OpenParen,
     pub args: Punctuated<0, Type, Comma>,
     pub closed_paren: ClosedParen,
+    #[parse({
+        if ArrowRight::can_parse(stream.peek()?) {
+            Some((ArrowRight::parse(stream)?, Box::new(Type::parse(stream)?)))
+        } else {
+            None
+        }
+    })]
     pub ret: Option<(ArrowRight, Box<Type>)>,
 }
 
@@ -330,154 +257,6 @@ impl Path {
 
     pub fn into_last(mut self) -> Ident {
         self.items.0.pop().unwrap()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Ident(pub String, pub Span);
-
-impl Display for Ident {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl ParseTokens for Ident {
-    fn parse(stream: &mut StreamBranch) -> Result<Self> {
-        let IdentWord(string, span) = IdentWord::parse(stream)?;
-        if !keyword::is_keyword(&string) {
-            Ok(Self(string, span))
-        } else {
-            Err(diagnostic!(span, "unexpected keyword `{string}`").into())
-        }
-    }
-}
-
-#[derive(Parse, Debug, Clone, PartialEq, Eq)]
-#[from(WordIdentRaw)]
-pub struct IdentWord(pub String, pub Span);
-
-impl From<WordIdentRaw> for IdentWord {
-    fn from(value: WordIdentRaw) -> Self {
-        Self(value.first.0.to_string() + value.rest.into_iter().map(|char| char.0).collect::<String>().as_ref(), value.first.1)
-    }
-}
-
-#[derive(Parse, Debug, PartialEq, Eq)]
-struct WordIdentRaw {
-    first: AlphabeticWord,
-    rest: Vec<AlphanumericWord>,
-}
-
-#[cfg(test)]
-mod tests {
-    use std::fmt::Debug;
-
-    use crate::{keyword::{Fun, Native, Using}, stream::TokenStream};
-
-    use super::*;
-
-    #[test]
-    fn test_number() {
-        assert_ok_empty("123", Number::Integer(123, Span::new(1, 1)));
-        assert_ok_empty("0", Number::Integer(0, Span::new(1, 1)));
-        assert_ok_empty("2", Number::Integer(2, Span::new(1, 1)));
-        assert_ok_empty("32000", Number::Integer(32000, Span::new(1, 1)));
-        assert_ok_empty("00076", Number::Integer(76, Span::new(1, 1)));
-
-        assert_ok_empty("3.22", Number::Float(3.22, Span::new(1, 1)));
-        assert_ok_empty("0.51", Number::Float(0.51, Span::new(1, 1)));
-        assert_ok_empty("2.0001", Number::Float(2.0001, Span::new(1, 1)));
-        assert_ok_empty("999.99", Number::Float(999.99, Span::new(1, 1)));
-        assert_ok_empty("5.800", Number::Float(5.8, Span::new(1, 1)));
-
-        assert_ok_partial("3.", Number::Integer(3, Span::new(1, 1)));
-        assert_ok_partial("9..", Number::Integer(9, Span::new(1, 1)));
-        assert_ok_partial("9.200.", Number::Float(9.2, Span::new(1, 1)));
-        assert_ok_partial("58.abc", Number::Integer(58, Span::new(1, 1)));
-        assert_ok_partial("5,300.22", Number::Integer(5, Span::new(1, 1)));
-        assert_ok_partial("20 .11", Number::Integer(20, Span::new(1, 1)));
-
-        assert_err::<Number>("a100");
-        assert_err::<Number>("");
-        assert_err::<Number>(".");
-        assert_err::<Number>("-50.2");
-        assert_err::<Number>("iiiii");
-    }
-
-    #[test]
-    fn test_keyword() {
-        assert_ok_empty("fun", Fun(Span::new(1, 1)));
-        assert_ok_empty("val  \n", Val(Span::new(1, 1)));
-        assert_ok_empty("    true", True(Span::new(5, 1)));
-        assert_ok_empty("\n   fun   ", Fun(Span::new(4, 2)));
-
-        assert_ok_partial("using   a", Using(Span::new(1, 1)));
-        assert_ok_partial("false f", False(Span::new(1, 1)));
-        assert_ok_partial("native   fun", Native(Span::new(1, 1)));
-        assert_ok_partial("fun   .", Fun(Span::new(1, 1)));
-
-        assert_err::<Native>("nativee");
-        assert_err::<True>("trueeee");
-        assert_err::<Using>("   funafun");
-        assert_err::<False>("fail  ");
-    }
-
-    #[test]
-    fn test_quoted_string() {
-        assert_ok_empty(r#""hello""#, QuotedString("hello".to_owned(), Span::new(1, 1)));
-        assert_ok_empty(r#""""#, QuotedString(String::new(), Span::new(1, 1)));
-        assert_ok_empty(r#""  hi  ""#, QuotedString("  hi  ".to_owned(), Span::new(1, 1)));
-        assert_ok_empty(r#""hmmm.. ""#, QuotedString("hmmm.. ".to_owned(), Span::new(1, 1)));
-        assert_ok_empty(r#""hello with \"quotes\"""#, QuotedString("hello with \"quotes\"".to_owned(), Span::new(1, 1)));
-        assert_ok_empty(r#""new\nline""#, QuotedString("new\nline".to_owned(), Span::new(1, 1)));
-        assert_ok_empty(r#""return! \r carriage!""#, QuotedString("return! \r carriage!".to_owned(), Span::new(1, 1)));
-        assert_ok_empty(r#""tab\ttab\ttab""#, QuotedString("tab\ttab\ttab".to_owned(), Span::new(1, 1)));
-
-        assert_ok_partial(r#""hello" world"#, QuotedString("hello".to_owned(), Span::new(1, 1)));
-        assert_ok_partial(r#""" world world"#, QuotedString(String::new(), Span::new(1, 1)));
-
-        assert_err::<QuotedString>(r#""no end quote!"#);
-        assert_err::<QuotedString>(r#"no, "start quote?""#);
-        assert_err::<QuotedString>(r#""invalid \a escape char""#);
-    }
-
-    fn assert_ok_empty<T: ParseTokens + Debug + PartialEq>(input: &str, eq: T) {
-        match parse_with(input) {
-            (Ok(t), stream) => {
-                assert!(stream.is_empty());
-                assert_eq!(eq, t);
-            },
-            (Err(err), _) => panic!("parse error: {err}"),
-        }
-    }
-
-    fn assert_ok_partial<T: ParseTokens + Debug + PartialEq>(input: &str, eq: T) {
-        match parse_with(input) {
-            (Ok(t), stream) => {
-                assert!(!stream.is_empty());
-                assert_eq!(eq, t);
-            },
-            (Err(err), _) => panic!("parse error: {err}"),
-        }
-    }
-
-    fn assert_err<T: ParseTokens>(input: &str) {
-        let (res, stream) = parse_with::<T>(input);
-        assert!(res.is_err());
-        assert_eq!(input.len(), stream.len());
-    }
-
-    fn parse_with<T: ParseTokens>(input: &str) -> (Result<T>, TokenStream) {
-        let mut stream = TokenStream::from_input(input);
-        let mut branch = stream.branch();
-        match T::parse(&mut branch) {
-            Ok(t) => {
-                branch.commit();
-                (Ok(t), stream)
-            },
-            Err(err) => (Err(err), stream),
-        }
     }
 }
 

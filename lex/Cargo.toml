@@ -1,14 +1,13 @@
 [package]
-name = "parse"
+name = "lex"
 version = "0.1.0"
 edition = "2024"
 
 [lib]
-name = "parse"
+name = "lex"
 path = "src/lib.rs"
 
 [dependencies]
-lex = { path = "../lex" }
 diagnostic = { path = "../diagnostic" }
-macros = { path = "../macros" }
+thiserror = { workspace = true }
 

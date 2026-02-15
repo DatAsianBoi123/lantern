@@ -1,0 +1,12 @@
+[package]
+name = "diagnostic"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "diagnostic"
+path = "src/lib.rs"
+
+[dependencies]
+thiserror = { workspace = true }
+

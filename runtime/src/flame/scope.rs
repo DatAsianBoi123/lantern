@@ -1,6 +1,6 @@
 use std::{collections::{HashMap, hash_map}};
 
-use parse::error::Span;
+use diagnostic::Span;
 
 use crate::{flame::{GeneratedFunction, LanternFunction, LanternVariable, instruction::InstructionSet, r#type::LanternType}, heap::TypeInfo};
 

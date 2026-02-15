@@ -1,41 +1,30 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, Data, DataEnum, DataStruct, DeriveInput, Field, Fields, FieldsNamed, FieldsUnnamed, Type, Variant};
+use syn::{Data, DataEnum, DataStruct, DeriveInput, Expr, Field, Fields, FieldsNamed, FieldsUnnamed, LitStr, Variant, parse_macro_input};
 
-#[proc_macro_derive(Parse, attributes(from))]
+#[proc_macro_derive(Parse, attributes(parse))]
 pub fn derive_parse(stream: TokenStream) -> TokenStream {
     let derive_input = parse_macro_input!(stream as DeriveInput);
 
-    match derive_input.attrs.iter().find(|attr| attr.path().is_ident("from")) {
-        Some(parse_attr) => {
-            match parse_attr.parse_args() {
-                Ok(from) => gen_from(derive_input, from),
-                Err(err) => err.to_compile_error().into(),
-            }
-        },
-        None => gen_full(derive_input),
-    }
-}
-
-fn gen_from(DeriveInput { ident, .. }: DeriveInput, from: Type) -> TokenStream {
-    quote! {
-        impl crate::ParseTokens for #ident {
-            fn parse(stream: &mut crate::stream::StreamBranch) -> crate::Result<Self> {
-                <#from as crate::ParseTokens>::parse(stream).map(::std::convert::Into::into)
-            }
-        }
-    }.into()
+    gen_full(derive_input)
 }
 
 fn gen_full(DeriveInput { ident, data, .. }: DeriveInput) -> TokenStream {
     match data {
         Data::Struct(DataStruct { fields, .. }) => {
+            let can_parse = fields.iter().next()
+                .map(|Field { ty, .. }| quote!(<#ty as crate::ParseTokens>::can_parse(peek)))
+                .unwrap_or(quote!(true));
             let r#impl = impl_for_fields(&fields, quote! { Self });
 
             quote! {
                 impl crate::ParseTokens for #ident {
-                    fn parse(stream: &mut crate::stream::StreamBranch) -> crate::Result<Self> {
+                    fn parse(stream: &mut crate::stream::TokenStream) -> crate::Result<Self> {
                         #r#impl
+                    }
+
+                    fn can_parse(peek: &::lex::Token) -> bool {
+                        #can_parse
                     }
                 }
             }.into()
@@ -43,33 +32,35 @@ fn gen_full(DeriveInput { ident, data, .. }: DeriveInput) -> TokenStream {
         Data::Enum(DataEnum { variants, .. }) => {
             let tries = variants.iter()
                 .map(|Variant { ident, fields, .. }| {
+                    let can_parse = fields.iter().next()
+                        .map(|Field { ty, .. }| quote!(<#ty as crate::ParseTokens>::can_parse(peek)))
+                        .unwrap_or(quote!(true));
                     let r#impl = impl_for_fields(fields, quote! { Self::#ident });
                     quote! {
-                        match (|| { #r#impl })() {
-                            Ok(variant) => return Ok(variant),
-                            Err(err) if stream.cursor() == farthest.cursor() => {
-                                diagnostics.extend(err);
-                            },
-                            Err(err) if stream.cursor() > farthest.cursor() => {
-                                farthest = stream.location();
-                                diagnostics = err;
-                            },
-                            Err(err) => {},
+                        if #can_parse {
+                            return #r#impl;
                         }
-                        stream.goto(mark.clone());
                     }
                 });
+            let can_parse = variants.iter()
+                .map(|Variant { fields, .. }| {
+                    fields.iter().next()
+                        .map(|Field { ty, .. }| quote!(<#ty as crate::ParseTokens>::can_parse(peek)))
+                        .unwrap_or(quote!(true))
+                });
+            let ident_name = LitStr::new(&ident.to_string(), ident.span());
 
             quote! {
                 impl crate::ParseTokens for #ident {
-                    fn parse(stream: &mut crate::stream::StreamBranch) -> crate::Result<Self> {
-                        let mut diagnostics = crate::error::Diagnostics::default();
-                        let mut farthest = stream.location();
-                        let mut mark = stream.location();
+                    fn parse(stream: &mut crate::stream::TokenStream) -> crate::Result<Self> {
+                        let peek = stream.peek()?;
                         #(#tries)*
-                        stream.goto(farthest);
+                        let span = peek.span();
+                        Err(::diagnostic::error!(span => "expected `{}`", #ident_name))
+                    }
 
-                        Err(diagnostics)
+                    fn can_parse(peek: &::lex::Token) -> bool {
+                        #(#can_parse ||)* false
                     }
                 }
             }.into()
@@ -81,27 +72,39 @@ fn gen_full(DeriveInput { ident, data, .. }: DeriveInput) -> TokenStream {
 fn impl_for_fields(fields: &Fields, this: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
     match fields {
         Fields::Unit => {
-            quote! { Ok::<_, crate::error::Diagnostics>(#this) }
+            quote! { Ok::<_, ::diagnostic::Diagnostic>(#this) }
         },
         Fields::Named(FieldsNamed { named, .. }) => {
-            let names = named.iter()
-                .map(|Field { ident, .. }| ident.as_ref().expect("named field"));
             let assignments = named.iter()
-                .map(|Field { ident, ty, .. }| {
+                .map(|Field { attrs, ident, ty, .. }| {
                     let ident = ident.as_ref().expect("named field");
-                    quote! { let #ident = <#ty as crate::ParseTokens>::parse(stream)?; }
+
+                    if let Some(parse) = attrs.iter().find(|attr| attr.path().is_ident("parse")) {
+                        parse.parse_args::<Expr>()
+                            .map(|parse| quote!(#ident: #parse))
+                            .unwrap_or_else(|err| err.to_compile_error())
+                    } else {
+                        quote!(#ident: <#ty as crate::ParseTokens>::parse(stream)?)
+                    }
                 });
 
             quote! {
-                #(#assignments)*
-                Ok::<_, crate::error::Diagnostics>(#this { #(#names),* })
+                Ok::<_, ::diagnostic::Diagnostic>(#this { #(#assignments),* })
             }
         },
         Fields::Unnamed(FieldsUnnamed { unnamed, .. }) => {
             let args = unnamed.iter()
-                .map(|Field { ty, .. }| quote! { <#ty as crate::ParseTokens>::parse(stream)? });
+                .map(|Field { attrs, ty, .. }| {
+                    if let Some(parse) = attrs.iter().find(|attr| attr.path().is_ident("parse")) {
+                        parse.parse_args::<Expr>()
+                            .map(|parse| quote!(#parse))
+                            .unwrap_or_else(|err| err.to_compile_error())
+                    } else {
+                        quote!(<#ty as crate::ParseTokens>::parse(stream)?)
+                    }
+                });
 
-            quote! { Ok::<_, crate::error::Diagnostics>(#this(#(#args),*)) }
+            quote! { Ok::<_, ::diagnostic::Diagnostic>(#this(#(#args),*)) }
         },
     }
 }

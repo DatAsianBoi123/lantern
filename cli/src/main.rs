@@ -1,6 +1,7 @@
 use std::{fs::File, io::Read, time::Instant};
 
 use clap::Parser;
+use diagnostic::DiagnosticSink;
 use runtime::VM;
 
 #[derive(Parser, Debug)]
@@ -42,14 +43,15 @@ fn main() {
         println!("Parsed in {took:?}");
     }
 
+    let mut sink = DiagnosticSink::new();
     let before = Instant::now();
-    let vm = match VM::new(lantern_file) {
-        Ok(vm) => vm,
-        Err(err) => {
-            eprintln!("{err}");
-            return;
-        },
-    };
+    let vm = VM::new(lantern_file, &mut sink);
+
+    for err in sink.into_emitted() {
+        eprintln!("{err}");
+    }
+
+    let Some(vm) = vm else { return; };
 
     if verbose {
         vm.funs().iter().enumerate().for_each(|(i, fun)| {

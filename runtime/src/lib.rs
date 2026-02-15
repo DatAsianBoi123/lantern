@@ -3,11 +3,12 @@
 use std::{fmt::{Display, Formatter}};
 
 use anyhow::anyhow;
+use diagnostic::DiagnosticSink;
 use error::RuntimeError;
 use flame::{GeneratedFunction, instruction::Instruction};
 use parse::LanternFile;
 
-use crate::{flame::{error::CompilerError, scope::Globals}, heap::{Heap, HeapArray, TypeInfo}, stack::LanternStack};
+use crate::{flame::scope::Globals, heap::{Heap, HeapArray, TypeInfo}, stack::LanternStack};
 
 macro_rules! args {
     ( ( $($ty: ty),+ $(,)? ) in $stack: expr, $pat: pat => $ret: expr) => {{
@@ -88,15 +89,18 @@ pub struct VM {
 }
 
 impl VM {
-    pub fn new(file: LanternFile) -> Result<Self, CompilerError> {
+    pub fn new(file: LanternFile, sink: &mut DiagnosticSink) -> Option<Self> {
         let mut globals = Globals {
             funs: Vec::new(),
             // TODO: better way of array type info
             types: vec![TypeInfo::Array { element_size: 1, is_ref: false }, TypeInfo::Array { element_size: 8, is_ref: false }],
         };
-        let root = flame::ignite(file, &mut globals)?;
+        let root = flame::ignite(file, &mut globals, sink);
+        if sink.fatal() {
+            return None;
+        }
         globals.funs.push(root);
-        Ok(Self {
+        Some(Self {
             frames: vec![Frame::new(globals.funs.len() - 1)],
             funs: globals.funs,
             types: globals.types,
@@ -185,7 +189,10 @@ impl VM {
                         frame.operand_stack.push_ref(array.as_ptr())?;
                     },
                     Instruction::LoadLocal(index) => frame.operand_stack.push_slot(frame.locals[index])?,
-                    Instruction::StoreLocal(index) => frame.locals[index] = frame.operand_stack.pop()?,
+                    Instruction::StoreLocal(index) => {
+                        // don't pop since assignment is an expression, value will be popped
+                        frame.locals[index] = frame.operand_stack.peek()?;
+                    },
                     Instruction::Return => {
                         let ret = frame.operand_stack.pop()?;
                         self.frames.pop();
@@ -226,6 +233,33 @@ impl VM {
                         } else {
                             frame.operand_stack.push_primitive(element)?;
                         }
+                    },
+                    Instruction::WriteIndex => {
+                        let index = unsafe { *frame.operand_stack.pop()?.read::<i64>() };
+                        let item = frame.operand_stack.pop()?;
+                        let ptr = unsafe { *frame.operand_stack.pop()?.read::<*mut u8>() };
+
+                        let mut array = unsafe { HeapArray::from_raw(ptr) };
+
+                        let index = if index >= 0 {
+                            if index as usize > array.len() {
+                                return Err(RuntimeError(anyhow!("index out of bounds").into()));
+                            };
+                            index as usize
+                        } else {
+                            array.len().checked_sub(index.unsigned_abs() as usize).ok_or(RuntimeError(anyhow!("index out of bounds").into()))?
+                        };
+
+                        let item = if array.is_ref() {
+                            // slot is a pointer to the data
+                            unsafe { *item.read::<*const u8>() }
+                        } else {
+                            // slot is primitive data
+                            item.read::<u8>()
+                        };
+                        unsafe { array.set(index as usize, item) };
+
+                        frame.operand_stack.push_primitive(0)?;
                     },
                     Instruction::Goto(ptr) => {
                         frame.inst_ptr = ptr;

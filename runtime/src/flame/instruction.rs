@@ -104,6 +104,9 @@ macro_rules! inst {
     ($inst: expr; INDEX) => {
         $inst.push($crate::flame::instruction::Instruction::Index)
     };
+    ($inst: expr; WRITE_INDEX) => {
+        $inst.push($crate::flame::instruction::Instruction::WriteIndex)
+    };
     ($inst: expr; GOTO $j: expr) => {
         $inst.push($crate::flame::instruction::Instruction::Goto($j))
     };
@@ -219,6 +222,7 @@ pub enum Instruction {
 
     Invoke(usize),
     Index,
+    WriteIndex,
 
     Goto(usize),
     GotoIfTrue(usize),
@@ -264,6 +268,7 @@ impl Display for Instruction {
             Self::Return => write!(f, "RET"),
             Self::Invoke(num_args) => write!(f, "{:20}{num_args}", "INV"),
             Self::Index => write!(f, "INDEX"),
+            Self::WriteIndex => write!(f, "WRITE_INDEX"),
             Self::Goto(index) => write!(f, "{:20}{index}", "GOTO"),
             Self::GotoIfTrue(index) => write!(f, "{:20}{index}", "GOTO_IF_TRUE"),
             Self::GotoIfFalse(index) => write!(f, "{:20}{index}", "GOTO_IF_FALSE"),

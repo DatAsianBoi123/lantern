@@ -1,8 +1,10 @@
 use std::fmt::{Display, Formatter};
 
+use diagnostic::Span;
+use lex::{And, Asterisk, Bang, ClosedBrace, ClosedBracket, ClosedParen, Comma, Equals, EqualsEquals, Greater, GreaterEq, Hyphen, Less, LessEq, Literal, OpenBrace, OpenBracket, OpenParen, Or, Percent, Period, Plus, Slash, TokenKind};
 use macros::Parse;
 
-use crate::{Ident, Literal, ParseTokens, QuotedString, Stmt, error::Span, punct::{And, Asterisk, Bang, ClosedBrace, ClosedBracket, ClosedParen, Comma, EqualsEquals, Greater, GreaterEq, Hyphen, Less, LessEq, OpenBrace, OpenBracket, OpenParen, Or, Percent, Period, Plus, Slash}, stream::{Punctuated, StreamBranch}};
+use crate::{Ident, ParseTokens, Result, Stmt, stream::{Punctuated, Repetition, TokenStream}};
 
 #[derive(Parse, Debug, Clone, PartialEq)]
 enum PrimaryExpr {
@@ -40,41 +42,41 @@ impl From<PrimaryExpr> for Expr {
 }
 
 impl Expr {
-    pub fn span(&self) -> &Span {
+    pub fn span(&self) -> Span {
         // TODO: ended span
         match self {
-            Expr::Literal(Literal::Number(number)) => number.span(),
-            Expr::Literal(Literal::Boolean(bool)) => bool.span(),
-            Expr::Literal(Literal::String(QuotedString(_, span))) => span,
-            Expr::Identifier(Ident(_, span)) => span,
+            Expr::Literal(literal) => literal.span(),
+            Expr::Identifier(Ident(_, span)) => span.clone(),
             Expr::Field(ExprField { expr, .. }) => expr.span(),
             Expr::FunCall(ExprFunCall { expr, .. }) => expr.span(),
-            Expr::Paren(ExprParen { open_paren, .. }) => &open_paren.0,
-            Expr::Block(ExprBlock { open_brace, .. }) => &open_brace.0,
-            Expr::Array(ExprArray { open_bracket, .. }) => &open_bracket.0,
+            Expr::Paren(ExprParen { open_paren, .. }) => open_paren.0.clone(),
+            Expr::Block(ExprBlock { open_brace, .. }) => open_brace.0.clone(),
+            Expr::Array(ExprArray { open_bracket, .. }) => open_bracket.0.clone(),
             Expr::Index(ExprIndex { expr, .. }) => expr.span(),
             Expr::Binary(ExprBinary { lhs, .. }) => lhs.span(),
             Expr::Unary(ExprUnary { op, .. }) => op.span(),
         }
     }
 
-    fn parse_all(stream: &mut StreamBranch, min_bp: u8) -> crate::Result<Self> {
+    fn parse_all(stream: &mut TokenStream, min_bp: u8) -> Result<Self> {
         let mut lhs = Self::parse_lhs(stream)?;
         loop {
-            if <Option<Period>>::parse(stream)?.is_some() {
+            if Period::can_parse(stream.peek()?) {
+                Period::parse(stream)?;
                 lhs = Self::Field(ExprField { expr: Box::new(lhs), ident: Ident::parse(stream)? });
                 continue;
             }
 
-            let before = stream.location();
-
-            if let Ok(op) = BinaryOperator::parse(stream) {
+            if BinaryOperator::can_parse(stream.peek()?) {
+                // TODO: no clone?
+                let op = BinaryOperator::parse(&mut stream.clone())?;
                 let (left_bp, right_bp) = op.binding_power();
 
                 if left_bp < min_bp {
-                    stream.goto(before);
                     break;
                 }
+                // operators are all only 1 token
+                stream.next_token()?;
 
                 let rhs = Self::parse_all(stream, right_bp)?;
                 lhs = Self::Binary(ExprBinary { lhs: Box::new(lhs), op, rhs: Box::new(rhs) });
@@ -82,43 +84,47 @@ impl Expr {
                 continue;
             }
 
-            if let Ok(open_paren) = OpenParen::parse(stream) {
+            if OpenParen::can_parse(stream.peek()?) {
                 // highest BP
+                let open_paren = OpenParen::parse(stream)?;
 
                 lhs = Self::FunCall(ExprFunCall { expr: Box::new(lhs), open_paren, args: ParseTokens::parse(stream)?, closed_paren: ClosedParen::parse(stream)? });
 
                 continue;
             }
 
-            if let Ok(open_bracket) = OpenBracket::parse(stream) {
+            if OpenBracket::can_parse(stream.peek()?) {
                 // highest BP
+                let open_bracket = OpenBracket::parse(stream)?;
 
-                lhs = Self::Index(ExprIndex { expr: Box::new(lhs), open_bracket, index: ParseTokens::parse(stream)?, closed_bracket: ClosedBracket::parse(stream)? });
+                lhs = Self::Index(ExprIndex { expr: Box::new(lhs), open_bracket, index: Box::new(Expr::parse(stream)?), closed_bracket: ClosedBracket::parse(stream)? });
 
                 continue;
             }
 
-            stream.goto(before);
             break;
         };
         Ok(lhs)
     }
 
-    fn parse_lhs(stream: &mut StreamBranch) -> crate::Result<Self> {
-        match <Option<UnaryOperator>>::parse(stream)? {
-            Some(op) => {
-                let right_bp = op.right_binding_power();
-                let rhs = Self::parse_all(stream, right_bp)?;
-                Ok(Self::Unary(ExprUnary { op, expr: Box::new(rhs) }))
-            },
-            None => Ok(PrimaryExpr::parse(stream)?.into()),
+    fn parse_lhs(stream: &mut TokenStream) -> Result<Self> {
+        if UnaryOperator::can_parse(stream.peek()?) {
+            let op = UnaryOperator::parse(stream)?;
+            let rhs = Self::parse_all(stream, op.right_binding_power())?;
+            Ok(Self::Unary(ExprUnary { op, expr: Box::new(rhs) }))
+        } else {
+            PrimaryExpr::parse(stream).map(Into::into)
         }
     }
 }
 
 impl ParseTokens for Expr {
-    fn parse(stream: &mut StreamBranch) -> crate::Result<Self> {
+    fn parse(stream: &mut TokenStream) -> Result<Self> {
         Self::parse_all(stream, 0)
+    }
+
+    fn can_parse(peek: &lex::Token) -> bool {
+        UnaryOperator::can_parse(peek) || PrimaryExpr::can_parse(peek)
     }
 }
 
@@ -128,7 +134,7 @@ pub struct ExprField {
     pub ident: Ident,
 }
 
-#[derive(Parse, Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ExprFunCall {
     pub expr: Box<Expr>,
     pub open_paren: OpenParen,
@@ -148,6 +154,7 @@ pub struct ExprMethodCall {
 #[derive(Parse, Debug, Clone, PartialEq)]
 pub struct ExprParen {
     pub open_paren: OpenParen,
+    #[parse(Box::new(Expr::parse(stream)?))]
     pub expr: Box<Expr>,
     pub closed_paren: ClosedParen,
 }
@@ -155,7 +162,7 @@ pub struct ExprParen {
 #[derive(Parse, Debug, Clone, PartialEq)]
 pub struct ExprBlock {
     pub open_brace: OpenBrace,
-    pub stmts: Vec<Stmt>,
+    pub stmts: Repetition<0, Stmt>,
     pub closed_brace: ClosedBrace,
 }
 
@@ -183,6 +190,8 @@ pub struct ExprBinary {
 
 #[derive(Parse, Debug, Clone, PartialEq, Eq)]
 pub enum BinaryOperator {
+    Assign(Equals),
+
     Add(Plus),
     Sub(Hyphen),
     Mult(Asterisk),
@@ -200,32 +209,35 @@ pub enum BinaryOperator {
 }
 
 impl BinaryOperator {
-    pub fn span(&self) -> &Span {
+    pub fn span(&self) -> Span {
         match self {
-            Self::Add(punct) => &punct.0,
-            Self::Sub(punct) => &punct.0,
-            Self::Mult(punct) => &punct.0,
-            Self::Div(punct) => &punct.0,
-            Self::Mod(punct) => &punct.0,
+            Self::Assign(punct) => punct.span(),
 
-            Self::Lt(punct) => &punct.0,
-            Self::Le(punct) => &punct.0,
-            Self::Gt(punct) => &punct.0,
-            Self::Ge(punct) => &punct.0,
-            Self::Eq(punct) => &punct.0,
+            Self::Add(punct) => punct.span(),
+            Self::Sub(punct) => punct.span(),
+            Self::Mult(punct) => punct.span(),
+            Self::Div(punct) => punct.span(),
+            Self::Mod(punct) => punct.span(),
 
-            Self::And(punct) => &punct.0,
-            Self::Or(punct) => &punct.0,
+            Self::Lt(punct) => punct.span(),
+            Self::Le(punct) => punct.span(),
+            Self::Gt(punct) => punct.span(),
+            Self::Ge(punct) => punct.span(),
+            Self::Eq(punct) => punct.span(),
+
+            Self::And(punct) => punct.span(),
+            Self::Or(punct) => punct.span(),
         }
     }
 
     pub fn binding_power(&self) -> (u8, u8) {
         match self {
-            Self::Mult(_) | Self::Div(_) | Self::Mod(_) => (9, 10),
-            Self::Add(_) | Self::Sub(_) => (7, 8),
-            Self::Lt(_) | Self::Le(_) | Self::Gt(_) | Self::Ge(_) | Self::Eq(_) => (5, 6),
-            Self::And(_) => (3, 4),
-            Self::Or(_) => (1, 2),
+            Self::Mult(_) | Self::Div(_) | Self::Mod(_) => (11, 12),
+            Self::Add(_) | Self::Sub(_) => (9, 10),
+            Self::Lt(_) | Self::Le(_) | Self::Gt(_) | Self::Ge(_) | Self::Eq(_) => (7, 8),
+            Self::And(_) => (5, 6),
+            Self::Or(_) => (3, 4),
+            Self::Assign(_) => (2, 1),
         }
     }
 }
@@ -233,6 +245,8 @@ impl BinaryOperator {
 impl Display for BinaryOperator {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Assign(punct) => punct.fmt(f),
+
             Self::Add(punct) => punct.fmt(f),
             Self::Sub(punct) => punct.fmt(f),
             Self::Mult(punct) => punct.fmt(f),
@@ -264,16 +278,16 @@ pub enum UnaryOperator {
 }
 
 impl UnaryOperator {
-    pub fn span(&self) -> &Span {
+    pub fn span(&self) -> Span {
         match self {
-            Self::Negate(punct) => &punct.0,
-            Self::Not(punct) => &punct.0,
+            Self::Negate(punct) => punct.0.clone(),
+            Self::Not(punct) => punct.0.clone(),
         }
     }
 
     pub fn right_binding_power(&self) -> u8 {
         match self {
-            Self::Negate(_) | Self::Not(_) => 11,
+            Self::Negate(_) | Self::Not(_) => 13,
         }
     }
 }

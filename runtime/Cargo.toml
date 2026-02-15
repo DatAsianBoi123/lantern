@@ -9,6 +9,7 @@ path = "src/lib.rs"
 
 [dependencies]
 parse = { path = "../parse" }
+diagnostic = { path = "../diagnostic" }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 

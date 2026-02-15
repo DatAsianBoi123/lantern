@@ -1,8 +1,7 @@
 use std::fmt::{Display, Formatter};
 
-use parse::{FunType, Type};
-
-use crate::flame::error::{CompilerError, CompilerErrorKind};
+use diagnostic::{Diagnostic, error};
+use parse::{FunType, Type, lex::TokenKind};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LanternType {
@@ -35,7 +34,7 @@ impl Display for LanternType {
 }
 
 impl LanternType {
-    pub fn from_type(r#type: &Type) -> Result<Self, CompilerError> {
+    pub fn from_type(r#type: &Type) -> Result<Self, Diagnostic> {
         match r#type {
             Type::Array(_, inner, _) => Ok(Self::Array(Box::new(Self::from_type(inner)?))),
             Type::Fun(FunType { args, ret, .. }) => {
@@ -53,8 +52,9 @@ impl LanternType {
                     "str" => Ok(Self::String),
                     "none" => Ok(Self::Null),
                     _ => {
-                        let span = path.items.1.clone();
-                        Err(CompilerError::new(CompilerErrorKind::UnknownType(r#type.clone()), span))
+                        let span = path.items.0[0].span();
+                        Err(error!(span => "unknown type `{type}`"))
+                        // FIXME: Err(CompilerError::new(CompilerErrorKind::UnknownType(r#type.clone()), span))
                     },
                 }
             },
