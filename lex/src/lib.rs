@@ -513,30 +513,44 @@ impl<'a> Lexer<'a> {
             '{' => Ok(punct!(OpenBrace)),
             '}' => Ok(punct!(ClosedBrace)),
 
+            '"' => {
+                let span = self.span();
+                match self.next_char() {
+                    Some('"') => Ok(Token::Literal(Literal::String(String::new(), span))),
+                    Some(next) => {
+                        let mut word = next.to_string();
+
+                        while let Some(char) = self.peek_char() && char != '\n' {
+                            if char == '"' {
+                                self.next_char();
+                                return Ok(Token::Literal(Literal::String(word, span)))
+                            }
+                            if char == '\\' {
+                                self.next_char();
+                                match self.next_char() {
+                                    Some('n') => word.push('\n'),
+                                    Some('r') => word.push('\r'),
+                                    Some('t') => word.push('\t'),
+                                    Some('\\') => word.push('\\'),
+                                    Some('"') => word.push('"'),
+                                    Some(_) => return Err(error!(self.span() => "invalid escape character")),
+                                    None => return Err(error!(self.span() => "expected escape character")),
+                                }
+                                continue;
+                            }
+                            word.push(char);
+                            self.next_char();
+                        }
+
+                        Err(error!(span => "unclosed quotation marks"))
+                    }
+                    None => Err(error!(span => "unclosed quotation marks")),
+                }
+            }
+
             next => {
                 let span = self.span();
-
-                if next == '"' {
-                    let span = self.span();
-                    match self.next_char() {
-                        Some('"') => Ok(Token::Literal(Literal::String(String::new(), span))),
-                        Some(next) => {
-                            let mut word = next.to_string();
-
-                            while let Some(char) = self.peek_char() && char != '\n' {
-                                if char == '"' {
-                                    self.next_char();
-                                    return Ok(Token::Literal(Literal::String(word, span)))
-                                }
-                                word.push(char);
-                                self.next_char();
-                            }
-
-                            Err(error!(span => "unclosed quotation marks"))
-                        }
-                        None => Err(error!(span => "unclosed quotation marks")),
-                    }
-                } else if let Some(num) = next.to_digit(10) {
+                if let Some(num) = next.to_digit(10) {
                     let (num, _) = self.next_int(num as i64);
                     if self.peek_is('.') && self.peek2_char().is_some_and(|char| char.is_ascii_digit()) {
                         self.next_char();
