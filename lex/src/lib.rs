@@ -410,8 +410,9 @@ impl<'a> Lexer<'a> {
         if peek == '\n' {
             self.line += 1;
             self.col = 0;
+        } else {
+            self.col += 1;
         }
-        self.col += 1;
         Some(peek)
     }
 
@@ -445,7 +446,8 @@ impl<'a> Lexer<'a> {
         self.skip_whitespace();
 
         let Some(next) = self.next_char() else {
-            return Ok(Token::Eof(self.span()));
+            // <eof> is always the next character over
+            return Ok(Token::Eof(Span::new(self.line, self.col + 1)));
         };
         match next {
             ',' => Ok(punct!(Comma)),
