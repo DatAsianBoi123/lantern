@@ -4,7 +4,7 @@ use anyhow::anyhow;
 
 use crate::{Slot, error::RuntimeError, heap::HeapArray};
 
-macro_rules! natives {
+macro_rules! native_funs {
     (for $vm: pat, $( $name: literal = ( $($pat: pat),* $(,)? ) => $expr: expr ),* $(,)?) => {
         pub fn get_native_fn(name: &str) -> Option<$crate::flame::NativeFn> {
             match name {
@@ -29,7 +29,7 @@ macro_rules! natives {
     };
 }
 
-natives![for vm,
+native_funs![for vm,
     "print" = (string) => {
         let string = unsafe { HeapArray::from_raw(*string.read::<*mut u8>()) };
         let mut stdout = std::io::stdout();

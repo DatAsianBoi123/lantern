@@ -1,0 +1,30 @@
+native fun print(x: str);
+native fun float_to_str(float: float) -> str;
+
+struct Position {
+  name: std.str,
+  x: std.float,
+  y: std.float,
+}
+
+val my_pos: Position = Position {
+  name: "hi",
+  x: 5.2,
+  y: -55.11,
+};
+
+fun print_pos(pos: Position) {
+  print("name:");
+  print(pos.name);
+  print("x:");
+  print(float_to_str(pos.x));
+  print("y:");
+  print(float_to_str(pos.y));
+}
+
+print_pos(my_pos);
+
+my_pos.x = my_pos.x * 2.0;
+my_pos.y = 5.28;
+print_pos(my_pos);
+

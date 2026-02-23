@@ -1,6 +1,6 @@
 #![feature(get_mut_unchecked)]
 
-use std::{fmt::{Display, Formatter}};
+use std::fmt::{Display, Formatter};
 
 use anyhow::anyhow;
 use diagnostic::DiagnosticSink;
@@ -8,7 +8,7 @@ use error::RuntimeError;
 use flame::{GeneratedFunction, instruction::Instruction};
 use parse::LanternFile;
 
-use crate::{flame::scope::Globals, heap::{Heap, HeapArray, TypeInfo}, stack::LanternStack};
+use crate::{flame::scope::Globals, heap::{Heap, HeapArray, HeapObject, TypeInfo}, stack::LanternStack};
 
 macro_rules! args {
     ( ( $($ty: ty),+ $(,)? ) in $stack: expr, $pat: pat => $ret: expr) => {{
@@ -80,7 +80,7 @@ impl Slot {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct VM {
     frames: Vec<Frame>,
     funs: Vec<GeneratedFunction>,
@@ -89,6 +89,9 @@ pub struct VM {
 }
 
 impl VM {
+    pub const STRING_TYPE_INDEX: usize = 0;
+    pub const PRIMITIVE_ARR_TYPE_INDEX: usize = 0;
+
     pub fn new(file: LanternFile, sink: &mut DiagnosticSink) -> Option<Self> {
         let mut globals = Globals {
             funs: Vec::new(),
@@ -118,7 +121,7 @@ impl VM {
     }
 
     pub fn alloc_string(&mut self, bytes: &[u8]) -> Result<HeapArray, RuntimeError> {
-        let mut array = self.heap.alloc_array(bytes.len(), &self.types[0])
+        let mut array = self.heap.alloc_array(bytes.len(), &self.types[Self::STRING_TYPE_INDEX])
             .unwrap_or_else(|| {
                 self.heap.gc(&mut self.frames);
                 self.heap.alloc_array(bytes.len(), &self.types[0]).expect("free heap space after gc")
@@ -170,18 +173,22 @@ impl VM {
                     Instruction::FCompareEq => args!((f64, f64) in frame.operand_stack, (rhs, lhs) => bool_to_slot(lhs == rhs)),
                     Instruction::ICompareEq => args!((i64, i64) in frame.operand_stack, (rhs, lhs) => bool_to_slot(lhs == rhs)),
                     Instruction::Not => args!((bool) in frame.operand_stack, bool => bool_to_slot(!bool)),
+                    Instruction::AllocObj(index) => {
+                        // TODO: gc
+                        let obj = self.heap.alloc_obj(&self.types[index]).unwrap();
+                        frame.operand_stack.push_ref(obj.as_ptr())?;
+                    },
                     Instruction::AllocString(str) => {
                         // TODO: figure out when to GC
-                        let mut array = self.heap.alloc_array(str.len(), &self.types[0]).unwrap();
+                        let mut array = self.heap.alloc_array(str.len(), &self.types[Self::STRING_TYPE_INDEX]).unwrap();
                         for (i, byte) in str.bytes().enumerate() {
                             unsafe { array.set(i, &byte as *const u8); }
                         }
                         frame.operand_stack.push_ref(array.as_ptr())?;
                     },
-                    Instruction::AllocArray(len) => {
-                        let type_index = unsafe { *frame.operand_stack.pop()?.read::<usize>() };
+                    Instruction::AllocArray(index, len) => {
                         // TODO: figure out when to GC
-                        let mut array = self.heap.alloc_array(len, &self.types[type_index]).unwrap();
+                        let mut array = self.heap.alloc_array(len, &self.types[index]).unwrap();
                         for i in 1..=len {
                             let element = &frame.operand_stack.pop()?.0 as *const _ as *const u8;
                             unsafe { array.set(len - i, element); }
@@ -212,6 +219,34 @@ impl VM {
                         self.frames.push(frame);
                         return Ok(());
                     },
+                    Instruction::Field(offset, len) => {
+                        let ptr = unsafe { *frame.operand_stack.pop()?.read::<*mut u8>() };
+
+                        let object = unsafe { HeapObject::from_raw(ptr) };
+                        let field = unsafe { object.field_ptr().add(offset) };
+
+                        if len == 0 {
+                            frame.operand_stack.push_ref(unsafe { *(field as *const *const u8) })?;
+                        } else {
+                            let slice = unsafe { std::slice::from_raw_parts(field, len) };
+                            let mut field_bytes = [0; 8];
+                            let (data, _) = field_bytes.split_at_mut(slice.len());
+                            data.copy_from_slice(slice);
+                            let element = u64::from_ne_bytes(field_bytes);
+                            frame.operand_stack.push_primitive(element)?;
+                        }
+                    },
+                    Instruction::WriteField(offset, len) => {
+                        let field = &frame.operand_stack.pop()?.0 as *const _ as *const u8;
+                        let ptr = unsafe { *frame.operand_stack.pop()?.read::<*mut u8>() };
+
+                        let mut object = unsafe { HeapObject::from_raw(ptr) };
+                        let struct_field = unsafe { object.field_ptr_mut().add(offset) };
+
+                        unsafe { struct_field.copy_from(field, len); };
+
+                        frame.operand_stack.push_ref(ptr)?;
+                    },
                     Instruction::Index => {
                         let index = unsafe { *frame.operand_stack.pop()?.read::<i64>() };
                         let ptr = unsafe { *frame.operand_stack.pop()?.read::<*mut u8>() };
@@ -220,7 +255,7 @@ impl VM {
                         let ptr = if index >= 0 {
                             array.get(index as usize).ok_or(RuntimeError(anyhow!("index out of bounds").into()))?
                         } else {
-                            let index = array.len().checked_sub(index.unsigned_abs()as usize).ok_or(RuntimeError(anyhow!("index out of bounds").into()))?;
+                            let index = array.len().checked_sub(index.unsigned_abs() as usize).ok_or(RuntimeError(anyhow!("index out of bounds").into()))?;
                             array.get(index).expect("index in range")
                         };
                         let slice = unsafe { std::slice::from_raw_parts(ptr, array.element_size()) };

@@ -1,11 +1,12 @@
-use std::{collections::{HashMap, hash_map}};
+use std::{collections::HashMap};
 
 use diagnostic::Span;
 
-use crate::{flame::{GeneratedFunction, LanternFunction, LanternVariable, instruction::InstructionSet, r#type::LanternType}, heap::TypeInfo};
+use crate::{flame::{GeneratedFunction, LanternFunction, LanternItem, LanternVariable, instruction::InstructionSet, r#type::LanternType}, heap::TypeInfo};
 
 #[derive(Debug, Clone)]
 pub struct Scope<'a> {
+    items: HashMap<String, LanternItem>,
     functions: HashMap<String, LanternFunction>,
     variables: HashMap<String, LanternVariable>,
     kind: ScopeKind<'a>,
@@ -20,6 +21,7 @@ impl<'a> Default for Scope<'a> {
 impl<'a> Scope<'a> {
     pub fn new() -> Self {
         Self {
+            items: HashMap::new(),
             functions: HashMap::new(),
             variables: HashMap::new(),
             kind: ScopeKind::Module,
@@ -34,8 +36,20 @@ impl<'a> Scope<'a> {
         self.kind
     }
 
-    pub fn functions(&self) -> hash_map::Values<'_, String, LanternFunction> {
-        self.functions.values()
+    pub fn item(&self, name: &str) -> Option<&LanternItem> {
+        match self.kind {
+            ScopeKind::Module => self.items.get(name),
+            ScopeKind::Block(parent) | ScopeKind::Function(parent, _) => {
+                self.items.get(name)
+                    .or_else(|| parent.item(name))
+            }
+        }
+    }
+
+    pub fn insert_item(&mut self, name: String, item: LanternItem) -> Option<()> {
+        if self.items.contains_key(&name) { return None; };
+        self.items.insert(name, item);
+        Some(())
     }
 
     pub fn function(&self, name: &str) -> Option<&LanternFunction> {
@@ -74,6 +88,7 @@ impl<'a> Scope<'a> {
 impl<'a: 'b, 'b> Scope<'a> {
     pub fn child_block(&'a self) -> Scope<'b> {
         Self {
+            items: HashMap::new(),
             functions: HashMap::new(),
             variables: HashMap::new(),
             kind: ScopeKind::Block(self),
@@ -82,6 +97,7 @@ impl<'a: 'b, 'b> Scope<'a> {
 
     pub fn child_function(&'a self, span: Span) -> Scope<'b> {
         Self {
+            items: HashMap::new(),
             functions: HashMap::new(),
             variables: HashMap::new(),
             kind: ScopeKind::Function(self, span),

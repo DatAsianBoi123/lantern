@@ -1,12 +1,11 @@
-use std::{fmt::{Display, Formatter}, mem::MaybeUninit, ops::ControlFlow, rc::Rc};
+use std::{fmt::{Display, Formatter}, ops::ControlFlow};
 
 use diagnostic::{DiagnosticSink, error};
 use instruction::InstructionSet;
-use parse::{FunArg, IfBranch, IfStmt, Item, ItemFun, ItemNative, LanternFile, Stmt, ValDeclaration, WhileStmt, expr::{BinaryOperator, Expr, ExprArray, ExprBinary, ExprBlock, ExprFunCall, ExprIndex, ExprParen, ExprUnary, UnaryOperator}, lex::{Break, Ident, Literal, TokenKind}};
+use parse::{FunArg, IfBranch, IfStmt, Item, ItemFun, ItemNativeFun, ItemNativeStruct, ItemStruct, LanternFile, Stmt, StructField, ValDeclaration, WhileStmt, expr::{BinaryOperator, Expr, ExprArray, ExprBinary, ExprBlock, ExprField, ExprFunCall, ExprIndex, ExprParen, ExprStruct, ExprUnary, UnaryOperator}, lex::{Break, Ident, Literal, TokenKind}};
 
-use crate::{Slot, VM, error::RuntimeError, flame::{instruction::Instruction, scope::{Globals, Scope, ScopeKind, StackFrame}, r#type::LanternType}, inst};
+use crate::{Slot, VM, error::RuntimeError, flame::{instruction::Instruction, scope::{Globals, Scope, ScopeKind, StackFrame}, r#type::LanternType}, heap::TypeInfo, inst};
 
-pub type GenerateFunPtr = Rc<MaybeUninit<GeneratedFunction>>;
 pub type NativeFn = fn(&mut VM, [Slot; 256]) -> Result<Slot, RuntimeError>;
 
 pub mod instruction;
@@ -35,29 +34,43 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
                 Item::Using(_) => todo!(),
                 Item::Fun(ItemFun { ident, args, ret, .. }) => {
                     let args = args.0.iter()
-                        .map(|FunArg { ident, r#type, .. }| (ident.clone(), sink.emit_or(LanternType::from_type(r#type), LanternType::Null)))
+                        .map(|FunArg { ident, r#type, .. }| (ident.clone(), sink.emit_or(LanternType::from_type(r#type, &scope), LanternType::Null)))
                         .collect();
 
                     let ret = ret.as_ref()
-                        .map(|(_, r#type)| sink.emit_or(LanternType::from_type(r#type), LanternType::Null))
+                        .map(|(_, r#type)| sink.emit_or(LanternType::from_type(r#type, &scope), LanternType::Null))
                         .unwrap_or(LanternType::Null);
 
                     scope.insert_function(ident.0.clone(), LanternFunction::new(next_fun_index, args, ret));
                     next_fun_index += 1;
                 },
-                Item::Native(ItemNative { ident, args, ret, .. }) => {
+                Item::NativeFun(ItemNativeFun { ident, args, ret, .. }) => {
                     let args = args.0.iter()
-                        .map(|FunArg { ident, r#type, .. }| (ident.clone(), sink.emit_or(LanternType::from_type(r#type), LanternType::Null)))
+                        .map(|FunArg { ident, r#type, .. }| (ident.clone(), sink.emit_or(LanternType::from_type(r#type, &scope), LanternType::Null)))
                         .collect();
 
                     let ret = ret.as_ref()
-                        .map(|(_, r#type)| sink.emit_or(LanternType::from_type(r#type), LanternType::Null))
+                        .map(|(_, r#type)| sink.emit_or(LanternType::from_type(r#type, &scope), LanternType::Null))
                         .unwrap_or(LanternType::Null);
 
                     scope.insert_function(ident.0.clone(), LanternFunction::new(next_fun_index, args, ret));
                     next_fun_index += 1;
                 },
-                Item::Struct(_) => todo!(),
+                // TODO: add types before checking for types
+                Item::Struct(ItemStruct { ident, fields, .. }) => {
+                    let fields = fields.0.iter()
+                        .map(|StructField { ident, r#type, .. }| {
+                            (ident.0.clone(), sink.emit_or(LanternType::from_type(r#type, &scope), LanternType::Null))
+                        })
+                        .collect();
+
+                    let lantern_struct = LanternStruct::new(globals.types.len(), fields);
+                    globals.types.push(lantern_struct.as_type());
+                    scope.insert_item(ident.0.clone(), LanternItem::Struct(lantern_struct));
+                },
+                Item::NativeStruct(ItemNativeStruct { .. }) => {
+
+                },
             }
         });
 
@@ -144,7 +157,7 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
             Stmt::ValDeclaration(ValDeclaration { ident, r#type, init: None, .. }) => {
                 // TODO: unitialized vars
                 let local_index = frame.declare_local(ident.0.clone());
-                if scope.insert_variable(ident.0.clone(), sink.emit_or(LanternType::from_type(&r#type), LanternType::Null)).is_none() {
+                if scope.insert_variable(ident.0.clone(), sink.emit_or(LanternType::from_type(&r#type, &scope), LanternType::Null)).is_none() {
                     error!(in sink; ident.span() => "variable `{}` already declared", ident.0);
                     // FIXME: CompilerError::new(CompilerErrorKind::ItemAlreadyDeclared(ident), ident_span)?;
                 }
@@ -157,7 +170,7 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
                 let init_span = init.span();
                 let init_type = compile_expr(init, &scope, frame, globals, sink)?;
 
-                let var_type = sink.emit_or(LanternType::from_type(&r#type), LanternType::Null);
+                let var_type = sink.emit_or(LanternType::from_type(&r#type, &scope), LanternType::Null);
                 if var_type != init_type {
                     error!(in sink; init_span => "expected {var_type}, but got {init_type} instead");
                     // FIXME: return Err(CompilerError::new(CompilerErrorKind::TypeError { expected: var_type, got: init_type }, init_span));
@@ -195,7 +208,7 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
             Stmt::Item(Item::Using(_)) => todo!(),
             Stmt::Item(Item::Fun(ItemFun { args, block, ret, .. })) => {
                 let ret = ret
-                    .map(|(_, r#type)| sink.emit_or(LanternType::from_type(&r#type), LanternType::Null))
+                    .map(|(_, r#type)| sink.emit_or(LanternType::from_type(&r#type, &scope), LanternType::Null))
                     .unwrap_or(LanternType::Null);
 
                 let mut fun_scope = scope.child_function(block.open_brace.span());
@@ -203,7 +216,7 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
 
                 args.0.into_iter()
                     .for_each(|FunArg { ident, r#type, .. }| {
-                        match LanternType::from_type(&r#type) {
+                        match LanternType::from_type(&r#type, &scope) {
                             Ok(r#type) => {
                                 fun_frame.declare_local(ident.0.clone());
                                 if fun_scope.insert_variable(ident.0.clone(), r#type).is_none() {
@@ -221,7 +234,7 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
 
                 globals.funs[current_index] = fun_frame.into_gen();
             },
-            Stmt::Item(Item::Native(ItemNative { ident, .. })) => {
+            Stmt::Item(Item::NativeFun(ItemNativeFun { ident, .. })) => {
                 let ptr = native::get_native_fn(&ident.0).unwrap_or_else(|| {
                     error!(in sink; ident.span() => "unknown native `{}`", ident.0);
                     // FIXME: CompilerError::new(CompilerErrorKind::UnknownNative(ident), span)
@@ -234,6 +247,7 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
                 globals.funs.push(GeneratedFunction::Native(ptr));
             },
             Stmt::Item(Item::Struct(_)) => {},
+            Stmt::Item(Item::NativeStruct(_)) => {},
         }
     };
 
@@ -362,7 +376,6 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
                             inst!(frame.instructions; STORE_LOCAL local_index);
                         },
                         Expr::Index(ExprIndex { expr, index, .. }) => {
-                            // TODO: method for indexing
                             let expr_span = expr.span();
                             let r#type = compile_expr(*expr, scope, frame, globals, sink)?;
                             let inner = match r#type {
@@ -390,7 +403,25 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
 
                             inst!(frame.instructions; WRITE_INDEX);
                         },
-                        Expr::Field(_) => todo!(),
+                        Expr::Field(ExprField { expr, ident }) => {
+                            let expr_span = expr.span();
+                            let ty = compile_expr(*expr, scope, frame, globals, sink)?;
+                            match ty {
+                                LanternType::Struct(r#struct) => {
+                                    if let Some(field) = r#struct.fields.into_iter().find(|field| field.name == ident.0) {
+                                        let field_type = compile_expr(*rhs, scope, frame, globals, sink)?;
+                                        if field_type != field.r#type {
+                                            error!(in sink; rhs_span => "expected {}, but got {field_type} instead", field.r#type);
+                                        }
+                                        inst!(frame.instructions; WRITE_FIELD field.offset, field.size);
+                                    } else {
+                                        // TODO: type name
+                                        error!(in sink; expr_span => "field `{}` does not exist", ident.0);
+                                    }
+                                },
+                                _ => error!(in sink; expr_span => "field `{}` does not exist on {ty}", ident.0),
+                            }
+                        },
                         _ => {
                             error!(in sink; punct.span() => "bad left-hand-side of assignment");
                             // FIXME: return Err(CompilerError::new(CompilerErrorKind::BadLeftHandSide, punct.span()));
@@ -515,6 +546,34 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
                 },
             }
         },
+        Expr::Struct(ExprStruct { ident, mut fields, .. }) => {
+            let Some(LanternItem::Struct(r#struct)) = scope.item(&ident.0) else {
+                error!(in sink; ident.span() => "unknown struct");
+                return ControlFlow::Continue(LanternType::Null);
+            };
+            inst!(frame.instructions; ALLOC_OBJ r#struct.id);
+
+            for field in &r#struct.fields {
+                match fields.0.iter().position(|expr_field| expr_field.ident.0 == field.name) {
+                    Some(index) => {
+                        let expr_field = fields.0.swap_remove(index);
+                        let expr_span = expr_field.expr.span();
+                        let field_ty = compile_expr(expr_field.expr, scope, frame, globals, sink)?;
+                        if field_ty != field.r#type {
+                            error!(in sink; expr_span => "expected {}, but got {field_ty} instead", field.r#type);
+                        }
+                        inst!(frame.instructions; WRITE_FIELD field.offset, field.size);
+                    },
+                    None => error!(in sink; ident.span() => "missing field `{}`", field.name),
+                }
+            }
+
+            for extraneous_field in fields.0 {
+                error!(in sink; extraneous_field.ident.span() => "unknown field");
+            }
+
+            ControlFlow::Continue(LanternType::Struct(r#struct.clone()))
+        },
         Expr::Paren(ExprParen { expr, .. }) => compile_expr(*expr, scope, frame, globals, sink),
         Expr::Block(ExprBlock { stmts, .. }) => {
             let block_scope = scope.child_block();
@@ -539,10 +598,7 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
                 }
             }
 
-            inst! { frame.instructions;
-                [PUSHU 1]
-                [ALLOC_ARR len]
-            }
+            inst!(frame.instructions; ALLOC_ARR VM::PRIMITIVE_ARR_TYPE_INDEX, len);
             match inner {
                 Some(inner) => ControlFlow::Continue(LanternType::Array(Box::new(inner))),
                 // TODO: type hint
@@ -590,7 +646,27 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
                 }
             }
         },
-        Expr::Field(_) => todo!(),
+        Expr::Field(ExprField { expr, ident }) => {
+            let expr_span = expr.span();
+            let ty = compile_expr(*expr, scope, frame, globals, sink)?;
+            match ty {
+                LanternType::Struct(r#struct) => {
+                    if let Some(field) = r#struct.fields.into_iter().find(|field| field.name == ident.0) {
+                        let size = if field.r#type.is_primitive() { field.size } else { 0 };
+                        inst!(frame.instructions; FIELD field.offset, size);
+                        ControlFlow::Continue(field.r#type)
+                    } else {
+                        // TODO: type name
+                        error!(in sink; expr_span => "field `{}` does not exist", ident.0);
+                        ControlFlow::Continue(LanternType::Null)
+                    }
+                },
+                _ => {
+                    error!(in sink; expr_span => "field `{}` does not exist on {ty}", ident.0);
+                    ControlFlow::Continue(LanternType::Null)
+                },
+            }
+        },
     }
 }
 
@@ -607,14 +683,20 @@ impl LanternFunction {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LanternItem {
+    Struct(LanternStruct),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LanternStruct {
-    pub fields: Box<[StructField]>,
+    pub id: usize,
+    pub fields: Box<[LanternStructField]>,
     pub size: usize,
 }
 
 impl LanternStruct {
-    pub fn new(fields: Box<[(String, LanternType)]>) -> Self {
+    pub fn new(index: usize, fields: Box<[(String, LanternType)]>) -> Self {
         let alignment = fields.iter()
             .map(|(_, r#type)| r#type.alignment())
             .max()
@@ -626,24 +708,34 @@ impl LanternStruct {
         };
         let fields = fields.into_iter()
             .enumerate()
-            .map(|(i, (name, r#type))| StructField {
+            .map(|(i, (name, r#type))| LanternStructField {
                 name,
-                r#type,
                 offset: i * alignment,
+                size: r#type.size(),
+                r#type,
             })
             .collect();
 
         Self {
+            id: index,
             fields,
             size,
+        }
+    }
+
+    pub fn as_type(&self) -> TypeInfo {
+        TypeInfo::Object {
+            size: self.size,
+            ref_offets: self.fields.iter().map(|field| field.offset).collect(),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StructField {
+pub struct LanternStructField {
     pub name: String,
     pub offset: usize,
+    pub size: usize,
     pub r#type: LanternType,
 }
 

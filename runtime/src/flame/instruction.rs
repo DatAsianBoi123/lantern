@@ -83,11 +83,14 @@ macro_rules! inst {
     ($inst: expr; NOT) => {
         $inst.push($crate::flame::instruction::Instruction::Not)
     };
+    ($inst: expr; ALLOC_OBJ $i: expr) => {
+        $inst.push($crate::flame::instruction::Instruction::AllocObj($i))
+    };
     ($inst: expr; ALLOC_STR $str: expr) => {
         $inst.push($crate::flame::instruction::Instruction::AllocString($str))
     };
-    ($inst: expr; ALLOC_ARR $i: expr) => {
-        $inst.push($crate::flame::instruction::Instruction::AllocArray($i))
+    ($inst: expr; ALLOC_ARR $t: expr, $l: expr) => {
+        $inst.push($crate::flame::instruction::Instruction::AllocArray($t, $l))
     };
     ($inst: expr; STORE_LOCAL $i: expr) => {
         $inst.push($crate::flame::instruction::Instruction::StoreLocal($i))
@@ -100,6 +103,12 @@ macro_rules! inst {
     };
     ($inst: expr; INV $i: expr) => {
         $inst.push($crate::flame::instruction::Instruction::Invoke($i))
+    };
+    ($inst: expr; FIELD $o: expr, $l: expr) => {
+        $inst.push($crate::flame::instruction::Instruction::Field($o, $l))
+    };
+    ($inst: expr; WRITE_FIELD $o: expr, $l: expr) => {
+        $inst.push($crate::flame::instruction::Instruction::WriteField($o, $l))
     };
     ($inst: expr; INDEX) => {
         $inst.push($crate::flame::instruction::Instruction::Index)
@@ -212,8 +221,10 @@ pub enum Instruction {
     /// PUSH    bool: !value
     Not,
 
+    AllocObj(usize),
+    // PERF: use something else to reduce size
     AllocString(String),
-    AllocArray(usize),
+    AllocArray(usize, usize),
 
     StoreLocal(usize),
     LoadLocal(usize),
@@ -221,6 +232,10 @@ pub enum Instruction {
     Return,
 
     Invoke(usize),
+
+    Field(usize, usize),
+    WriteField(usize, usize),
+
     Index,
     WriteIndex,
 
@@ -261,12 +276,15 @@ impl Display for Instruction {
             Self::FCompareEq => write!(f, "FCOMP_EQ"),
             Self::ICompareEq => write!(f, "ICOMP_EQ"),
             Self::Not => write!(f, "NOT"),
+            Self::AllocObj(index) => write!(f, "{:20}{index}", "ALLOC_OBJ"),
             Self::AllocString(str) => write!(f, "{:20}{str:?}", "ALLOC_STR"),
-            Self::AllocArray(len) => write!(f, "{:20}{len:?}", "ALLOC_ARRAY"),
+            Self::AllocArray(index, len) => write!(f, "{:20}{index} {len}", "ALLOC_ARRAY"),
             Self::StoreLocal(index) => write!(f, "{:20}{index}", "STORE_LOCAL"),
             Self::LoadLocal(index) => write!(f, "{:20}{index}", "LOAD_LOCAL"),
             Self::Return => write!(f, "RET"),
             Self::Invoke(num_args) => write!(f, "{:20}{num_args}", "INV"),
+            Self::Field(offset, len) => write!(f, "{:20}{offset} {len}", "FIELD"),
+            Self::WriteField(offset, len) => write!(f, "{:20}{offset} {len}", "WRITE_FIELD"),
             Self::Index => write!(f, "INDEX"),
             Self::WriteIndex => write!(f, "WRITE_INDEX"),
             Self::Goto(index) => write!(f, "{:20}{index}", "GOTO"),

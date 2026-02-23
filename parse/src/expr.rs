@@ -1,18 +1,51 @@
 use std::fmt::{Display, Formatter};
 
-use diagnostic::Span;
-use lex::{And, Asterisk, Bang, ClosedBrace, ClosedBracket, ClosedParen, Comma, Equals, EqualsEquals, Greater, GreaterEq, Hyphen, Less, LessEq, Literal, OpenBrace, OpenBracket, OpenParen, Or, Percent, Period, Plus, Slash, TokenKind};
+use diagnostic::{Span, error};
+use lex::{And, Asterisk, Bang, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Equals, EqualsEquals, Greater, GreaterEq, Hyphen, Less, LessEq, Literal, OpenBrace, OpenBracket, OpenParen, Or, Percent, Period, Plus, Punct, Slash, Token, TokenKind};
 use macros::Parse;
 
 use crate::{Ident, ParseTokens, Result, Stmt, stream::{Punctuated, Repetition, TokenStream}};
 
-#[derive(Parse, Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 enum PrimaryExpr {
     Literal(Literal),
     Identifier(Ident),
+    Struct(ExprStruct),
     Paren(ExprParen),
     Block(ExprBlock),
     Array(ExprArray),
+}
+
+impl ParseTokens for PrimaryExpr {
+    fn parse(stream: &mut TokenStream) -> Result<Self> {
+        match stream.peek()? {
+            Token::Literal(_) => Ok(Self::Literal(Literal::parse(stream)?)),
+            Token::Ident(_) => {
+                // either Ident or Struct
+                let Token::Ident(ident) = stream.next_token()? else { unreachable!() };
+                if matches!(stream.peek()?, Token::Punct(Punct::OpenBrace(_))) {
+                    // Struct
+                    Ok(Self::Struct(ExprStruct {
+                        ident,
+                        open_brace: ParseTokens::parse(stream)?,
+                        fields: ParseTokens::parse(stream)?,
+                        closed_brace: ParseTokens::parse(stream)?,
+                    }))
+                } else {
+                    // Ident
+                    Ok(Self::Identifier(ident))
+                }
+            },
+            Token::Punct(Punct::OpenParen(_)) => Ok(Self::Paren(ExprParen::parse(stream)?)),
+            Token::Punct(Punct::OpenBrace(_)) => Ok(Self::Block(ExprBlock::parse(stream)?)),
+            Token::Punct(Punct::OpenBracket(_)) => Ok(Self::Array(ExprArray::parse(stream)?)),
+            token => Err(error!(token.span() => "expected `expr`")),
+        }
+    }
+
+    fn can_parse(peek: &Token) -> bool {
+        Literal::can_parse(peek) || Ident::can_parse(peek) || ExprParen::can_parse(peek) || ExprBlock::can_parse(peek) || ExprArray::can_parse(peek)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -21,6 +54,7 @@ pub enum Expr {
     Identifier(Ident),
     Field(ExprField),
     FunCall(ExprFunCall),
+    Struct(ExprStruct),
     Paren(ExprParen),
     Block(ExprBlock),
     Array(ExprArray),
@@ -34,6 +68,7 @@ impl From<PrimaryExpr> for Expr {
         match value {
             PrimaryExpr::Literal(literal) => Self::Literal(literal),
             PrimaryExpr::Identifier(ident) => Self::Identifier(ident),
+            PrimaryExpr::Struct(expr_struct) => Self::Struct(expr_struct),
             PrimaryExpr::Paren(expr) => Self::Paren(expr),
             PrimaryExpr::Block(block) => Self::Block(block),
             PrimaryExpr::Array(array) => Self::Array(array),
@@ -49,6 +84,7 @@ impl Expr {
             Expr::Identifier(Ident(_, span)) => span.clone(),
             Expr::Field(ExprField { expr, .. }) => expr.span(),
             Expr::FunCall(ExprFunCall { expr, .. }) => expr.span(),
+            Expr::Struct(ExprStruct { ident, .. }) => ident.span(),
             Expr::Paren(ExprParen { open_paren, .. }) => open_paren.0.clone(),
             Expr::Block(ExprBlock { open_brace, .. }) => open_brace.0.clone(),
             Expr::Array(ExprArray { open_bracket, .. }) => open_bracket.0.clone(),
@@ -123,7 +159,7 @@ impl ParseTokens for Expr {
         Self::parse_all(stream, 0)
     }
 
-    fn can_parse(peek: &lex::Token) -> bool {
+    fn can_parse(peek: &Token) -> bool {
         UnaryOperator::can_parse(peek) || PrimaryExpr::can_parse(peek)
     }
 }
@@ -149,6 +185,21 @@ pub struct ExprMethodCall {
     pub open_paren: OpenParen,
     pub args: Vec<Expr>,
     pub closed_paren: ClosedParen,
+}
+
+#[derive(Parse, Debug, Clone, PartialEq)]
+pub struct ExprStruct {
+    pub ident: Ident,
+    pub open_brace: OpenBrace,
+    pub fields: Punctuated<0, ExprStructField, Comma>,
+    pub closed_brace: ClosedBrace,
+}
+
+#[derive(Parse, Debug, Clone, PartialEq)]
+pub struct ExprStructField {
+    pub ident: Ident,
+    pub colon: Colon,
+    pub expr: Expr,
 }
 
 #[derive(Parse, Debug, Clone, PartialEq)]

@@ -7,8 +7,9 @@ sy match Identifier /\w\+/
 sy match Function /\w\+\ze\s*(\_.*)/
 sy match Operator /[=+\-*/%<>]\|==\|||\|&&/
 sy match Delimiter /[;:.,(){}\[\]]\|->/
-sy match Type /\(\(:\s*\)\@<=\w\+\)/
-sy match Type /\(\(->\s*\)\@<=\w\+\)/
+sy match Type /\(:\s*\)\@<=\w\+/
+sy match Type /\(->\s*\)\@<=\w\+/
+sy match Type /\(struct\s*\)\@<=\w\+/
 sy match Number /\d\+\(\.\d\+\)\?/
 sy match EscapeCharacter /\\[\\nrt"]/ contained
 sy match Special /@\w*/
