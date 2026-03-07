@@ -726,7 +726,10 @@ impl LanternStruct {
     pub fn as_type(&self) -> TypeInfo {
         TypeInfo::Object {
             size: self.size,
-            ref_offets: self.fields.iter().map(|field| field.offset).collect(),
+            ref_offets: self.fields.iter()
+                .filter(|field| field.r#type.is_ref())
+                .map(|field| field.offset)
+                .collect(),
         }
     }
 }

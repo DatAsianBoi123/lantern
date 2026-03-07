@@ -72,6 +72,10 @@ impl LanternType {
         matches!(self, Self::Integer | Self::Float | Self::Bool | Self::Function { .. })
     }
 
+    pub fn is_ref(&self) -> bool {
+        matches!(self, Self::String | Self::Struct(_) | Self::Array(..))
+    }
+
     pub fn size(&self) -> usize {
         match self {
             Self::Integer => 8,
