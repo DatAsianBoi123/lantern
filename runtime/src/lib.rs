@@ -1,5 +1,3 @@
-#![feature(get_mut_unchecked)]
-
 use std::fmt::{Display, Formatter};
 
 use anyhow::anyhow;
