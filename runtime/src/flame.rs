@@ -413,7 +413,7 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
                                         if field_type != field.r#type {
                                             error!(in sink; rhs_span => "expected {}, but got {field_type} instead", field.r#type);
                                         }
-                                        inst!(frame.instructions; WRITE_FIELD field.offset, field.size);
+                                        inst!(frame.instructions; WRITE field.offset, field.size);
                                     } else {
                                         // TODO: type name
                                         error!(in sink; expr_span => "field `{}` does not exist", ident.0);
@@ -562,7 +562,7 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
                         if field_ty != field.r#type {
                             error!(in sink; expr_span => "expected {}, but got {field_ty} instead", field.r#type);
                         }
-                        inst!(frame.instructions; WRITE_FIELD field.offset, field.size);
+                        inst!(frame.instructions; WRITE field.offset, field.size);
                     },
                     None => error!(in sink; ident.span() => "missing field `{}`", field.name),
                 }
@@ -653,7 +653,7 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
                 LanternType::Struct(r#struct) => {
                     if let Some(field) = r#struct.fields.into_iter().find(|field| field.name == ident.0) {
                         let size = if field.r#type.is_primitive() { field.size } else { 0 };
-                        inst!(frame.instructions; FIELD field.offset, size);
+                        inst!(frame.instructions; READ field.offset, size);
                         ControlFlow::Continue(field.r#type)
                     } else {
                         // TODO: type name

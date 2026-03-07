@@ -104,11 +104,11 @@ macro_rules! inst {
     ($inst: expr; INV $i: expr) => {
         $inst.push($crate::flame::instruction::Instruction::Invoke($i))
     };
-    ($inst: expr; FIELD $o: expr, $l: expr) => {
-        $inst.push($crate::flame::instruction::Instruction::Field($o, $l))
+    ($inst: expr; READ $o: expr, $l: expr) => {
+        $inst.push($crate::flame::instruction::Instruction::Read($o, $l))
     };
-    ($inst: expr; WRITE_FIELD $o: expr, $l: expr) => {
-        $inst.push($crate::flame::instruction::Instruction::WriteField($o, $l))
+    ($inst: expr; WRITE $o: expr, $l: expr) => {
+        $inst.push($crate::flame::instruction::Instruction::Write($o, $l))
     };
     ($inst: expr; INDEX) => {
         $inst.push($crate::flame::instruction::Instruction::Index)
@@ -233,8 +233,8 @@ pub enum Instruction {
 
     Invoke(usize),
 
-    Field(usize, usize),
-    WriteField(usize, usize),
+    Read(usize, usize),
+    Write(usize, usize),
 
     Index,
     WriteIndex,
@@ -283,8 +283,8 @@ impl Display for Instruction {
             Self::LoadLocal(index) => write!(f, "{:20}{index}", "LOAD_LOCAL"),
             Self::Return => write!(f, "RET"),
             Self::Invoke(num_args) => write!(f, "{:20}{num_args}", "INV"),
-            Self::Field(offset, len) => write!(f, "{:20}{offset} {len}", "FIELD"),
-            Self::WriteField(offset, len) => write!(f, "{:20}{offset} {len}", "WRITE_FIELD"),
+            Self::Read(offset, len) => write!(f, "{:20}{offset} {len}", "READ"),
+            Self::Write(offset, len) => write!(f, "{:20}{offset} {len}", "WRITE"),
             Self::Index => write!(f, "INDEX"),
             Self::WriteIndex => write!(f, "WRITE_INDEX"),
             Self::Goto(index) => write!(f, "{:20}{index}", "GOTO"),
