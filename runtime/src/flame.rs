@@ -4,7 +4,7 @@ use diagnostic::{DiagnosticSink, error};
 use instruction::InstructionSet;
 use parse::{FunArg, IfBranch, IfStmt, Item, ItemFun, ItemNativeFun, ItemNativeStruct, ItemStruct, LanternFile, Stmt, StructField, ValDeclaration, WhileStmt, expr::{BinaryOperator, Expr, ExprArray, ExprBinary, ExprBlock, ExprField, ExprFunCall, ExprIndex, ExprParen, ExprStruct, ExprUnary, UnaryOperator}, lex::{Break, Ident, Literal, TokenKind}};
 
-use crate::{Slot, VM, error::RuntimeError, flame::{instruction::Instruction, scope::{Globals, Scope, ScopeKind, StackFrame}, r#type::LanternType}, heap::TypeInfo, inst};
+use crate::{Slot, VM, error::RuntimeError, flame::{instruction::Instruction, scope::{Globals, Scope, ScopeKind, StackFrame}, r#type::LanternType}, heap::{HeapArray, HeapObject, TypeInfo}, inst};
 
 pub type NativeFn = fn(&mut VM, [Slot; 256]) -> Result<Slot, RuntimeError>;
 
@@ -388,12 +388,6 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
                                 },
                             };
 
-                            let rhs = compile_expr(*rhs, scope, frame, globals, sink)?;
-
-                            if rhs != inner {
-                                error!(in sink; rhs_span => "expected {inner}, but got {rhs} instead");
-                            }
-
                             let index_span = index.span();
                             let index_type = compile_expr(*index, scope, frame, globals, sink)?;
                             if index_type != LanternType::Integer {
@@ -401,7 +395,21 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
                                 // FIXME: return Err(CompilerError::new(CompilerErrorKind::TypeError { expected: LanternType::Integer, got: index_type }, index_span));
                             }
 
-                            inst!(frame.instructions; WRITE_INDEX);
+                            inst! { frame.instructions;
+                                [PUSHU inner.size() as u64]
+                                [MULTI]
+                                [PUSHU HeapArray::element_offset() as u64]
+                                [ADDI]
+                            }
+
+                            let rhs = compile_expr(*rhs, scope, frame, globals, sink)?;
+
+                            if rhs != inner {
+                                error!(in sink; rhs_span => "expected {inner}, but got {rhs} instead");
+                            }
+
+                            // TODO: bounds checking
+                            inst!(frame.instructions; WRITE inner.size());
                         },
                         Expr::Field(ExprField { expr, ident }) => {
                             let expr_span = expr.span();
@@ -409,11 +417,12 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
                             match ty {
                                 LanternType::Struct(r#struct) => {
                                     if let Some(field) = r#struct.fields.into_iter().find(|field| field.name == ident.0) {
+                                        inst!(frame.instructions; PUSHU (HeapObject::field_offset() + field.offset) as u64);
                                         let field_type = compile_expr(*rhs, scope, frame, globals, sink)?;
                                         if field_type != field.r#type {
                                             error!(in sink; rhs_span => "expected {}, but got {field_type} instead", field.r#type);
                                         }
-                                        inst!(frame.instructions; WRITE field.offset, field.size);
+                                        inst! (frame.instructions; WRITE field.size);
                                     } else {
                                         // TODO: type name
                                         error!(in sink; expr_span => "field `{}` does not exist", ident.0);
@@ -552,17 +561,17 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
                 return ControlFlow::Continue(LanternType::Null);
             };
             inst!(frame.instructions; ALLOC_OBJ r#struct.id);
-
             for field in &r#struct.fields {
                 match fields.0.iter().position(|expr_field| expr_field.ident.0 == field.name) {
                     Some(index) => {
                         let expr_field = fields.0.swap_remove(index);
                         let expr_span = expr_field.expr.span();
+                        inst!(frame.instructions; PUSHU (HeapObject::field_offset() + field.offset) as u64);
                         let field_ty = compile_expr(expr_field.expr, scope, frame, globals, sink)?;
                         if field_ty != field.r#type {
                             error!(in sink; expr_span => "expected {}, but got {field_ty} instead", field.r#type);
                         }
-                        inst!(frame.instructions; WRITE field.offset, field.size);
+                        inst!(frame.instructions; WRITE field.size);
                     },
                     None => error!(in sink; ident.span() => "missing field `{}`", field.name),
                 }
@@ -624,7 +633,14 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
                 // FIXME: return Err(CompilerError::new(CompilerErrorKind::TypeError { expected: LanternType::Integer, got: index_type }, index_span));
             }
 
-            inst!(frame.instructions; INDEX);
+            inst! { frame.instructions;
+                [PUSHU inner.size() as u64]
+                [MULTI]
+                [PUSHU HeapArray::element_offset() as u64]
+                [ADDI]
+                [ADDI]
+                [READ if inner.is_primitive() { inner.size() } else { 0 }]
+            }
             ControlFlow::Continue(inner)
         },
         Expr::Identifier(ident) => {
@@ -653,7 +669,11 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
                 LanternType::Struct(r#struct) => {
                     if let Some(field) = r#struct.fields.into_iter().find(|field| field.name == ident.0) {
                         let size = if field.r#type.is_primitive() { field.size } else { 0 };
-                        inst!(frame.instructions; READ field.offset, size);
+                        inst! { frame.instructions;
+                            [PUSHU (HeapObject::field_offset() + field.offset) as u64]
+                            [ADDI]
+                            [READ size]
+                        }
                         ControlFlow::Continue(field.r#type)
                     } else {
                         // TODO: type name

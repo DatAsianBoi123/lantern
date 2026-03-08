@@ -219,6 +219,10 @@ impl HeapObject {
         object
     }
 
+    pub const fn field_offset() -> usize {
+        size_of::<ObjectHeader>()
+    }
+
     pub fn as_ptr(&self) -> *const u8 {
         self.0
     }
@@ -232,7 +236,7 @@ impl HeapObject {
     }
 
     pub fn size_of(size: usize) -> usize {
-        unsafe { Layout::from_size_align_unchecked(size_of::<ObjectHeader>() + size, 8).pad_to_align().size() }
+        unsafe { Layout::from_size_align_unchecked(Self::field_offset() + size, 8).pad_to_align().size() }
     }
 
     pub fn size(&self) -> usize {
@@ -254,11 +258,11 @@ impl HeapObject {
     }
 
     pub fn field_ptr(&self) -> *const u8 {
-        unsafe { self.0.add(std::mem::size_of::<ObjectHeader>()) }
+        unsafe { self.0.add(Self::field_offset()) }
     }
 
     pub fn field_ptr_mut(&mut self) -> *mut u8 {
-        unsafe { self.0.add(std::mem::size_of::<ObjectHeader>()) }
+        unsafe { self.0.add(Self::field_offset()) }
     }
 
 }
@@ -298,8 +302,12 @@ impl HeapArray {
         array
     }
 
+    pub const fn element_offset() -> usize {
+        size_of::<ObjectHeader>() + size_of::<usize>()
+    }
+
     pub fn size_of(len: usize, element_size: usize) -> usize {
-        unsafe { Layout::from_size_align_unchecked(size_of::<ObjectHeader>() + 8 + len * element_size, 8).pad_to_align().size() }
+        unsafe { Layout::from_size_align_unchecked(Self::element_offset() + len * element_size, 8).pad_to_align().size() }
     }
 
     pub fn size(&self) -> usize {
@@ -333,11 +341,11 @@ impl HeapArray {
     }
 
     pub fn element_ptr(&self) -> *const u8 {
-        unsafe { self.0.add(size_of::<ObjectHeader>() + 8) }
+        unsafe { self.0.add(Self::element_offset()) }
     }
 
     pub fn element_ptr_mut(&mut self) -> *mut u8 {
-        unsafe { self.0.add(size_of::<ObjectHeader>() + 8) }
+        unsafe { self.0.add(Self::element_offset()) }
     }
 
     pub fn is_empty(&self) -> bool {

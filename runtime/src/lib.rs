@@ -1,12 +1,11 @@
 use std::fmt::{Display, Formatter};
 
-use anyhow::anyhow;
 use diagnostic::DiagnosticSink;
 use error::RuntimeError;
 use flame::{GeneratedFunction, instruction::Instruction};
 use parse::LanternFile;
 
-use crate::{flame::scope::Globals, heap::{Heap, HeapArray, HeapObject, TypeInfo}, stack::LanternStack};
+use crate::{flame::scope::Globals, heap::{Heap, HeapArray, TypeInfo}, stack::LanternStack};
 
 macro_rules! args {
     ( ( $($ty: ty),+ $(,)? ) in $stack: expr, $pat: pat => $ret: expr) => {{
@@ -217,16 +216,15 @@ impl VM {
                         self.frames.push(frame);
                         return Ok(());
                     },
-                    Instruction::Field(offset, len) => {
+                    Instruction::Read(len) => {
                         let ptr = unsafe { *frame.operand_stack.pop()?.read::<*mut u8>() };
 
-                        let object = unsafe { HeapObject::from_raw(ptr) };
-                        let field = unsafe { object.field_ptr().add(offset) };
-
                         if len == 0 {
-                            frame.operand_stack.push_ref(unsafe { *(field as *const *const u8) })?;
+                            // reference
+                            frame.operand_stack.push_ref(unsafe { *(ptr as *const *const u8) })?;
                         } else {
-                            let slice = unsafe { std::slice::from_raw_parts(field, len) };
+                            // primitive
+                            let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
                             let mut field_bytes = [0; 8];
                             let (data, _) = field_bytes.split_at_mut(slice.len());
                             data.copy_from_slice(slice);
@@ -234,65 +232,14 @@ impl VM {
                             frame.operand_stack.push_primitive(element)?;
                         }
                     },
-                    Instruction::WriteField(offset, len) => {
-                        let field = &frame.operand_stack.pop()?.0 as *const _ as *const u8;
+                    Instruction::Write(len) => {
+                        let new_field = &frame.operand_stack.pop()?.0 as *const _ as *const u8;
+                        let offset = unsafe { *frame.operand_stack.pop()?.read::<usize>() };
                         let ptr = unsafe { *frame.operand_stack.pop()?.read::<*mut u8>() };
 
-                        let mut object = unsafe { HeapObject::from_raw(ptr) };
-                        let struct_field = unsafe { object.field_ptr_mut().add(offset) };
-
-                        unsafe { struct_field.copy_from(field, len); };
+                        unsafe { ptr.add(offset).copy_from(new_field, len); };
 
                         frame.operand_stack.push_ref(ptr)?;
-                    },
-                    Instruction::Index => {
-                        let index = unsafe { *frame.operand_stack.pop()?.read::<i64>() };
-                        let ptr = unsafe { *frame.operand_stack.pop()?.read::<*mut u8>() };
-
-                        let array = unsafe { HeapArray::from_raw(ptr) };
-                        let ptr = if index >= 0 {
-                            array.get(index as usize).ok_or(RuntimeError(anyhow!("index out of bounds").into()))?
-                        } else {
-                            let index = array.len().checked_sub(index.unsigned_abs() as usize).ok_or(RuntimeError(anyhow!("index out of bounds").into()))?;
-                            array.get(index).expect("index in range")
-                        };
-                        let slice = unsafe { std::slice::from_raw_parts(ptr, array.element_size()) };
-                        let mut element_bytes = [0; 8];
-                        let (data, _) = element_bytes.split_at_mut(slice.len());
-                        data.copy_from_slice(slice);
-                        let element = u64::from_ne_bytes(element_bytes);
-                        if array.is_ref() {
-                            frame.operand_stack.push_ref(element as *const u8)?;
-                        } else {
-                            frame.operand_stack.push_primitive(element)?;
-                        }
-                    },
-                    Instruction::WriteIndex => {
-                        let index = unsafe { *frame.operand_stack.pop()?.read::<i64>() };
-                        let item = frame.operand_stack.pop()?;
-                        let ptr = unsafe { *frame.operand_stack.pop()?.read::<*mut u8>() };
-
-                        let mut array = unsafe { HeapArray::from_raw(ptr) };
-
-                        let index = if index >= 0 {
-                            if index as usize > array.len() {
-                                return Err(RuntimeError(anyhow!("index out of bounds").into()));
-                            };
-                            index as usize
-                        } else {
-                            array.len().checked_sub(index.unsigned_abs() as usize).ok_or(RuntimeError(anyhow!("index out of bounds").into()))?
-                        };
-
-                        let item = if array.is_ref() {
-                            // slot is a pointer to the data
-                            unsafe { *item.read::<*const u8>() }
-                        } else {
-                            // slot is primitive data
-                            item.read::<u8>()
-                        };
-                        unsafe { array.set(index as usize, item) };
-
-                        frame.operand_stack.push_primitive(0)?;
                     },
                     Instruction::Goto(ptr) => {
                         frame.inst_ptr = ptr;
