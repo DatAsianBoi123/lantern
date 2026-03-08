@@ -302,6 +302,7 @@ define_keywords! {
         Native = "native",
         Struct = "struct",
         Return = "return",
+        Continue = "continue",
         Break = "break",
     }
 }

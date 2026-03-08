@@ -198,6 +198,9 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
                 inst!(frame.instructions; RET);
                 return ControlFlow::Break(());
             },
+            Stmt::Continue(_, _) => {
+                todo!()
+            },
             Stmt::Break(Break(_), _) => {
                 todo!()
             },
