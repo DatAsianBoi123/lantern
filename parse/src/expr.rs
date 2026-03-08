@@ -104,7 +104,6 @@ impl Expr {
             }
 
             if BinaryOperator::can_parse(stream.peek()?) {
-                // TODO: no clone?
                 let op = BinaryOperator::parse(&mut stream.clone())?;
                 let (left_bp, right_bp) = op.binding_power();
 
