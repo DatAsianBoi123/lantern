@@ -724,24 +724,19 @@ impl LanternStruct {
             .map(|(_, r#type)| r#type.alignment())
             .max()
             .unwrap_or(1);
-        let size = if fields.is_empty() {
-            0
-        } else {
-            alignment * fields.len() - 1 + fields.last().map(|(_, r#type)| r#type.size()).unwrap_or(0)
-        };
-        let fields = fields.into_iter()
-            .enumerate()
-            .map(|(i, (name, r#type))| LanternStructField {
-                name,
-                offset: i * alignment,
-                size: r#type.size(),
-                r#type,
-            })
-            .collect();
+
+        let mut struct_fields = Vec::with_capacity(fields.len());
+        let mut size = 0;
+        for (name, r#type) in fields {
+            let padding = size % r#type.alignment();
+            size += padding + r#type.size();
+            struct_fields.push(LanternStructField { name, offset: size + padding, size: r#type.size(), r#type });
+        }
+        size += size % alignment;
 
         Self {
             id: index,
-            fields,
+            fields: struct_fields,
             size,
         }
     }
