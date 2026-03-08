@@ -88,7 +88,7 @@ pub struct VM {
 
 impl VM {
     pub const STRING_TYPE_INDEX: usize = 0;
-    pub const PRIMITIVE_ARR_TYPE_INDEX: usize = 0;
+    pub const PRIMITIVE_ARR_TYPE_INDEX: usize = 1;
 
     pub fn new(file: LanternFile, sink: &mut DiagnosticSink) -> Option<Self> {
         let mut globals = Globals {
