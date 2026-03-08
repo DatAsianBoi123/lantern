@@ -167,7 +167,6 @@ pub enum Token {
     Keyword(Keyword),
     Ident(Ident),
     Punct(Punct),
-    Comment(Comment),
     Eof(Span),
 }
 
@@ -178,7 +177,6 @@ impl Display for Token {
             Self::Keyword(keyword) => write!(f, "{keyword}"),
             Self::Ident(ident) => write!(f, "{ident}"),
             Self::Punct(punct) => write!(f, "{punct}"),
-            Self::Comment(comment) => write!(f, "{comment}"),
             Self::Eof(_) => write!(f, "<eof>"),
         }
     }
@@ -203,7 +201,6 @@ impl TokenKind for Token {
             Self::Keyword(keyword) => keyword.span(),
             Self::Ident(Ident(_, span)) => span.clone(),
             Self::Punct(punct) => punct.span(),
-            Self::Comment(comment) => comment.span(),
             Self::Eof(span) => span.clone(),
         }
     }
@@ -345,36 +342,6 @@ define_puncts! {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Comment(pub String, pub Span);
-
-impl Display for Comment {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "//{}", self.0)
-    }
-}
-
-impl TokenKind for Comment {
-    fn name() -> String {
-        "COMMENT".to_string()
-    }
-
-    fn from_token(token: Token) -> Option<Self> {
-        match token {
-            Token::Comment(comment) => Some(comment),
-            _ => None,
-        }
-    }
-
-    fn is_token(token: &Token) -> bool {
-        matches!(token, Token::Comment(_))
-    }
-
-    fn span(&self) -> Span {
-        self.1.clone()
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct Lexer<'a> {
     chars: Chars<'a>,
@@ -466,14 +433,14 @@ impl<'a> Lexer<'a> {
             '*' => Ok(punct!(Asterisk)),
             '/' if self.peek_is('/') => {
                 // comment, ignore characters until newline
-                let span = self.span();
                 self.next_char();
                 let mut comment = String::new();
                 while let Some(next) = self.peek_char() && next != '\n' {
                     comment.push(next);
                     self.next_char();
                 }
-                Ok(Token::Comment(Comment(comment, span)))
+                // don't output comment tokens
+                self.next_token()
             }
             '/' => Ok(punct!(Slash)),
             '%' => Ok(punct!(Percent)),

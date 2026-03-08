@@ -45,9 +45,6 @@ impl ParseTokens for LanternFile {
     fn parse(stream: &mut TokenStream) -> Result<Self> {
         let mut stmts = Vec::new();
         while !stream.is_eof()? {
-            if matches!(stream.peek()?, Token::Comment(_)) {
-                continue;
-            }
             stmts.push(Stmt::parse(stream)?);
         }
         Ok(Self { stmts })
