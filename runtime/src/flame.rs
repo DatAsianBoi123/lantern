@@ -147,7 +147,7 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
                 let break_index = frame.instructions.len();
                 inst!(frame.instructions; POP_GOTO_IF_FALSE 0);
 
-                let block_scope = scope.child_block();
+                let block_scope = scope.child_loop(head);
                 // we can't assume the initial condition is met so these may not even be ran
                 let _ = compile_stmts(block.stmts.0, block_scope, frame, globals, sink);
                 inst!(frame.instructions; GOTO head);
@@ -198,8 +198,12 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
                 inst!(frame.instructions; RET);
                 return ControlFlow::Break(());
             },
-            Stmt::Continue(_, _) => {
-                todo!()
+            Stmt::Continue(Continue(span), _) => {
+                if let Some(head_index) = scope.loop_head_index() {
+                    inst!(frame.instructions; GOTO head_index);
+                } else {
+                    error!(in sink; span => "`continue` not allowed here");
+                }
             },
             Stmt::Break(Break(_), _) => {
                 todo!()
@@ -254,8 +258,8 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
         }
     };
 
-    // implicit return
     match scope.into_kind() {
+        // implicit return
         ScopeKind::Function(_, span) => {
             let ret_type = frame.ret_type.clone().expect("function scope has return type");
             if ret_type != LanternType::Null {
@@ -274,6 +278,12 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
                 [RET]
             }
             ControlFlow::Break(())
+        },
+        ScopeKind::Loop { breaks, .. } => {
+            for break_index in breaks {
+                frame.instructions[break_index] = Instruction::Goto(frame.instructions.len());
+            }
+            ControlFlow::Continue(())
         },
         ScopeKind::Block(_) => ControlFlow::Continue(())
     }
