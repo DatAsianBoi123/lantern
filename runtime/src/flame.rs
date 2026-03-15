@@ -2,9 +2,9 @@ use std::{fmt::{Display, Formatter}, ops::ControlFlow};
 
 use diagnostic::{DiagnosticSink, error};
 use instruction::InstructionSet;
-use parse::{FunArg, IfBranch, IfStmt, Item, ItemFun, ItemNativeFun, ItemNativeStruct, ItemStruct, LanternFile, Stmt, StructField, ValDeclaration, WhileStmt, expr::{BinaryOperator, Expr, ExprArray, ExprBinary, ExprBlock, ExprField, ExprFunCall, ExprIndex, ExprParen, ExprStruct, ExprUnary, UnaryOperator}, lex::{Break, Ident, Literal, TokenKind}};
+use parse::{FunArg, IfBranch, IfStmt, Item, ItemFun, ItemNativeFun, ItemNativeStruct, ItemStruct, LanternFile, Stmt, StructField, ValDeclaration, WhileStmt, expr::{BinaryOperator, Expr, ExprArray, ExprBinary, ExprBlock, ExprField, ExprFunCall, ExprIndex, ExprParen, ExprStruct, ExprUnary, UnaryOperator}, lex::{Break, Continue, Ident, Literal, TokenKind}};
 
-use crate::{Slot, VM, error::RuntimeError, flame::{instruction::Instruction, scope::{Globals, Scope, ScopeKind, StackFrame}, r#type::LanternType}, heap::{HeapArray, HeapObject, TypeInfo}, inst};
+use crate::{Slot, VM, error::RuntimeError, flame::{instruction::Instruction, scope::{Globals, LoopContext, LoopScope, Scope, ScopeKind, StackFrame}, r#type::LanternType}, heap::{HeapArray, HeapObject, TypeInfo}, inst};
 
 pub type NativeFn = fn(&mut VM, [Slot; 256]) -> Result<Slot, RuntimeError>;
 
@@ -33,7 +33,7 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, loop_context: &mut Loo
         .for_each(|item| {
             match item {
                 Item::Using(_) => todo!(),
-                Item::Fun(ItemFun { path: ident, args, ret, .. }) => {
+                Item::Fun(ItemFun { path, args, ret, .. }) => {
                     let args = args.0.iter()
                         .map(|FunArg { ident, r#type, .. }| (ident.clone(), sink.emit_or(LanternType::from_type(r#type, &scope), LanternType::Null)))
                         .collect();
@@ -42,7 +42,18 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, loop_context: &mut Loo
                         .map(|(_, r#type)| sink.emit_or(LanternType::from_type(r#type, &scope), LanternType::Null))
                         .unwrap_or(LanternType::Null);
 
-                    scope.insert_function(ident.last().0.clone(), LanternFunction::new(next_fun_index, args, ret));
+                    let name = path.last().0.clone();
+                    let fun = LanternFunction::new(next_fun_index, args, ret);
+                    if path.items.0.is_empty() {
+                        scope.insert_function(name, fun);
+                    } else {
+                        let ident = &path.items.0[0];
+                        if let Some(item) = scope.item(&ident.0) {
+                            scope.insert_associated(item.type_id(), name, fun);
+                        } else {
+                            error!(in sink; ident.span() => "item `{ident}` not found");
+                        }
+                    }
                     next_fun_index += 1;
                 },
                 Item::NativeFun(ItemNativeFun { ident, args, ret, .. }) => {
@@ -66,7 +77,7 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, loop_context: &mut Loo
                         .collect();
 
                     let lantern_struct = LanternStruct::new(globals.types.len(), fields);
-                    globals.types.push(lantern_struct.as_type());
+                    globals.types.push(lantern_struct.to_type_info());
                     scope.insert_item(ident.0.clone(), LanternItem::Struct(lantern_struct));
                 },
                 Item::NativeStruct(ItemNativeStruct { .. }) => {
@@ -664,21 +675,19 @@ fn compile_expr(expression: Expr, scope: &Scope, loop_context: &mut LoopContext,
         },
         Expr::Identifier(ident) => {
             let span = ident.span();
-            match scope.variable(&ident.0) {
-                Some(var) => {
-                    let local_index = frame.find_local(&ident.0).expect("local var exists");
-                    inst!(frame.instructions; LOAD_LOCAL local_index);
-                    ControlFlow::Continue(var.r#type)
-                },
-                None => {
-                    let Some(fun) = scope.function(&ident.0) else {
-                        error!(in sink; span => "unknown variable `{}`", ident.0);
-                        // FIXME: CompilerError::new(CompilerErrorKind::UnknownVariable(ident), span)?;
-                        return ControlFlow::Continue(LanternType::Null);
-                    };
-                    inst!(frame.instructions; PUSHU fun.index as u64);
-                    ControlFlow::Continue(LanternType::Function { args: fun.args.iter().map(|(_, r#type)| r#type.clone()).collect(), ret: Box::new(fun.ret.clone()) })
-                }
+            if let Some(var) = scope.variable(&ident.0) {
+                let local_index = frame.find_local(&ident.0).expect("local var exists");
+                inst!(frame.instructions; LOAD_LOCAL local_index);
+                ControlFlow::Continue(var.r#type)
+            } else if let Some(fun) = scope.function(&ident.0) {
+                inst!(frame.instructions; PUSHU fun.index as u64);
+                ControlFlow::Continue(fun.to_type())
+            } else if let Some(item) = scope.item(&ident.0) {
+                ControlFlow::Continue(LanternType::Item(item.type_id()))
+            } else {
+                error!(in sink; span => "unknown variable `{}`", ident.0);
+                // FIXME: CompilerError::new(CompilerErrorKind::UnknownVariable(ident), span)?;
+                ControlFlow::Continue(LanternType::Null)
             }
         },
         Expr::Field(ExprField { expr, ident }) => {
@@ -700,6 +709,14 @@ fn compile_expr(expression: Expr, scope: &Scope, loop_context: &mut LoopContext,
                         ControlFlow::Continue(LanternType::Null)
                     }
                 },
+                LanternType::Item(type_id) => {
+                    let Some(fun) = scope.associated(type_id, &ident.0) else {
+                        error!(in sink; ident.span() => "static item `{}` does not exist", ident.0);
+                        return ControlFlow::Continue(LanternType::Null)
+                    };
+                    inst!(frame.instructions; PUSHU fun.index as u64);
+                    ControlFlow::Continue(fun.to_type())
+                },
                 _ => {
                     error!(in sink; expr_span => "field `{}` does not exist on {ty}", ident.0);
                     ControlFlow::Continue(LanternType::Null)
@@ -709,7 +726,7 @@ fn compile_expr(expression: Expr, scope: &Scope, loop_context: &mut LoopContext,
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LanternFunction {
     pub index: usize,
     pub args: Vec<(Ident, LanternType)>,
@@ -720,11 +737,23 @@ impl LanternFunction {
     pub fn new(index: usize, args: Vec<(Ident, LanternType)>, ret: LanternType) -> Self {
         Self { index, args, ret }
     }
+
+    pub fn to_type(&self) -> LanternType {
+        LanternType::Function { args: self.args.iter().map(|(_, r#type)| r#type.clone()).collect(), ret: Box::new(self.ret.clone()) }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LanternItem {
     Struct(LanternStruct),
+}
+
+impl LanternItem {
+    pub fn type_id(&self) -> usize {
+        match self {
+            Self::Struct(r#struct) => r#struct.id,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -752,12 +781,12 @@ impl LanternStruct {
 
         Self {
             id: index,
-            fields: struct_fields,
+            fields: struct_fields.into(),
             size,
         }
     }
 
-    pub fn as_type(&self) -> TypeInfo {
+    pub fn to_type_info(&self) -> TypeInfo {
         TypeInfo::Object {
             size: self.size,
             ref_offets: self.fields.iter()

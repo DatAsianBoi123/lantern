@@ -9,6 +9,7 @@ pub struct Scope<'a> {
     items: HashMap<String, LanternItem>,
     functions: HashMap<String, LanternFunction>,
     variables: HashMap<String, LanternVariable>,
+    associated: HashMap<usize, HashMap<String, LanternFunction>>,
     kind: ScopeKind<'a>,
 }
 
@@ -24,6 +25,7 @@ impl<'a> Scope<'a> {
             items: HashMap::new(),
             functions: HashMap::new(),
             variables: HashMap::new(),
+            associated: HashMap::new(),
             kind: ScopeKind::Module,
         }
     }
@@ -83,6 +85,24 @@ impl<'a> Scope<'a> {
         self.variables.insert(name, LanternVariable::new(r#type));
         Some(())
     }
+
+    pub fn associated(&self, type_id: usize, name: &str) -> Option<&LanternFunction> {
+        match self.kind {
+            ScopeKind::Module => self.associated.get(&type_id).and_then(|associated| associated.get(name)),
+            ScopeKind::Block(parent) | ScopeKind::Function(parent, _) => {
+                self.associated.get(&type_id).and_then(|type_associated| type_associated.get(name))
+                    .or_else(|| parent.associated(type_id, name))
+            }
+        }
+    }
+
+    pub fn insert_associated(&mut self, type_id: usize, name: String, fun: LanternFunction) -> Option<()> {
+        let type_associated = self.associated.entry(type_id)
+            .or_default();
+        if type_associated.contains_key(&name) { return None; };
+        type_associated.insert(name, fun);
+        Some(())
+    }
 }
 
 impl<'a: 'b, 'b> Scope<'a> {
@@ -91,6 +111,7 @@ impl<'a: 'b, 'b> Scope<'a> {
             items: HashMap::new(),
             functions: HashMap::new(),
             variables: HashMap::new(),
+            associated: HashMap::new(),
             kind: ScopeKind::Block(self),
         }
     }
@@ -100,6 +121,7 @@ impl<'a: 'b, 'b> Scope<'a> {
             items: HashMap::new(),
             functions: HashMap::new(),
             variables: HashMap::new(),
+            associated: HashMap::new(),
             kind: ScopeKind::Function(self, span),
         }
     }

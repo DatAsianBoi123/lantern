@@ -113,7 +113,7 @@ impl ParseTokens for Item {
 #[derive(Parse, Debug, Clone, PartialEq)]
 pub struct ItemFun {
     pub fun: Fun,
-    pub ident: Ident,
+    pub path: Path,
     pub open_paren: OpenParen,
     pub args: Punctuated<0, FunArg, Comma>,
     pub closed_paren: ClosedParen,

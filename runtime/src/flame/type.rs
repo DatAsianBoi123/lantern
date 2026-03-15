@@ -17,6 +17,7 @@ pub enum LanternType {
         args: Vec<LanternType>,
         ret: Box<LanternType>,
     },
+    Item(usize),
     Null,
 }
 
@@ -32,6 +33,7 @@ impl Display for LanternType {
             Self::Function { args, ret, .. } => {
                 write!(f, "fun({}) -> {}", args.iter().map(|r#type| r#type.to_string()).collect::<Vec<String>>().join(", "), ret)
             },
+            Self::Item(type_id) => write!(f, "item({type_id})"),
             Self::Null => f.write_str("null"),
         }
     }
@@ -85,6 +87,7 @@ impl LanternType {
             Self::Struct(_) => 8,
             Self::Array(..) => 8,
             Self::Function { .. } => 8,
+            Self::Item(_) => panic!("static types are unsized"),
             Self::Null => 8,
         }
     }
@@ -98,6 +101,7 @@ impl LanternType {
             Self::Struct(_) => 8,
             Self::Array(..) => 8,
             Self::Function { .. } => 8,
+            Self::Item(_) => panic!("static types have no alignment"),
             Self::Null => 8,
         }
     }

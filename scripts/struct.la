@@ -13,7 +13,7 @@ val my_pos: Position = Position {
   y: -55.11,
 };
 
-fun print_pos(pos: Position) {
+fun Position.print(pos: Position) {
   print("name:");
   print(pos.name);
   print("x:");
@@ -22,9 +22,11 @@ fun print_pos(pos: Position) {
   print(float_to_str(pos.y));
 }
 
-print_pos(my_pos);
+Position.print(my_pos);
+
+print("");
 
 my_pos.x = my_pos.x * 2.0;
 my_pos.y = 5.28;
-print_pos(my_pos);
+Position.print(my_pos);
 
