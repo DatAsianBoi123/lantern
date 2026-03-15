@@ -39,7 +39,7 @@ impl<'a> Scope<'a> {
     pub fn item(&self, name: &str) -> Option<&LanternItem> {
         match self.kind {
             ScopeKind::Module => self.items.get(name),
-            ScopeKind::Block(parent) | ScopeKind::Loop { parent, .. } | ScopeKind::Function(parent, _) => {
+            ScopeKind::Block(parent) | ScopeKind::Function(parent, _) => {
                 self.items.get(name)
                     .or_else(|| parent.item(name))
             }
@@ -55,7 +55,7 @@ impl<'a> Scope<'a> {
     pub fn function(&self, name: &str) -> Option<&LanternFunction> {
         match self.kind {
             ScopeKind::Module => self.functions.get(name),
-            ScopeKind::Block(parent) | ScopeKind::Loop { parent, .. } | ScopeKind::Function(parent, _) => {
+            ScopeKind::Block(parent) | ScopeKind::Function(parent, _) => {
                 self.functions.get(name)
                     .or_else(|| parent.function(name))
             }
@@ -71,7 +71,7 @@ impl<'a> Scope<'a> {
     pub fn variable(&self, name: &str) -> Option<LanternVariable> {
         match self.kind {
             ScopeKind::Module | ScopeKind::Function(..) => self.variables.get(name).cloned(),
-            ScopeKind::Block(parent) | ScopeKind::Loop { parent, .. } => {
+            ScopeKind::Block(parent) => {
                 self.variables.get(name).cloned()
                     .or_else(|| parent.variable(name))
             }
@@ -83,14 +83,6 @@ impl<'a> Scope<'a> {
         self.variables.insert(name, LanternVariable::new(r#type));
         Some(())
     }
-
-    pub fn loop_head_index(&self) -> Option<usize> {
-        match self.kind {
-            ScopeKind::Loop { header_index, .. } => Some(header_index),
-            ScopeKind::Block(parent) => parent.loop_head_index(),
-            ScopeKind::Function(_, _) | ScopeKind::Module => None,
-        }
-    }
 }
 
 impl<'a: 'b, 'b> Scope<'a> {
@@ -100,15 +92,6 @@ impl<'a: 'b, 'b> Scope<'a> {
             functions: HashMap::new(),
             variables: HashMap::new(),
             kind: ScopeKind::Block(self),
-        }
-    }
-
-    pub fn child_loop(&'a self, header_index: usize) -> Scope<'b> {
-        Self {
-            items: HashMap::new(),
-            functions: HashMap::new(),
-            variables: HashMap::new(),
-            kind: ScopeKind::Loop { parent: self, header_index, breaks: Vec::new() }
         }
     }
 
@@ -127,10 +110,41 @@ pub enum ScopeKind<'a> {
     Module,
     Function(&'a Scope<'a>, Span),
     Block(&'a Scope<'a>),
-    Loop {
-        parent: &'a Scope<'a>,
-        header_index: usize,
-        breaks: Vec<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoopContext {
+    pub scopes: Vec<LoopScope>,
+}
+
+impl Default for LoopContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LoopContext {
+    pub fn new() -> Self {
+        Self { scopes: Vec::new() }
+    }
+
+    pub fn in_loop(&self) -> bool {
+        !self.scopes.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoopScope {
+    pub head: usize,
+    pub breaks: Vec<usize>,
+}
+
+impl LoopScope {
+    pub fn new(head: usize) -> Self {
+        Self {
+            head,
+            breaks: Vec::new(),
+        }
     }
 }
 

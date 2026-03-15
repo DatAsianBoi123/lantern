@@ -15,11 +15,12 @@ pub mod native;
 
 pub fn ignite(file: LanternFile, globals: &mut Globals, sink: &mut DiagnosticSink) -> GeneratedFunction {
     let mut frame = StackFrame::new_module();
-    let _ = compile_stmts(file.stmts, Scope::new(), &mut frame, globals, sink);
+    let mut loop_context = LoopContext::new();
+    let _ = compile_stmts(file.stmts, Scope::new(), &mut loop_context, &mut frame, globals, sink);
     frame.into_gen()
 }
 
-fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame, globals: &mut Globals, sink: &mut DiagnosticSink) -> ControlFlow<()> {
+fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, loop_context: &mut LoopContext, frame: &mut StackFrame, globals: &mut Globals, sink: &mut DiagnosticSink) -> ControlFlow<()> {
     let mut next_fun_index = globals.funs.len();
     statements.iter()
         .filter_map(|statement| {
@@ -32,7 +33,7 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
         .for_each(|item| {
             match item {
                 Item::Using(_) => todo!(),
-                Item::Fun(ItemFun { ident, args, ret, .. }) => {
+                Item::Fun(ItemFun { path: ident, args, ret, .. }) => {
                     let args = args.0.iter()
                         .map(|FunArg { ident, r#type, .. }| (ident.clone(), sink.emit_or(LanternType::from_type(r#type, &scope), LanternType::Null)))
                         .collect();
@@ -41,7 +42,7 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
                         .map(|(_, r#type)| sink.emit_or(LanternType::from_type(r#type, &scope), LanternType::Null))
                         .unwrap_or(LanternType::Null);
 
-                    scope.insert_function(ident.0.clone(), LanternFunction::new(next_fun_index, args, ret));
+                    scope.insert_function(ident.last().0.clone(), LanternFunction::new(next_fun_index, args, ret));
                     next_fun_index += 1;
                 },
                 Item::NativeFun(ItemNativeFun { ident, args, ret, .. }) => {
@@ -86,7 +87,7 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
                     match current_branch {
                         IfBranch::ElseIf(IfStmt { condition, block, branch, .. }) => {
                             let condition_span = condition.span();
-                            let r#type = compile_expr(condition, &scope, frame, globals, sink)?;
+                            let r#type = compile_expr(condition, &scope, loop_context, frame, globals, sink)?;
                             if r#type != LanternType::Bool {
                                 error!(in sink; condition_span => "expected `bool`, but got {type} instead");
                                 // FIXME: return Err(CompilerError::new(CompilerErrorKind::TypeError { expected: LanternType::Bool, got: r#type }, condition_span));
@@ -96,7 +97,7 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
                             inst!(frame.instructions; GOTO_IF_FALSE 0);
 
                             let block_scope = scope.child_block();
-                            let branch_return = compile_stmts(block.stmts.0, block_scope, frame, globals, sink);
+                            let branch_return = compile_stmts(block.stmts.0, block_scope, loop_context, frame, globals, sink);
                             match (overall_return, branch_return) {
                                 (Some(ControlFlow::Break(_)), ControlFlow::Break(_)) => {},
                                 (Some(ControlFlow::Break(_)), ControlFlow::Continue(_)) => overall_return = Some(branch_return),
@@ -114,7 +115,7 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
                         },
                         IfBranch::Else(block) => {
                             let block_scope = scope.child_block();
-                            let branch_return = compile_stmts(block.stmts.0, block_scope, frame, globals, sink);
+                            let branch_return = compile_stmts(block.stmts.0, block_scope, loop_context, frame, globals, sink);
                             match (overall_return, branch_return) {
                                 (Some(ControlFlow::Break(_)), ControlFlow::Break(_)) => {},
                                 (Some(ControlFlow::Break(_)), ControlFlow::Continue(_)) => overall_return = Some(branch_return),
@@ -138,8 +139,10 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
             Stmt::WhileStmt(WhileStmt { condition, block, .. }) => {
                 let condition_span = condition.span();
                 let head = frame.instructions.len();
+                let loop_scope = LoopScope::new(head);
+                loop_context.scopes.push(loop_scope);
 
-                let r#type = compile_expr(condition, &scope, frame, globals, sink)?;
+                let r#type = compile_expr(condition, &scope, loop_context, frame, globals, sink)?;
                 if r#type != LanternType::Bool {
                     error!(in sink; condition_span => "expected `bool`, but got {type} instead");
                     // FIXME: return Err(CompilerError::new(CompilerErrorKind::TypeError { expected: LanternType::Bool, got: r#type }, condition_span));
@@ -147,12 +150,16 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
                 let break_index = frame.instructions.len();
                 inst!(frame.instructions; POP_GOTO_IF_FALSE 0);
 
-                let block_scope = scope.child_loop(head);
+                let block_scope = scope.child_block();
                 // we can't assume the initial condition is met so these may not even be ran
-                let _ = compile_stmts(block.stmts.0, block_scope, frame, globals, sink);
+                let _ = compile_stmts(block.stmts.0, block_scope, loop_context, frame, globals, sink);
                 inst!(frame.instructions; GOTO head);
 
                 frame.instructions[break_index] = Instruction::PopGotoIfFalse(frame.instructions.len());
+
+                for break_index in loop_context.scopes.pop().expect("in loop").breaks {
+                    frame.instructions[break_index] = Instruction::Goto(frame.instructions.len());
+                }
             },
             Stmt::ValDeclaration(ValDeclaration { ident, r#type, init: None, .. }) => {
                 // TODO: unitialized vars
@@ -168,7 +175,7 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
             },
             Stmt::ValDeclaration(ValDeclaration { ident, r#type, init: Some((_, init)), .. }) => {
                 let init_span = init.span();
-                let init_type = compile_expr(init, &scope, frame, globals, sink)?;
+                let init_type = compile_expr(init, &scope, loop_context, frame, globals, sink)?;
 
                 let var_type = sink.emit_or(LanternType::from_type(&r#type, &scope), LanternType::Null);
                 if var_type != init_type {
@@ -190,7 +197,7 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
                         return ControlFlow::Break(());
                     },
                 };
-                let ret = compile_expr(expr, &scope, frame, globals, sink)?;
+                let ret = compile_expr(expr, &scope, loop_context, frame, globals, sink)?;
                 if expected_ret != ret {
                     error!(in sink; ret_keyword.span() => "expected {expected_ret}, but got {ret} instead");
                     // FIXME: return Err(CompilerError::new(CompilerErrorKind::TypeError { expected: expected_ret, got: ret }, span));
@@ -199,17 +206,22 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
                 return ControlFlow::Break(());
             },
             Stmt::Continue(Continue(span), _) => {
-                if let Some(head_index) = scope.loop_head_index() {
-                    inst!(frame.instructions; GOTO head_index);
+                if let Some(LoopScope { head, .. }) = loop_context.scopes.last() {
+                    inst!(frame.instructions; GOTO *head);
                 } else {
                     error!(in sink; span => "`continue` not allowed here");
                 }
             },
-            Stmt::Break(Break(_), _) => {
-                todo!()
+            Stmt::Break(Break(span), _) => {
+                if let Some(LoopScope { breaks, .. }) = loop_context.scopes.last_mut() {
+                    breaks.push(frame.instructions.len());
+                    inst!(frame.instructions; GOTO 0);
+                } else {
+                    error!(in sink; span => "`break` not allowed here");
+                }
             },
             Stmt::Expr(expr, _) => {
-                compile_expr(expr, &scope, frame, globals, sink)?;
+                compile_expr(expr, &scope, loop_context, frame, globals, sink)?;
                 inst!(frame.instructions; POP);
             },
             Stmt::Item(Item::Using(_)) => todo!(),
@@ -237,7 +249,7 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
 
                 let current_index = globals.funs.len();
                 globals.funs.push(GeneratedFunction::Instructions(InstructionSet::default()));
-                let _ = compile_stmts(block.stmts.0, fun_scope, &mut fun_frame, globals, sink);
+                let _ = compile_stmts(block.stmts.0, fun_scope, loop_context, &mut fun_frame, globals, sink);
 
                 globals.funs[current_index] = fun_frame.into_gen();
             },
@@ -279,17 +291,11 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, frame: &mut StackFrame
             }
             ControlFlow::Break(())
         },
-        ScopeKind::Loop { breaks, .. } => {
-            for break_index in breaks {
-                frame.instructions[break_index] = Instruction::Goto(frame.instructions.len());
-            }
-            ControlFlow::Continue(())
-        },
         ScopeKind::Block(_) => ControlFlow::Continue(())
     }
 }
 
-fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals: &mut Globals, sink: &mut DiagnosticSink) -> ControlFlow<(), LanternType> {
+fn compile_expr(expression: Expr, scope: &Scope, loop_context: &mut LoopContext, frame: &mut StackFrame, globals: &mut Globals, sink: &mut DiagnosticSink) -> ControlFlow<(), LanternType> {
     match expression {
         Expr::Literal(Literal::Integer(int, _)) => {
             inst!(frame.instructions; PUSHI int);
@@ -313,7 +319,7 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
         },
         Expr::FunCall(ExprFunCall { expr, args, .. }) => {
             let span = expr.span();
-            let r#type = compile_expr(*expr, scope, frame, globals, sink)?;
+            let r#type = compile_expr(*expr, scope, loop_context, frame, globals, sink)?;
             if let LanternType::Function { args: fun_args, ret } = r#type {
                 let fun_args_len = fun_args.len();
                 if args.0.len() != fun_args_len {
@@ -323,7 +329,7 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
 
                 for (expr, r#type) in args.0.into_iter().zip(fun_args) {
                     let expr_span = expr.span();
-                    let expr_type = compile_expr(expr, scope, frame, globals, sink)?;
+                    let expr_type = compile_expr(expr, scope, loop_context, frame, globals, sink)?;
                     if expr_type != r#type {
                         error!(in sink; expr_span => "expected {type}, got {expr_type} instead");
                         // FIXME: return Err(CompilerError::new(CompilerErrorKind::TypeError { expected: r#type, got: expr_type }, expr_span));
@@ -343,7 +349,7 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
             // special cases
             match op {
                 BinaryOperator::And(_) | BinaryOperator::Or(_) => {
-                    let lhs_type = compile_expr(*lhs, scope, frame, globals, sink)?;
+                    let lhs_type = compile_expr(*lhs, scope, loop_context, frame, globals, sink)?;
                     let goto_index = frame.instructions.len();
 
                     match op {
@@ -353,7 +359,7 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
                     };
                     inst!(frame.instructions; POP);
 
-                    let rhs_type = compile_expr(*rhs, scope, frame, globals, sink)?;
+                    let rhs_type = compile_expr(*rhs, scope, loop_context, frame, globals, sink)?;
 
                     let goto_inst = match op {
                         BinaryOperator::And(_) => Instruction::GotoIfFalse(frame.instructions.len()),
@@ -379,7 +385,7 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
                                 return ControlFlow::Continue(LanternType::Null);
                             };
 
-                            let rhs = compile_expr(*rhs, scope, frame, globals, sink)?;
+                            let rhs = compile_expr(*rhs, scope, loop_context, frame, globals, sink)?;
 
                             if var.r#type != rhs {
                                 error!(in sink; rhs_span => "expected {}, but got {rhs} instead", var.r#type);
@@ -390,7 +396,7 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
                         },
                         Expr::Index(ExprIndex { expr, index, .. }) => {
                             let expr_span = expr.span();
-                            let r#type = compile_expr(*expr, scope, frame, globals, sink)?;
+                            let r#type = compile_expr(*expr, scope, loop_context, frame, globals, sink)?;
                             let inner = match r#type {
                                 LanternType::Array(inner) => *inner,
                                 LanternType::String => LanternType::Integer,
@@ -402,7 +408,7 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
                             };
 
                             let index_span = index.span();
-                            let index_type = compile_expr(*index, scope, frame, globals, sink)?;
+                            let index_type = compile_expr(*index, scope, loop_context, frame, globals, sink)?;
                             if index_type != LanternType::Integer {
                                 error!(in sink; index_span => "expected index to be an integer");
                                 // FIXME: return Err(CompilerError::new(CompilerErrorKind::TypeError { expected: LanternType::Integer, got: index_type }, index_span));
@@ -415,7 +421,7 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
                                 [ADDI]
                             }
 
-                            let rhs = compile_expr(*rhs, scope, frame, globals, sink)?;
+                            let rhs = compile_expr(*rhs, scope, loop_context, frame, globals, sink)?;
 
                             if rhs != inner {
                                 error!(in sink; rhs_span => "expected {inner}, but got {rhs} instead");
@@ -426,12 +432,12 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
                         },
                         Expr::Field(ExprField { expr, ident }) => {
                             let expr_span = expr.span();
-                            let ty = compile_expr(*expr, scope, frame, globals, sink)?;
+                            let ty = compile_expr(*expr, scope, loop_context, frame, globals, sink)?;
                             match ty {
                                 LanternType::Struct(r#struct) => {
                                     if let Some(field) = r#struct.fields.into_iter().find(|field| field.name == ident.0) {
                                         inst!(frame.instructions; PUSHU (HeapObject::field_offset() + field.offset) as u64);
-                                        let field_type = compile_expr(*rhs, scope, frame, globals, sink)?;
+                                        let field_type = compile_expr(*rhs, scope, loop_context, frame, globals, sink)?;
                                         if field_type != field.r#type {
                                             error!(in sink; rhs_span => "expected {}, but got {field_type} instead", field.r#type);
                                         }
@@ -454,8 +460,8 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
                 _ => {},
             }
 
-            let lhs = compile_expr(*lhs, scope, frame, globals, sink)?;
-            let rhs = compile_expr(*rhs, scope, frame, globals, sink)?;
+            let lhs = compile_expr(*lhs, scope, loop_context, frame, globals, sink)?;
+            let rhs = compile_expr(*rhs, scope, loop_context, frame, globals, sink)?;
 
             match (lhs, op, rhs) {
                 (LanternType::Float, BinaryOperator::Add(_), LanternType::Float) => {
@@ -547,7 +553,7 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
             }
         },
         Expr::Unary(ExprUnary { op, expr }) => {
-            let r#type = compile_expr(*expr, scope, frame, globals, sink)?;
+            let r#type = compile_expr(*expr, scope, loop_context, frame, globals, sink)?;
             match (op, r#type) {
                 (UnaryOperator::Negate(_), LanternType::Float) => {
                     inst!(frame.instructions; NEGF);
@@ -580,7 +586,7 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
                         let expr_field = fields.0.swap_remove(index);
                         let expr_span = expr_field.expr.span();
                         inst!(frame.instructions; PUSHU (HeapObject::field_offset() + field.offset) as u64);
-                        let field_ty = compile_expr(expr_field.expr, scope, frame, globals, sink)?;
+                        let field_ty = compile_expr(expr_field.expr, scope, loop_context, frame, globals, sink)?;
                         if field_ty != field.r#type {
                             error!(in sink; expr_span => "expected {}, but got {field_ty} instead", field.r#type);
                         }
@@ -596,10 +602,10 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
 
             ControlFlow::Continue(LanternType::Struct(r#struct.clone()))
         },
-        Expr::Paren(ExprParen { expr, .. }) => compile_expr(*expr, scope, frame, globals, sink),
+        Expr::Paren(ExprParen { expr, .. }) => compile_expr(*expr, scope, loop_context, frame, globals, sink),
         Expr::Block(ExprBlock { stmts, .. }) => {
             let block_scope = scope.child_block();
-            compile_stmts(stmts.0, block_scope, frame, globals, sink)?;
+            compile_stmts(stmts.0, block_scope, loop_context, frame, globals, sink)?;
             inst!(frame.instructions; PUSHU 0);
             ControlFlow::Continue(LanternType::Null)
         },
@@ -609,7 +615,7 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
 
             for expr in elements.0 {
                 let span = expr.span();
-                inner = match (inner, compile_expr(expr, scope, frame, globals, sink)?) {
+                inner = match (inner, compile_expr(expr, scope, loop_context, frame, globals, sink)?) {
                     (None, r#type) => Some(r#type),
                     (Some(r#type), expr_type) if r#type == expr_type => Some(r#type),
                     (Some(r#type), expr_type) => {
@@ -629,7 +635,7 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
         },
         Expr::Index(ExprIndex { expr, index, .. }) => {
             let expr_span = expr.span();
-            let r#type = compile_expr(*expr, scope, frame, globals, sink)?;
+            let r#type = compile_expr(*expr, scope, loop_context, frame, globals, sink)?;
             let inner = match r#type {
                 LanternType::Array(inner) => *inner,
                 LanternType::String => LanternType::Integer,
@@ -640,7 +646,7 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
                 },
             };
             let index_span = index.span();
-            let index_type = compile_expr(*index, scope, frame, globals, sink)?;
+            let index_type = compile_expr(*index, scope, loop_context, frame, globals, sink)?;
             if index_type != LanternType::Integer {
                 error!(in sink; index_span => "expected index to be an integer");
                 // FIXME: return Err(CompilerError::new(CompilerErrorKind::TypeError { expected: LanternType::Integer, got: index_type }, index_span));
@@ -677,7 +683,7 @@ fn compile_expr(expression: Expr, scope: &Scope, frame: &mut StackFrame, globals
         },
         Expr::Field(ExprField { expr, ident }) => {
             let expr_span = expr.span();
-            let ty = compile_expr(*expr, scope, frame, globals, sink)?;
+            let ty = compile_expr(*expr, scope, loop_context, frame, globals, sink)?;
             match ty {
                 LanternType::Struct(r#struct) => {
                     if let Some(field) = r#struct.fields.into_iter().find(|field| field.name == ident.0) {
