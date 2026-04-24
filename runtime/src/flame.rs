@@ -2,9 +2,9 @@ use std::{fmt::{Display, Formatter}, ops::ControlFlow};
 
 use diagnostic::{DiagnosticSink, error};
 use instruction::InstructionSet;
-use parse::{FunArg, IfBranch, IfStmt, Item, ItemFun, ItemNativeFun, ItemNativeStruct, ItemStruct, LanternFile, Stmt, StructField, ValDeclaration, WhileStmt, expr::{BinaryOperator, Expr, ExprArray, ExprBinary, ExprBlock, ExprField, ExprFunCall, ExprIndex, ExprParen, ExprStruct, ExprUnary, UnaryOperator}, lex::{Break, Continue, Ident, Literal, TokenKind}};
+use parse::{FunArg, IfBranch, IfStmt, Item, ItemFun, ItemNativeFun, ItemPrimitive, ItemStruct, LanternFile, Stmt, StructField, ValDeclaration, WhileStmt, expr::{BinaryOperator, Expr, ExprArray, ExprBinary, ExprBlock, ExprField, ExprFunCall, ExprIndex, ExprParen, ExprStruct, ExprUnary, UnaryOperator}, lex::{Break, Ident, Literal, TokenKind}};
 
-use crate::{Slot, VM, error::RuntimeError, flame::{instruction::Instruction, scope::{Globals, LoopContext, LoopScope, Scope, ScopeKind, StackFrame}, r#type::LanternType}, heap::{HeapArray, HeapObject, TypeInfo}, inst};
+use crate::{Slot, VM, error::RuntimeError, flame::{instruction::Instruction, scope::{Globals, ItemIdentifier, LoopContext, LoopScope, Scope, ScopeKind, StackFrame}, r#type::LanternType}, heap::{HeapArray, HeapObject, TypeInfo}, inst};
 
 pub type NativeFn = fn(&mut VM, [Slot; 256]) -> Result<Slot, RuntimeError>;
 
@@ -20,7 +20,14 @@ pub fn ignite(file: LanternFile, globals: &mut Globals, sink: &mut DiagnosticSin
     frame.into_gen()
 }
 
-fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, loop_context: &mut LoopContext, frame: &mut StackFrame, globals: &mut Globals, sink: &mut DiagnosticSink) -> ControlFlow<()> {
+fn compile_stmts(
+    statements: Vec<Stmt>,
+    mut scope: Scope,
+    loop_context: &mut LoopContext,
+    frame: &mut StackFrame,
+    globals: &mut Globals,
+    sink: &mut DiagnosticSink,
+) -> ControlFlow<()> {
     let mut next_fun_index = globals.funs.len();
     statements.iter()
         .filter_map(|statement| {
@@ -44,14 +51,15 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, loop_context: &mut Loo
 
                     let name = path.last().0.clone();
                     let fun = LanternFunction::new(next_fun_index, args, ret);
-                    if path.items.0.is_empty() {
+                    if path.items.0.len() == 1 {
                         scope.insert_function(name, fun);
                     } else {
                         let ident = &path.items.0[0];
                         if let Some(item) = scope.item(&ident.0) {
-                            scope.insert_associated(item.type_id(), name, fun);
+                            // TODO: associated with same name
+                            scope.insert_associated(item.identifier(), name, fun);
                         } else {
-                            error!(in sink; ident.span() => "item `{ident}` not found");
+                            error!(in sink; ident.span() => "item {ident} not found");
                         }
                     }
                     next_fun_index += 1;
@@ -80,8 +88,9 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, loop_context: &mut Loo
                     globals.types.push(lantern_struct.to_type_info());
                     scope.insert_item(ident.0.clone(), LanternItem::Struct(lantern_struct));
                 },
-                Item::NativeStruct(ItemNativeStruct { .. }) => {
-
+                Item::Primitive(ItemPrimitive { ident, .. }) => {
+                    let Some(primitive) = native::get_primitive(&ident.0) else { panic!("unknown primitive `{}`", ident.0) };
+                    scope.insert_item(ident.0.clone(), LanternItem::Primitive(primitive));
                 },
             }
         });
@@ -99,9 +108,8 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, loop_context: &mut Loo
                         IfBranch::ElseIf(IfStmt { condition, block, branch, .. }) => {
                             let condition_span = condition.span();
                             let r#type = compile_expr(condition, &scope, loop_context, frame, globals, sink)?;
-                            if r#type != LanternType::Bool {
+                            if !r#type.is_bool() {
                                 error!(in sink; condition_span => "expected `bool`, but got {type} instead");
-                                // FIXME: return Err(CompilerError::new(CompilerErrorKind::TypeError { expected: LanternType::Bool, got: r#type }, condition_span));
                             }
 
                             let false_index = frame.instructions.len();
@@ -154,9 +162,8 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, loop_context: &mut Loo
                 loop_context.scopes.push(loop_scope);
 
                 let r#type = compile_expr(condition, &scope, loop_context, frame, globals, sink)?;
-                if r#type != LanternType::Bool {
+                if !r#type.is_bool() {
                     error!(in sink; condition_span => "expected `bool`, but got {type} instead");
-                    // FIXME: return Err(CompilerError::new(CompilerErrorKind::TypeError { expected: LanternType::Bool, got: r#type }, condition_span));
                 }
                 let break_index = frame.instructions.len();
                 inst!(frame.instructions; POP_GOTO_IF_FALSE 0);
@@ -177,7 +184,6 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, loop_context: &mut Loo
                 let local_index = frame.declare_local(ident.0.clone());
                 if scope.insert_variable(ident.0.clone(), sink.emit_or(LanternType::from_type(&r#type, &scope), LanternType::Null)).is_none() {
                     error!(in sink; ident.span() => "variable `{}` already declared", ident.0);
-                    // FIXME: CompilerError::new(CompilerErrorKind::ItemAlreadyDeclared(ident), ident_span)?;
                 }
                 inst! { frame.instructions; 
                     [PUSHU 0]
@@ -191,12 +197,10 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, loop_context: &mut Loo
                 let var_type = sink.emit_or(LanternType::from_type(&r#type, &scope), LanternType::Null);
                 if var_type != init_type {
                     error!(in sink; init_span => "expected {var_type}, but got {init_type} instead");
-                    // FIXME: return Err(CompilerError::new(CompilerErrorKind::TypeError { expected: var_type, got: init_type }, init_span));
                 }
                 let local_index = frame.declare_local(ident.0.clone());
                 if scope.insert_variable(ident.0.clone(), var_type).is_none() {
                     error!(in sink; ident.span() => "variable `{}` already declared", ident.0);
-                    // FIXME: CompilerError::new(CompilerErrorKind::ItemAlreadyDeclared(ident.clone()), ident_span)?;
                 }
                 inst!(frame.instructions; STORE_LOCAL local_index);
             },
@@ -211,16 +215,15 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, loop_context: &mut Loo
                 let ret = compile_expr(expr, &scope, loop_context, frame, globals, sink)?;
                 if expected_ret != ret {
                     error!(in sink; ret_keyword.span() => "expected {expected_ret}, but got {ret} instead");
-                    // FIXME: return Err(CompilerError::new(CompilerErrorKind::TypeError { expected: expected_ret, got: ret }, span));
                 }
                 inst!(frame.instructions; RET);
                 return ControlFlow::Break(());
             },
-            Stmt::Continue(Continue(span), _) => {
+            Stmt::Continue(continue_keyword, _) => {
                 if let Some(LoopScope { head, .. }) = loop_context.scopes.last() {
                     inst!(frame.instructions; GOTO *head);
                 } else {
-                    error!(in sink; span => "`continue` not allowed here");
+                    error!(in sink; continue_keyword.span() => "{continue_keyword} not allowed here");
                 }
             },
             Stmt::Break(Break(span), _) => {
@@ -251,7 +254,6 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, loop_context: &mut Loo
                                 fun_frame.declare_local(ident.0.clone());
                                 if fun_scope.insert_variable(ident.0.clone(), r#type).is_none() {
                                     error!(in sink; ident.span() => "argument `{}` already declared", ident.0);
-                                    // FIXME: .ok_or(CompilerError::new(CompilerErrorKind::ItemAlreadyDeclared(ident), span))
                                 }
                             },
                             Err(err) => sink.emit(err),
@@ -267,7 +269,6 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, loop_context: &mut Loo
             Stmt::Item(Item::NativeFun(ItemNativeFun { ident, .. })) => {
                 let ptr = native::get_native_fn(&ident.0).unwrap_or_else(|| {
                     error!(in sink; ident.span() => "unknown native `{}`", ident.0);
-                    // FIXME: CompilerError::new(CompilerErrorKind::UnknownNative(ident), span)
                     fn empty(_: &mut VM, _: [Slot; 256]) -> Result<Slot, RuntimeError> {
                         Ok(Slot::new_primitive(0))
                     }
@@ -277,7 +278,7 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, loop_context: &mut Loo
                 globals.funs.push(GeneratedFunction::Native(ptr));
             },
             Stmt::Item(Item::Struct(_)) => {},
-            Stmt::Item(Item::NativeStruct(_)) => {},
+            Stmt::Item(Item::Primitive(_)) => {},
         }
     };
 
@@ -287,7 +288,6 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, loop_context: &mut Loo
             let ret_type = frame.ret_type.clone().expect("function scope has return type");
             if ret_type != LanternType::Null {
                 error!(in sink; span => "expected function to return {ret_type}");
-                // FIXME: return Err(CompilerError::new(CompilerErrorKind::TypeError { expected: ret_type, got: LanternType::Null }, span));
             };
             inst! { frame.instructions;
                 [PUSHU 0]
@@ -306,27 +306,36 @@ fn compile_stmts(statements: Vec<Stmt>, mut scope: Scope, loop_context: &mut Loo
     }
 }
 
-fn compile_expr(expression: Expr, scope: &Scope, loop_context: &mut LoopContext, frame: &mut StackFrame, globals: &mut Globals, sink: &mut DiagnosticSink) -> ControlFlow<(), LanternType> {
+fn compile_expr(
+    expression: Expr,
+    scope: &Scope,
+    loop_context: &mut LoopContext,
+    frame: &mut StackFrame,
+    globals: &mut Globals,
+    sink: &mut DiagnosticSink,
+) -> ControlFlow<(), LanternType> {
     match expression {
         Expr::Literal(Literal::Integer(int, _)) => {
             inst!(frame.instructions; PUSHI int);
-            ControlFlow::Continue(LanternType::Integer)
+            ControlFlow::Continue(LanternType::Primitive(&native::INT_PRIMITIVE))
         },
         Expr::Literal(Literal::Float(float, _)) => {
             inst!(frame.instructions; PUSHF float);
-            ControlFlow::Continue(LanternType::Float)
+            ControlFlow::Continue(LanternType::Primitive(&native::FLOAT_PRIMITIVE))
         },
         Expr::Literal(Literal::True(_)) => {
             inst!(frame.instructions; PUSHU 1);
-            ControlFlow::Continue(LanternType::Bool)
+            ControlFlow::Continue(LanternType::Primitive(&native::BOOL_PRIMITIVE))
         },
         Expr::Literal(Literal::False(_)) => {
             inst!(frame.instructions; PUSHU 0);
-            ControlFlow::Continue(LanternType::Bool)
+            ControlFlow::Continue(LanternType::Primitive(&native::BOOL_PRIMITIVE))
         },
         Expr::Literal(Literal::String(string, _)) => {
+            // TODO: better string alloc
             inst!(frame.instructions; ALLOC_STR string.clone());
-            ControlFlow::Continue(LanternType::String)
+            // TODO: make string a struct instead of array
+            ControlFlow::Continue(LanternType::Array(Box::new(LanternType::Primitive(&native::CHAR_PRIMITIVE))))
         },
         Expr::FunCall(ExprFunCall { expr, args, .. }) => {
             let span = expr.span();
@@ -335,7 +344,6 @@ fn compile_expr(expression: Expr, scope: &Scope, loop_context: &mut LoopContext,
                 let fun_args_len = fun_args.len();
                 if args.0.len() != fun_args_len {
                     error!(in sink; span => "expected function to have {} args, got {} args instead", fun_args_len, args.0.len());
-                    // FIXME: return Err(CompilerError::new(CompilerErrorKind::MismatchedFunctionArgs { expects: fun_args.len(), got: args.0.len() }, span));
                 }
 
                 for (expr, r#type) in args.0.into_iter().zip(fun_args) {
@@ -343,7 +351,6 @@ fn compile_expr(expression: Expr, scope: &Scope, loop_context: &mut LoopContext,
                     let expr_type = compile_expr(expr, scope, loop_context, frame, globals, sink)?;
                     if expr_type != r#type {
                         error!(in sink; expr_span => "expected {type}, got {expr_type} instead");
-                        // FIXME: return Err(CompilerError::new(CompilerErrorKind::TypeError { expected: r#type, got: expr_type }, expr_span));
                     }
                 }
 
@@ -353,7 +360,6 @@ fn compile_expr(expression: Expr, scope: &Scope, loop_context: &mut LoopContext,
             } else {
                 error!(in sink; span => "expected function");
                 ControlFlow::Continue(LanternType::Null)
-                // FIXME: Err(CompilerError::new(CompilerErrorKind::TypeError { expected, got: r#type }, span))
             }
         },
         Expr::Binary(ExprBinary { lhs, op, rhs }) => {
@@ -379,12 +385,11 @@ fn compile_expr(expression: Expr, scope: &Scope, loop_context: &mut LoopContext,
                     };
                     frame.instructions[goto_index] = goto_inst;
 
-                    if (lhs_type.clone(), rhs_type.clone()) != (LanternType::Bool, LanternType::Bool) {
+                    if !lhs_type.is_bool() || !rhs_type.is_bool() {
                         error!(in sink; op.span() => "{op} cannot be applied to {lhs_type} and {rhs_type}");
-                        // FIXME: return Err(CompilerError::new(CompilerErrorKind::BinaryOperator { op, got: (lhs_type, rhs_type) }, span));
                     }
 
-                    return ControlFlow::Continue(LanternType::Bool);
+                    return ControlFlow::Continue(LanternType::Primitive(&native::BOOL_PRIMITIVE));
                 },
                 BinaryOperator::Assign(punct) => {
                     let rhs_span = rhs.span();
@@ -392,7 +397,6 @@ fn compile_expr(expression: Expr, scope: &Scope, loop_context: &mut LoopContext,
                         Expr::Identifier(ident) => {
                             let Some(var) = scope.variable(&ident.0) else {
                                 error!(in sink; ident.span() => "unknown variable `{}`", ident.0);
-                                // FIXME: CompilerError::new(CompilerErrorKind::UnknownVariable(ident.clone()), ident.span())?;
                                 return ControlFlow::Continue(LanternType::Null);
                             };
 
@@ -400,7 +404,6 @@ fn compile_expr(expression: Expr, scope: &Scope, loop_context: &mut LoopContext,
 
                             if var.r#type != rhs {
                                 error!(in sink; rhs_span => "expected {}, but got {rhs} instead", var.r#type);
-                                // FIXME: return Err(CompilerError::new(CompilerErrorKind::TypeError { expected: var.r#type, got: r#type }, ident.span()));
                             }
                             let local_index = frame.find_local(&ident.0).expect("local var exists");
                             inst!(frame.instructions; STORE_LOCAL local_index);
@@ -410,19 +413,16 @@ fn compile_expr(expression: Expr, scope: &Scope, loop_context: &mut LoopContext,
                             let r#type = compile_expr(*expr, scope, loop_context, frame, globals, sink)?;
                             let inner = match r#type {
                                 LanternType::Array(inner) => *inner,
-                                LanternType::String => LanternType::Integer,
                                 _ => {
                                     error!(in sink; expr_span => "expected array or string");
-                                    // FIXME: return Err(CompilerError::new(CompilerErrorKind::TypeError { expected: LanternType::Array(Box::new(LanternType::Null)), got: r#type }, expr_span));
                                     LanternType::Null
                                 },
                             };
 
                             let index_span = index.span();
                             let index_type = compile_expr(*index, scope, loop_context, frame, globals, sink)?;
-                            if index_type != LanternType::Integer {
-                                error!(in sink; index_span => "expected index to be an integer");
-                                // FIXME: return Err(CompilerError::new(CompilerErrorKind::TypeError { expected: LanternType::Integer, got: index_type }, index_span));
+                            if index_type != LanternType::Primitive(&native::INT_PRIMITIVE) {
+                                error!(in sink; index_span => "expected index to be an `int`");
                             }
 
                             inst! { frame.instructions;
@@ -445,8 +445,8 @@ fn compile_expr(expression: Expr, scope: &Scope, loop_context: &mut LoopContext,
                             let expr_span = expr.span();
                             let ty = compile_expr(*expr, scope, loop_context, frame, globals, sink)?;
                             match ty {
-                                LanternType::Struct(r#struct) => {
-                                    if let Some(field) = r#struct.fields.into_iter().find(|field| field.name == ident.0) {
+                                LanternType::Struct(type_id) => {
+                                    if let Some(field) = scope.find_struct(type_id).fields.iter().find(|field| field.name == ident.0) {
                                         inst!(frame.instructions; PUSHU (HeapObject::field_offset() + field.offset) as u64);
                                         let field_type = compile_expr(*rhs, scope, loop_context, frame, globals, sink)?;
                                         if field_type != field.r#type {
@@ -461,11 +461,8 @@ fn compile_expr(expression: Expr, scope: &Scope, loop_context: &mut LoopContext,
                                 _ => error!(in sink; expr_span => "field `{}` does not exist on {ty}", ident.0),
                             }
                         },
-                        _ => {
-                            error!(in sink; punct.span() => "bad left-hand-side of assignment");
-                            // FIXME: return Err(CompilerError::new(CompilerErrorKind::BadLeftHandSide, punct.span()));
-                        },
-                    };
+                        _ => error!(in sink; punct.span() => "bad left-hand-side of assignment"),
+                    }
                     return ControlFlow::Continue(LanternType::Null);
                 },
                 _ => {},
@@ -475,90 +472,17 @@ fn compile_expr(expression: Expr, scope: &Scope, loop_context: &mut LoopContext,
             let rhs = compile_expr(*rhs, scope, loop_context, frame, globals, sink)?;
 
             match (lhs, op, rhs) {
-                (LanternType::Float, BinaryOperator::Add(_), LanternType::Float) => {
-                    inst!(frame.instructions; ADDF);
-                    ControlFlow::Continue(LanternType::Float)
+                (LanternType::Primitive(lhs), op, LanternType::Primitive(rhs)) if lhs == rhs && op.is_comparison() && lhs.ops.get_bin_op(&op).is_some() => {
+                    frame.instructions.push(lhs.ops.get_bin_op(&op).unwrap());
+                    ControlFlow::Continue(LanternType::Primitive(&native::BOOL_PRIMITIVE))
                 },
-                (LanternType::Integer, BinaryOperator::Add(_), LanternType::Integer) => {
-                    inst!(frame.instructions; ADDI);
-                    ControlFlow::Continue(LanternType::Integer)
-                },
-                (LanternType::Float, BinaryOperator::Sub(_), LanternType::Float) => {
-                    inst!(frame.instructions; SUBF);
-                    ControlFlow::Continue(LanternType::Float)
-                },
-                (LanternType::Integer, BinaryOperator::Sub(_), LanternType::Integer) => {
-                    inst!(frame.instructions; SUBI);
-                    ControlFlow::Continue(LanternType::Integer)
-                },
-                (LanternType::Float, BinaryOperator::Mult(_), LanternType::Float) => {
-                    inst!(frame.instructions; MULTF);
-                    ControlFlow::Continue(LanternType::Float)
-                },
-                (LanternType::Integer, BinaryOperator::Mult(_), LanternType::Integer) => {
-                    inst!(frame.instructions; MULTI);
-                    ControlFlow::Continue(LanternType::Integer)
-                },
-                (LanternType::Float, BinaryOperator::Div(_), LanternType::Float) => {
-                    inst!(frame.instructions; DIVF);
-                    ControlFlow::Continue(LanternType::Float)
-                },
-                (LanternType::Integer, BinaryOperator::Div(_), LanternType::Integer) => {
-                    inst!(frame.instructions; DIVI);
-                    ControlFlow::Continue(LanternType::Integer)
-                },
-                (LanternType::Float, BinaryOperator::Mod(_), LanternType::Float) => {
-                    inst!(frame.instructions; MODF);
-                    ControlFlow::Continue(LanternType::Float)
-                },
-                (LanternType::Integer, BinaryOperator::Mod(_), LanternType::Integer) => {
-                    inst!(frame.instructions; MODI);
-                    ControlFlow::Continue(LanternType::Integer)
-                },
-                (LanternType::Float, BinaryOperator::Lt(_), LanternType::Float) => {
-                    inst!(frame.instructions; FCOMP_LT);
-                    ControlFlow::Continue(LanternType::Bool)
-                },
-                (LanternType::Integer, BinaryOperator::Lt(_), LanternType::Integer) => {
-                    inst!(frame.instructions; ICOMP_LT);
-                    ControlFlow::Continue(LanternType::Bool)
-                },
-                (LanternType::Float, BinaryOperator::Le(_), LanternType::Float) => {
-                    inst!(frame.instructions; FCOMP_LE);
-                    ControlFlow::Continue(LanternType::Bool)
-                },
-                (LanternType::Integer, BinaryOperator::Le(_), LanternType::Integer) => {
-                    inst!(frame.instructions; ICOMP_LE);
-                    ControlFlow::Continue(LanternType::Bool)
-                },
-                (LanternType::Float, BinaryOperator::Gt(_), LanternType::Float) => {
-                    inst!(frame.instructions; FCOMP_GT);
-                    ControlFlow::Continue(LanternType::Bool)
-                },
-                (LanternType::Integer, BinaryOperator::Gt(_), LanternType::Integer) => {
-                    inst!(frame.instructions; ICOMP_GT);
-                    ControlFlow::Continue(LanternType::Bool)
-                },
-                (LanternType::Float, BinaryOperator::Ge(_), LanternType::Float) => {
-                    inst!(frame.instructions; FCOMP_GE);
-                    ControlFlow::Continue(LanternType::Bool)
-                },
-                (LanternType::Integer, BinaryOperator::Ge(_), LanternType::Integer) => {
-                    inst!(frame.instructions; ICOMP_GE);
-                    ControlFlow::Continue(LanternType::Bool)
-                },
-                (LanternType::Float, BinaryOperator::Eq(_), LanternType::Float) => {
-                    inst!(frame.instructions; FCOMP_EQ);
-                    ControlFlow::Continue(LanternType::Bool)
-                },
-                (LanternType::Integer, BinaryOperator::Eq(_), LanternType::Integer) => {
-                    inst!(frame.instructions; ICOMP_EQ);
-                    ControlFlow::Continue(LanternType::Bool)
+                (LanternType::Primitive(lhs), op, LanternType::Primitive(rhs)) if lhs == rhs && lhs.ops.get_bin_op(&op).is_some() => {
+                    frame.instructions.push(lhs.ops.get_bin_op(&op).unwrap());
+                    ControlFlow::Continue(LanternType::Primitive(lhs))
                 },
                 (_, BinaryOperator::Assign(_) | BinaryOperator::And(_) | BinaryOperator::Or(_), _) => unreachable!(),
                 (lhs, op, rhs) => {
                     error!(in sink; op.span() => "{op} cannot be applied to {lhs} and {rhs}");
-                    // FIXME: Err(CompilerError::new(CompilerErrorKind::BinaryOperator { op, got: (lhs, rhs) }, span))
                     ControlFlow::Continue(LanternType::Null)
                 },
             }
@@ -566,21 +490,12 @@ fn compile_expr(expression: Expr, scope: &Scope, loop_context: &mut LoopContext,
         Expr::Unary(ExprUnary { op, expr }) => {
             let r#type = compile_expr(*expr, scope, loop_context, frame, globals, sink)?;
             match (op, r#type) {
-                (UnaryOperator::Negate(_), LanternType::Float) => {
-                    inst!(frame.instructions; NEGF);
-                    ControlFlow::Continue(LanternType::Float)
-                },
-                (UnaryOperator::Negate(_), LanternType::Integer) => {
-                    inst!(frame.instructions; NEGI);
-                    ControlFlow::Continue(LanternType::Integer)
-                },
-                (UnaryOperator::Not(_), LanternType::Bool) => {
-                    inst!(frame.instructions; NOT);
-                    ControlFlow::Continue(LanternType::Bool)
+                (op, LanternType::Primitive(primitive)) if primitive.ops.get_un_op(&op).is_some() => {
+                    frame.instructions.push(primitive.ops.get_un_op(&op).unwrap());
+                    ControlFlow::Continue(LanternType::Primitive(primitive))
                 },
                 (op, got) => {
                     error!(in sink; op.span() => "{op} cannot be applied to {got}");
-                    // FIXME: Err(CompilerError::new(CompilerErrorKind::UnaryOperator { op, got }, span))
                     ControlFlow::Continue(LanternType::Null)
                 },
             }
@@ -611,7 +526,7 @@ fn compile_expr(expression: Expr, scope: &Scope, loop_context: &mut LoopContext,
                 error!(in sink; extraneous_field.ident.span() => "unknown field");
             }
 
-            ControlFlow::Continue(LanternType::Struct(r#struct.clone()))
+            ControlFlow::Continue(LanternType::Struct(r#struct.id))
         },
         Expr::Paren(ExprParen { expr, .. }) => compile_expr(*expr, scope, loop_context, frame, globals, sink),
         Expr::Block(ExprBlock { stmts, .. }) => {
@@ -631,7 +546,6 @@ fn compile_expr(expression: Expr, scope: &Scope, loop_context: &mut LoopContext,
                     (Some(r#type), expr_type) if r#type == expr_type => Some(r#type),
                     (Some(r#type), expr_type) => {
                         error!(in sink; span => "expected {type}, but got {expr_type} instead");
-                        // FIXME: return Err(CompilerError::new(CompilerErrorKind::TypeError { expected: r#type, got: expr_type }, span)),
                         Some(r#type)
                     },
                 }
@@ -649,18 +563,15 @@ fn compile_expr(expression: Expr, scope: &Scope, loop_context: &mut LoopContext,
             let r#type = compile_expr(*expr, scope, loop_context, frame, globals, sink)?;
             let inner = match r#type {
                 LanternType::Array(inner) => *inner,
-                LanternType::String => LanternType::Integer,
                 _ => {
                     error!(in sink; expr_span => "expected array or string");
-                    // FIXME: return Err(CompilerError::new(CompilerErrorKind::TypeError { expected: LanternType::Array(Box::new(LanternType::Null)), got: r#type }, expr_span));
                     LanternType::Null
                 },
             };
             let index_span = index.span();
             let index_type = compile_expr(*index, scope, loop_context, frame, globals, sink)?;
-            if index_type != LanternType::Integer {
-                error!(in sink; index_span => "expected index to be an integer");
-                // FIXME: return Err(CompilerError::new(CompilerErrorKind::TypeError { expected: LanternType::Integer, got: index_type }, index_span));
+            if index_type != LanternType::Primitive(&native::INT_PRIMITIVE) {
+                error!(in sink; index_span => "expected index to be an `int`");
             }
 
             inst! { frame.instructions;
@@ -683,10 +594,9 @@ fn compile_expr(expression: Expr, scope: &Scope, loop_context: &mut LoopContext,
                 inst!(frame.instructions; PUSHU fun.index as u64);
                 ControlFlow::Continue(fun.to_type())
             } else if let Some(item) = scope.item(&ident.0) {
-                ControlFlow::Continue(LanternType::Item(item.type_id()))
+                ControlFlow::Continue(LanternType::ItemStatic(item.identifier()))
             } else {
-                error!(in sink; span => "unknown variable `{}`", ident.0);
-                // FIXME: CompilerError::new(CompilerErrorKind::UnknownVariable(ident), span)?;
+                error!(in sink; span => "unknown identifier `{}`", ident.0);
                 ControlFlow::Continue(LanternType::Null)
             }
         },
@@ -694,31 +604,31 @@ fn compile_expr(expression: Expr, scope: &Scope, loop_context: &mut LoopContext,
             let expr_span = expr.span();
             let ty = compile_expr(*expr, scope, loop_context, frame, globals, sink)?;
             match ty {
-                LanternType::Struct(r#struct) => {
-                    if let Some(field) = r#struct.fields.into_iter().find(|field| field.name == ident.0) {
+                LanternType::Struct(type_id) => {
+                    if let Some(field) = scope.find_struct(type_id).fields.iter().find(|field| field.name == ident.0) {
                         let size = if field.r#type.is_primitive() { field.size } else { 0 };
                         inst! { frame.instructions;
                             [PUSHU (HeapObject::field_offset() + field.offset) as u64]
                             [ADDI]
                             [READ size]
                         }
-                        ControlFlow::Continue(field.r#type)
+                        ControlFlow::Continue(field.r#type.clone())
                     } else {
                         // TODO: type name
-                        error!(in sink; expr_span => "field `{}` does not exist", ident.0);
+                        error!(in sink; expr_span => "field {} does not exist", ident.0);
                         ControlFlow::Continue(LanternType::Null)
                     }
                 },
-                LanternType::Item(type_id) => {
+                LanternType::ItemStatic(type_id) => {
                     let Some(fun) = scope.associated(type_id, &ident.0) else {
-                        error!(in sink; ident.span() => "static item `{}` does not exist", ident.0);
+                        error!(in sink; ident.span() => "static item {} does not exist", ident.0);
                         return ControlFlow::Continue(LanternType::Null)
                     };
                     inst!(frame.instructions; PUSHU fun.index as u64);
                     ControlFlow::Continue(fun.to_type())
                 },
                 _ => {
-                    error!(in sink; expr_span => "field `{}` does not exist on {ty}", ident.0);
+                    error!(in sink; expr_span => "field {} does not exist on {ty}", ident.0);
                     ControlFlow::Continue(LanternType::Null)
                 },
             }
@@ -746,12 +656,14 @@ impl LanternFunction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LanternItem {
     Struct(LanternStruct),
+    Primitive(&'static LanternPrimitive),
 }
 
 impl LanternItem {
-    pub fn type_id(&self) -> usize {
+    pub fn identifier(&self) -> ItemIdentifier {
         match self {
-            Self::Struct(r#struct) => r#struct.id,
+            Self::Struct(r#struct) => ItemIdentifier::Struct(r#struct.id),
+            Self::Primitive(primitive) => ItemIdentifier::Primitive(primitive.id),
         }
     }
 }
@@ -797,6 +709,67 @@ impl LanternStruct {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct LanternPrimitive {
+    pub id: usize,
+    pub size: usize,
+    pub align: usize,
+    pub ops: PrimitiveOps,
+}
+
+#[derive(Default, Debug, Clone, PartialEq)]
+pub struct PrimitiveOps {
+    pub negate_inst: Option<Instruction>,
+    pub not_inst: Option<Instruction>,
+    pub add_inst: Option<Instruction>,
+    pub sub_inst: Option<Instruction>,
+    pub mult_inst: Option<Instruction>,
+    pub div_inst: Option<Instruction>,
+    pub mod_inst: Option<Instruction>,
+    pub lt_inst: Option<Instruction>,
+    pub le_inst: Option<Instruction>,
+    pub ge_inst: Option<Instruction>,
+    pub gt_inst: Option<Instruction>,
+    pub eq_inst: Option<Instruction>,
+}
+
+impl PrimitiveOps {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn get_bin_op(&self, op: &BinaryOperator) -> Option<Instruction> {
+        match op {
+            BinaryOperator::Add(_) => self.add_inst.clone(),
+            BinaryOperator::Sub(_) => self.sub_inst.clone(),
+            BinaryOperator::Mult(_) => self.mult_inst.clone(),
+            BinaryOperator::Div(_) => self.div_inst.clone(),
+            BinaryOperator::Mod(_) => self.mod_inst.clone(),
+            BinaryOperator::Lt(_) => self.lt_inst.clone(),
+            BinaryOperator::Le(_) => self.le_inst.clone(),
+            BinaryOperator::Gt(_) => self.gt_inst.clone(),
+            BinaryOperator::Ge(_) => self.ge_inst.clone(),
+            BinaryOperator::Eq(_) => self.eq_inst.clone(),
+            _ => None,
+        }
+    }
+
+    pub fn get_un_op(&self, op: &UnaryOperator) -> Option<Instruction> {
+        match op {
+            UnaryOperator::Negate(_) => self.negate_inst.clone(),
+            _ => None,
+        }
+    }
+}
+
+impl PartialEq for LanternPrimitive {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for LanternPrimitive { }
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LanternStructField {
     pub name: String,
@@ -805,7 +778,7 @@ pub struct LanternStructField {
     pub r#type: LanternType,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LanternVariable {
     pub r#type: LanternType,
 }

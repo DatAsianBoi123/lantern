@@ -2,14 +2,14 @@ use std::collections::HashMap;
 
 use diagnostic::Span;
 
-use crate::{flame::{GeneratedFunction, LanternFunction, LanternItem, LanternVariable, instruction::InstructionSet, r#type::LanternType}, heap::TypeInfo};
+use crate::{flame::{GeneratedFunction, LanternFunction, LanternItem, LanternStruct, LanternVariable, instruction::InstructionSet, r#type::LanternType}, heap::TypeInfo};
 
 #[derive(Debug, Clone)]
 pub struct Scope<'a> {
     items: HashMap<String, LanternItem>,
     functions: HashMap<String, LanternFunction>,
     variables: HashMap<String, LanternVariable>,
-    associated: HashMap<usize, HashMap<String, LanternFunction>>,
+    associated: HashMap<ItemIdentifier, HashMap<String, LanternFunction>>,
     kind: ScopeKind<'a>,
 }
 
@@ -36,6 +36,29 @@ impl<'a> Scope<'a> {
 
     pub fn into_kind(self) -> ScopeKind<'a> {
         self.kind
+    }
+
+    pub fn find_struct(&self, type_id: usize) -> &LanternStruct {
+        match self.kind {
+            ScopeKind::Module => {
+                for item in self.items.values() {
+                    match item {
+                        LanternItem::Struct(r#struct @ LanternStruct { id, .. }) if *id == type_id => return r#struct,
+                        _ => {}
+                    }
+                }
+                panic!("struct with type id {type_id} not found");
+            },
+            ScopeKind::Block(parent) | ScopeKind::Function(parent, _) => {
+                for item in self.items.values() {
+                    match item {
+                        LanternItem::Struct(r#struct @ LanternStruct { id, .. }) if *id == type_id => return r#struct,
+                        _ => {}
+                    }
+                }
+                parent.find_struct(type_id)
+            }
+        }
     }
 
     pub fn item(&self, name: &str) -> Option<&LanternItem> {
@@ -86,18 +109,18 @@ impl<'a> Scope<'a> {
         Some(())
     }
 
-    pub fn associated(&self, type_id: usize, name: &str) -> Option<&LanternFunction> {
+    pub fn associated(&self, id: ItemIdentifier, name: &str) -> Option<&LanternFunction> {
         match self.kind {
-            ScopeKind::Module => self.associated.get(&type_id).and_then(|associated| associated.get(name)),
+            ScopeKind::Module => self.associated.get(&id).and_then(|associated| associated.get(name)),
             ScopeKind::Block(parent) | ScopeKind::Function(parent, _) => {
-                self.associated.get(&type_id).and_then(|type_associated| type_associated.get(name))
-                    .or_else(|| parent.associated(type_id, name))
+                self.associated.get(&id).and_then(|type_associated| type_associated.get(name))
+                    .or_else(|| parent.associated(id, name))
             }
         }
     }
 
-    pub fn insert_associated(&mut self, type_id: usize, name: String, fun: LanternFunction) -> Option<()> {
-        let type_associated = self.associated.entry(type_id)
+    pub fn insert_associated(&mut self, id: ItemIdentifier, name: String, fun: LanternFunction) -> Option<()> {
+        let type_associated = self.associated.entry(id)
             .or_default();
         if type_associated.contains_key(&name) { return None; };
         type_associated.insert(name, fun);
@@ -125,6 +148,12 @@ impl<'a: 'b, 'b> Scope<'a> {
             kind: ScopeKind::Function(self, span),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ItemIdentifier {
+    Struct(usize),
+    Primitive(usize),
 }
 
 #[derive(Debug, Clone)]

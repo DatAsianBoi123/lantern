@@ -1,6 +1,6 @@
 sy case match
 
-sy keyword Keyword val fun using native return continue break if else while struct
+sy keyword Keyword val fun using native return continue break if else while struct primitive
 sy keyword Boolean true false
 
 sy match Identifier /\w\+/
@@ -10,6 +10,7 @@ sy match Delimiter /[;:.,(){}\[\]]\|->/
 sy match Type /\(:\s*\)\@<=\w\+/
 sy match Type /\(->\s*\)\@<=\w\+/
 sy match Type /\(struct\s*\)\@<=\w\+/
+sy match Type /\(primitive\s*\)\@<=\w\+/
 sy match Number /\d\+\(\.\d\+\)\?/
 sy match EscapeCharacter /\\[\\nrt"]/ contained
 sy match Special /@\w*/

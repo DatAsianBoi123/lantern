@@ -290,6 +290,10 @@ impl BinaryOperator {
             Self::Assign(_) => (2, 1),
         }
     }
+
+    pub fn is_comparison(&self) -> bool {
+        matches!(self, Self::Lt(_) | Self::Le(_) | Self::Gt(_) | Self::Ge(_) | Self::Eq(_))
+    }
 }
 
 impl Display for BinaryOperator {

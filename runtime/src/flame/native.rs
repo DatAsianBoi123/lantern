@@ -2,7 +2,7 @@ use std::io::Write;
 
 use anyhow::anyhow;
 
-use crate::{Slot, error::RuntimeError, heap::HeapArray};
+use crate::{Slot, error::RuntimeError, flame::{LanternPrimitive, PrimitiveOps, instruction::Instruction}, heap::HeapArray};
 
 macro_rules! native_funs {
     (for $vm: pat, $( $name: literal = ( $($pat: pat),* $(,)? ) => $expr: expr ),* $(,)?) => {
@@ -67,4 +67,91 @@ native_funs![for vm,
         Ok(Slot::new_primitive(input.trim().parse::<i64>().map_err(|_| RuntimeError(anyhow!("not an integer").into()))?))
     },
 ];
+
+pub static CHAR_PRIMITIVE: LanternPrimitive = LanternPrimitive {
+    id: 0,
+    size: 1,
+    align: 1,
+    ops: PrimitiveOps {
+        not_inst: None,
+        negate_inst: Some(Instruction::Negi),
+        add_inst: Some(Instruction::Addi),
+        sub_inst: Some(Instruction::Subi),
+        mult_inst: Some(Instruction::Multi),
+        div_inst: Some(Instruction::Divi),
+        mod_inst: Some(Instruction::Modi),
+        lt_inst: Some(Instruction::ICompareLt),
+        le_inst: Some(Instruction::ICompareLe),
+        gt_inst: Some(Instruction::ICompareGt),
+        ge_inst: Some(Instruction::ICompareGe),
+        eq_inst: Some(Instruction::ICompareEq),
+    },
+};
+pub static INT_PRIMITIVE: LanternPrimitive = LanternPrimitive {
+    id: 1,
+    size: 8,
+    align: 8,
+    ops: PrimitiveOps {
+        not_inst: None,
+        negate_inst: Some(Instruction::Negi),
+        add_inst: Some(Instruction::Addi),
+        sub_inst: Some(Instruction::Subi),
+        mult_inst: Some(Instruction::Multi),
+        div_inst: Some(Instruction::Divi),
+        mod_inst: Some(Instruction::Modi),
+        lt_inst: Some(Instruction::ICompareLt),
+        le_inst: Some(Instruction::ICompareLe),
+        gt_inst: Some(Instruction::ICompareGt),
+        ge_inst: Some(Instruction::ICompareGe),
+        eq_inst: Some(Instruction::ICompareEq),
+    },
+};
+pub static FLOAT_PRIMITIVE: LanternPrimitive = LanternPrimitive {
+    id: 2,
+    size: 8,
+    align: 8,
+    ops: PrimitiveOps {
+        not_inst: None,
+        negate_inst: Some(Instruction::Negf),
+        add_inst: Some(Instruction::Addf),
+        sub_inst: Some(Instruction::Subf),
+        mult_inst: Some(Instruction::Multf),
+        div_inst: Some(Instruction::Divf),
+        mod_inst: Some(Instruction::Modf),
+        lt_inst: Some(Instruction::FCompareLt),
+        le_inst: Some(Instruction::FCompareLe),
+        gt_inst: Some(Instruction::FCompareGt),
+        ge_inst: Some(Instruction::FCompareGe),
+        eq_inst: Some(Instruction::FCompareEq),
+    },
+};
+pub static BOOL_PRIMITIVE: LanternPrimitive = LanternPrimitive {
+    id: 3,
+    size: 1,
+    align: 1,
+    ops: PrimitiveOps {
+        not_inst: Some(Instruction::Not),
+        negate_inst: None,
+        add_inst: None,
+        sub_inst: None,
+        mult_inst: None,
+        div_inst: None,
+        mod_inst: None,
+        lt_inst: None,
+        le_inst: None,
+        gt_inst: None,
+        ge_inst: None,
+        eq_inst: Some(Instruction::ICompareEq),
+    },
+};
+
+pub fn get_primitive(name: &str) -> Option<&'static LanternPrimitive> {
+    match name {
+        "char" => Some(&CHAR_PRIMITIVE),
+        "int" => Some(&INT_PRIMITIVE),
+        "float" => Some(&FLOAT_PRIMITIVE),
+        "bool" => Some(&BOOL_PRIMITIVE),
+        _ => None,
+    }
+}
 

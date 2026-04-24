@@ -1,7 +1,7 @@
 use std::fmt::{Display, Formatter};
 
 use diagnostic::{Diagnostic, error};
-use lex::{ArrowRight, Break, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Continue, Else, Equals, Fun, Ident, If, Keyword, Native, OpenBrace, OpenBracket, OpenParen, Period, Punct, Return, Semi, Struct, Token, TokenKind, Using, Val, While};
+use lex::{ArrowRight, Break, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Continue, Else, Equals, Fun, Ident, If, Keyword, Native, OpenBrace, OpenBracket, OpenParen, Period, Primitive, Return, Semi, Struct, Token, TokenKind, Using, Val, While};
 use macros::Parse;
 
 use crate::{expr::{Expr, ExprBlock}, stream::{Punctuated, TokenStream, TrailingDenied}};
@@ -61,7 +61,7 @@ pub enum Item {
     Using(ItemUsing),
     Struct(ItemStruct),
     NativeFun(ItemNativeFun),
-    NativeStruct(ItemNativeStruct),
+    Primitive(ItemPrimitive),
 }
 
 impl ParseTokens for Item {
@@ -71,42 +71,14 @@ impl ParseTokens for Item {
             Token::Keyword(Keyword::Fun(_)) => ItemFun::parse(stream).map(Self::Fun),
             Token::Keyword(Keyword::Using(_)) => ItemUsing::parse(stream).map(Self::Using),
             Token::Keyword(Keyword::Struct(_)) => ItemStruct::parse(stream).map(Self::Struct),
-            Token::Keyword(Keyword::Native(_)) => {
-                let Token::Keyword(Keyword::Native(native)) = stream.next_token()? else { unreachable!() };
-                match stream.next_token()? {
-                    Token::Keyword(Keyword::Fun(fun)) => {
-                        Ok(Self::NativeFun(ItemNativeFun {
-                            native,
-                            fun,
-                            ident: ParseTokens::parse(stream)?,
-                            open_paren: ParseTokens::parse(stream)?,
-                            args: ParseTokens::parse(stream)?,
-                            closed_paren: ParseTokens::parse(stream)?,
-                            ret: if matches!(stream.peek()?, Token::Punct(Punct::ArrowRight(_))) {
-                                Some((ArrowRight::parse(stream)?, Type::parse(stream)?))
-                            } else {
-                                None
-                            },
-                            semi: ParseTokens::parse(stream)?,
-                        }))
-                    },
-                    Token::Keyword(Keyword::Struct(r#struct)) => {
-                        Ok(Self::NativeStruct(ItemNativeStruct {
-                            native,
-                            r#struct,
-                            ident: ParseTokens::parse(stream)?,
-                            semi: ParseTokens::parse(stream)?,
-                        }))
-                    },
-                    token => Err(error!(token.span() => "expected `fun` or `struct`")),
-                }
-            }
+            Token::Keyword(Keyword::Native(_)) => ItemNativeFun::parse(stream).map(Self::NativeFun),
+            Token::Keyword(Keyword::Primitive(_)) => ItemPrimitive::parse(stream).map(Self::Primitive),
             _ => Err(error!(peek.span() => "expected `item`")),
         }
     }
 
     fn can_parse(peek: &Token) -> bool {
-        matches!(peek, Token::Keyword(Keyword::Fun(_) | Keyword::Using(_) | Keyword::Struct(_) | Keyword::Native(_)))
+        matches!(peek, Token::Keyword(Keyword::Fun(_) | Keyword::Using(_) | Keyword::Struct(_) | Keyword::Native(_) | Keyword::Primitive(_)))
     }
 }
 
@@ -155,9 +127,8 @@ pub struct FunArg {
 }
 
 #[derive(Parse, Debug, Clone, PartialEq)]
-pub struct ItemNativeStruct {
-    pub native: Native,
-    pub r#struct: Struct,
+pub struct ItemPrimitive {
+    pub primitive: Primitive,
     pub ident: Ident,
     pub semi: Semi,
 }

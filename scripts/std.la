@@ -1,0 +1,25 @@
+primitive char;
+
+primitive int;
+fun int.abs(x: int) -> int {
+  if (x < 0) {
+    return -x;
+  } else {
+    return x;
+  }
+}
+
+primitive float;
+fun float.inverse(x: float) -> float {
+  return 1.0 / x;
+}
+
+primitive bool;
+
+native fun print(str: [char]);
+native fun int_to_str(int: int) -> [char];
+native fun float_to_str(float: float) -> [char];
+native fun len(array: [int]) -> int;
+native fun input_float() -> float;
+native fun input_int() -> int;
+

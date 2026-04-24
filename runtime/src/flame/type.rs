@@ -3,37 +3,32 @@ use std::fmt::{Display, Formatter};
 use diagnostic::{Diagnostic, error};
 use parse::{FunType, Type, lex::TokenKind};
 
-use crate::flame::{LanternItem, LanternStruct, scope::Scope};
+use crate::flame::{LanternItem, LanternPrimitive, LanternStruct, native, scope::{ItemIdentifier, Scope}};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LanternType {
-    Integer,
-    Float,
-    Bool,
-    String,
-    Struct(LanternStruct),
+    Struct(usize),
+    Primitive(&'static LanternPrimitive),
     Array(Box<LanternType>),
     Function {
         args: Vec<LanternType>,
         ret: Box<LanternType>,
     },
-    Item(usize),
+    ItemStatic(ItemIdentifier),
     Null,
 }
 
 impl Display for LanternType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Integer => f.write_str("int"),
-            Self::Float => f.write_str("float"),
-            Self::Bool => f.write_str("bool"),
-            Self::String => f.write_str("string"),
             Self::Struct(_) => f.write_str("struct"),
+            Self::Primitive(_) => f.write_str("primitive"),
             Self::Array(inner) => write!(f, "[{inner}]"),
             Self::Function { args, ret, .. } => {
                 write!(f, "fun({}) -> {}", args.iter().map(|r#type| r#type.to_string()).collect::<Vec<String>>().join(", "), ret)
             },
-            Self::Item(type_id) => write!(f, "item({type_id})"),
+            Self::ItemStatic(ItemIdentifier::Struct(id)) => write!(f, "item(struct:{id})"),
+            Self::ItemStatic(ItemIdentifier::Primitive(id)) => write!(f, "item(primitive:{id})"),
             Self::Null => f.write_str("null"),
         }
     }
@@ -51,57 +46,48 @@ impl LanternType {
                 Ok(LanternType::Function { args, ret: Box::new(ret) })
             },
             Type::Path(path) => {
-                match path.last().0.as_str() {
-                    "int" => Ok(Self::Integer),
-                    "float" => Ok(Self::Float),
-                    "bool" => Ok(Self::Bool),
-                    "str" => Ok(Self::String),
-                    "none" => Ok(Self::Null),
-                    last => {
-                        let span = path.items.0[0].span();
-                        match scope.item(last) {
-                            Some(LanternItem::Struct(r#struct)) => Ok(Self::Struct(r#struct.clone())),
-                            // FIXME: Err(CompilerError::new(CompilerErrorKind::UnknownType(r#type.clone()), span))
-                            None => Err(error!(span => "unknown type `{type}`")),
-                        }
-                    },
+                let span = path.items.0[0].span();
+                match scope.item(&path.last().0) {
+                    Some(LanternItem::Struct(LanternStruct { id, .. })) => Ok(Self::Struct(*id)),
+                    Some(LanternItem::Primitive(primitive)) => Ok(Self::Primitive(primitive)),
+                    None => Err(error!(span => "unknown type `{type}`")),
                 }
             },
         }
     }
 
     pub fn is_primitive(&self) -> bool {
-        matches!(self, Self::Integer | Self::Float | Self::Bool | Self::Function { .. })
+        matches!(self, Self::Primitive(_) | Self::Function { .. })
     }
 
     pub fn is_ref(&self) -> bool {
-        matches!(self, Self::String | Self::Struct(_) | Self::Array(..))
+        matches!(self, Self::Struct(_) | Self::Array(..))
+    }
+
+    pub fn is_bool(&self) -> bool {
+        *self == Self::Primitive(&native::BOOL_PRIMITIVE)
     }
 
     pub fn size(&self) -> usize {
         match self {
-            Self::Integer => 8,
-            Self::Float => 8,
-            Self::Bool => 1,
-            Self::String => 8,
             Self::Struct(_) => 8,
+            Self::Primitive(LanternPrimitive { size, .. }) => *size,
             Self::Array(..) => 8,
             Self::Function { .. } => 8,
-            Self::Item(_) => panic!("static types are unsized"),
+            Self::ItemStatic(_) => panic!("static types are unsized"),
+            // null is a ptr
             Self::Null => 8,
         }
     }
 
     pub fn alignment(&self) -> usize {
         match self {
-            Self::Integer => 8,
-            Self::Float => 8,
-            Self::Bool => 1,
-            Self::String => 8,
             Self::Struct(_) => 8,
+            Self::Primitive(LanternPrimitive { align, .. }) => *align,
             Self::Array(..) => 8,
             Self::Function { .. } => 8,
-            Self::Item(_) => panic!("static types have no alignment"),
+            Self::ItemStatic(_) => panic!("static types have no alignment"),
+            // null is a ptr
             Self::Null => 8,
         }
     }
