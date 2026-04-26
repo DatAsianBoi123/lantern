@@ -395,6 +395,18 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    fn next_escape(&mut self) -> Result<char, Diagnostic> {
+        match self.next_char() {
+            Some('n') => Ok('\n'),
+            Some('r') => Ok('\r'),
+            Some('t') => Ok('\t'),
+            Some('\\') => Ok('\\'),
+            Some('"') => Ok('"'),
+            Some(_) => Err(error!(self.span() => "invalid escape character")),
+            None => Err(error!(self.span() => "expected escape character")),
+        }
+    }
+
     pub fn next_int(&mut self, mut num: i64) -> (i64, i32) {
         let mut digits = 1;
         while let Some(next) = self.peek_char() && let Some(digit) = next.to_digit(10) {
@@ -489,7 +501,11 @@ impl<'a> Lexer<'a> {
                 match self.next_char() {
                     Some('"') => Ok(Token::Literal(Literal::String(String::new(), span))),
                     Some(next) => {
-                        let mut word = next.to_string();
+                        let mut word = if next == '\\' {
+                            self.next_escape()?.to_string()
+                        } else {
+                            next.to_string()
+                        };
 
                         while let Some(char) = self.peek_char() && char != '\n' {
                             if char == '"' {
@@ -498,15 +514,7 @@ impl<'a> Lexer<'a> {
                             }
                             if char == '\\' {
                                 self.next_char();
-                                match self.next_char() {
-                                    Some('n') => word.push('\n'),
-                                    Some('r') => word.push('\r'),
-                                    Some('t') => word.push('\t'),
-                                    Some('\\') => word.push('\\'),
-                                    Some('"') => word.push('"'),
-                                    Some(_) => return Err(error!(self.span() => "invalid escape character")),
-                                    None => return Err(error!(self.span() => "expected escape character")),
-                                }
+                                word.push(self.next_escape()?);
                                 continue;
                             }
                             word.push(char);
