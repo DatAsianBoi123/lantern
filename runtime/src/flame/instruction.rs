@@ -104,6 +104,9 @@ macro_rules! inst {
     ($inst: expr; INV $i: expr) => {
         $inst.push($crate::flame::instruction::Instruction::Invoke($i))
     };
+    ($inst: expr; INV_MET $i: expr) => {
+        $inst.push($crate::flame::instruction::Instruction::InvokeMethod($i))
+    };
     ($inst: expr; READ $l: expr) => {
         $inst.push($crate::flame::instruction::Instruction::Read($l))
     };
@@ -226,6 +229,7 @@ pub enum Instruction {
     Return,
 
     Invoke(usize),
+    InvokeMethod(usize),
 
     Read(usize),
     Write(usize),
@@ -274,6 +278,7 @@ impl Display for Instruction {
             Self::LoadLocal(index) => write!(f, "{:20}{index}", "LOAD_LOCAL"),
             Self::Return => write!(f, "RET"),
             Self::Invoke(num_args) => write!(f, "{:20}{num_args}", "INV"),
+            Self::InvokeMethod(num_args) => write!(f, "{:20}{num_args}", "INV_MET"),
             Self::Read(len) => write!(f, "{:20}{len}", "READ"),
             Self::Write(len) => write!(f, "{:20}{len}", "WRITE"),
             Self::Goto(index) => write!(f, "{:20}{index}", "GOTO"),

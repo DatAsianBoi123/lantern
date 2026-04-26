@@ -340,7 +340,7 @@ fn compile_expr(
         Expr::FunCall(ExprFunCall { expr, args, .. }) => {
             let span = expr.span();
             let r#type = compile_expr(*expr, scope, loop_context, frame, globals, sink)?;
-            if let LanternType::Function { args: fun_args, ret } = r#type {
+            if let LanternType::Function { is_method, args: fun_args, ret } = r#type {
                 let fun_args_len = fun_args.len();
                 if args.0.len() != fun_args_len {
                     error!(in sink; span => "expected function to have {} args, got {} args instead", fun_args_len, args.0.len());
@@ -354,7 +354,11 @@ fn compile_expr(
                     }
                 }
 
-                inst!(frame.instructions; INV fun_args_len);
+                if is_method {
+                    inst!(frame.instructions; INV_MET fun_args_len);
+                } else {
+                    inst!(frame.instructions; INV fun_args_len);
+                }
 
                 ControlFlow::Continue(*ret)
             } else {
@@ -592,7 +596,7 @@ fn compile_expr(
                 ControlFlow::Continue(var.r#type)
             } else if let Some(fun) = scope.function(&ident.0) {
                 inst!(frame.instructions; PUSHU fun.index as u64);
-                ControlFlow::Continue(fun.to_type())
+                ControlFlow::Continue(fun.to_assoc_type())
             } else if let Some(item) = scope.item(&ident.0) {
                 ControlFlow::Continue(LanternType::ItemStatic(item.identifier()))
             } else {
@@ -601,7 +605,6 @@ fn compile_expr(
             }
         },
         Expr::Field(ExprField { expr, ident }) => {
-            let expr_span = expr.span();
             let ty = compile_expr(*expr, scope, loop_context, frame, globals, sink)?;
             match ty {
                 LanternType::Struct(type_id) => {
@@ -613,9 +616,30 @@ fn compile_expr(
                             [READ size]
                         }
                         ControlFlow::Continue(field.r#type.clone())
+                    } else if let Some(associated) = scope.associated(ItemIdentifier::Struct(type_id), &ident.0) {
+                        if associated.args.first().is_some_and(|(_, receiver)| *receiver == ty) {
+                            inst!(frame.instructions; PUSHU associated.index as u64);
+                        } else {
+                            error!(in sink; ident.1 => "method must have a receiver");
+                        }
+                        ControlFlow::Continue(associated.to_method_type())
                     } else {
                         // TODO: type name
-                        error!(in sink; expr_span => "field {} does not exist", ident.0);
+                        error!(in sink; ident.1 => "field {} does not exist", ident.0);
+                        ControlFlow::Continue(LanternType::Null)
+                    }
+                },
+                LanternType::Primitive(primitive) => {
+                    if let Some(associated) = scope.associated(ItemIdentifier::Primitive(primitive.id), &ident.0) {
+                        if associated.args.first().is_some_and(|(_, receiver)| *receiver == ty) {
+                            inst!(frame.instructions; PUSHU associated.index as u64);
+                        } else {
+                            error!(in sink; ident.1 => "method must have a receiver");
+                        }
+                        ControlFlow::Continue(associated.to_method_type())
+                    } else {
+                        // TODO: type name
+                        error!(in sink; ident.1 => "method {} does not exist", ident.0);
                         ControlFlow::Continue(LanternType::Null)
                     }
                 },
@@ -625,10 +649,10 @@ fn compile_expr(
                         return ControlFlow::Continue(LanternType::Null)
                     };
                     inst!(frame.instructions; PUSHU fun.index as u64);
-                    ControlFlow::Continue(fun.to_type())
+                    ControlFlow::Continue(fun.to_assoc_type())
                 },
                 _ => {
-                    error!(in sink; expr_span => "field {} does not exist on {ty}", ident.0);
+                    error!(in sink; ident.1 => "field {} does not exist on {ty}", ident.0);
                     ControlFlow::Continue(LanternType::Null)
                 },
             }
@@ -648,8 +672,13 @@ impl LanternFunction {
         Self { index, args, ret }
     }
 
-    pub fn to_type(&self) -> LanternType {
-        LanternType::Function { args: self.args.iter().map(|(_, r#type)| r#type.clone()).collect(), ret: Box::new(self.ret.clone()) }
+    pub fn to_assoc_type(&self) -> LanternType {
+        LanternType::Function { is_method: false, args: self.args.iter().map(|(_, r#type)| r#type.clone()).collect(), ret: Box::new(self.ret.clone()) }
+    }
+
+    pub fn to_method_type(&self) -> LanternType {
+        // first arg is assumed to be the receiver
+        LanternType::Function { is_method: true, args: self.args.iter().skip(1).map(|(_, r#type)| r#type.clone()).collect(), ret: Box::new(self.ret.clone()) }
     }
 }
 

@@ -216,6 +216,19 @@ impl VM {
                         self.frames.push(frame);
                         return Ok(());
                     },
+                    Instruction::InvokeMethod(num_args) => {
+                        frame.inst_ptr += 1;
+                        let mut locals = [Default::default(); 256];
+                        for i in 0..num_args {
+                            locals[num_args - i] = frame.operand_stack.pop()?;
+                        }
+                        let index = unsafe { *frame.operand_stack.pop()?.read::<usize>() };
+                        // first arg is the receiver
+                        locals[0] = frame.operand_stack.pop()?;
+                        let frame = Frame::with_locals(index, locals);
+                        self.frames.push(frame);
+                        return Ok(());
+                    },
                     Instruction::Read(len) => {
                         let ptr = unsafe { *frame.operand_stack.pop()?.read::<*mut u8>() };
 
