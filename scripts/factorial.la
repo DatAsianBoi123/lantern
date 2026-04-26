@@ -1,8 +1,8 @@
-primitive char;
+primitive byte;
 primitive int;
 
-native fun print(x: [char]);
-native fun int_to_str(x: int) -> [char];
+native fun print(x: [byte]);
+native fun int_to_str(x: int) -> [byte];
 native fun input_int() -> int;
 
 fun factorial(num: int) -> int {

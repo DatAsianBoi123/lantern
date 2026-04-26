@@ -1,12 +1,12 @@
-primitive char;
+primitive byte;
 primitive int;
 primitive float;
 
-native fun print(x: [char]);
-native fun float_to_str(float: float) -> [char];
+native fun print(x: [byte]);
+native fun float_to_str(float: float) -> [byte];
 
 struct Position {
-  name: [char],
+  name: [byte],
   x: float,
   y: float,
 }

@@ -1,4 +1,4 @@
-primitive char;
+primitive byte;
 
 primitive int;
 fun int.abs(x: int) -> int {
@@ -16,9 +16,9 @@ fun float.inverse(x: float) -> float {
 
 primitive bool;
 
-native fun print(str: [char]);
-native fun int_to_str(int: int) -> [char];
-native fun float_to_str(float: float) -> [char];
+native fun print(str: [byte]);
+native fun int_to_str(int: int) -> [byte];
+native fun float_to_str(float: float) -> [byte];
 native fun len(array: [int]) -> int;
 native fun input_float() -> float;
 native fun input_int() -> int;

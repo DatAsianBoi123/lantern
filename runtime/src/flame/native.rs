@@ -68,7 +68,7 @@ native_funs![for vm,
     },
 ];
 
-pub static CHAR_PRIMITIVE: LanternPrimitive = LanternPrimitive {
+pub static BYTE_PRIMITIVE: LanternPrimitive = LanternPrimitive {
     id: 0,
     size: 1,
     align: 1,
@@ -147,7 +147,7 @@ pub static BOOL_PRIMITIVE: LanternPrimitive = LanternPrimitive {
 
 pub fn get_primitive(name: &str) -> Option<&'static LanternPrimitive> {
     match name {
-        "char" => Some(&CHAR_PRIMITIVE),
+        "byte" => Some(&BYTE_PRIMITIVE),
         "int" => Some(&INT_PRIMITIVE),
         "float" => Some(&FLOAT_PRIMITIVE),
         "bool" => Some(&BOOL_PRIMITIVE),

@@ -335,7 +335,7 @@ fn compile_expr(
             // TODO: better string alloc
             inst!(frame.instructions; ALLOC_STR string.clone());
             // TODO: make string a struct instead of array
-            ControlFlow::Continue(LanternType::Array(Box::new(LanternType::Primitive(&native::CHAR_PRIMITIVE))))
+            ControlFlow::Continue(LanternType::Array(Box::new(LanternType::Primitive(&native::BYTE_PRIMITIVE))))
         },
         Expr::FunCall(ExprFunCall { expr, args, .. }) => {
             let span = expr.span();

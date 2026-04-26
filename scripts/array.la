@@ -1,8 +1,8 @@
-primitive char;
+primitive byte;
 primitive int;
 
-native fun print(str: [char]);
-native fun int_to_str(int: int) -> [char];
+native fun print(str: [byte]);
+native fun int_to_str(int: int) -> [byte];
 native fun len(array: [int]) -> int;
 
 fun print_array(array: [int]) {
