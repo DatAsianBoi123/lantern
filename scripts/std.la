@@ -1,22 +1,36 @@
 primitive byte;
 
 primitive int;
-fun int.abs(x: int) -> int {
-  if (x < 0) {
-    return -x;
+fun int.abs(self: int) -> int {
+  if (self < 0) {
+    return -self;
   } else {
-    return x;
+    return self;
   }
 }
 
 primitive float;
-fun float.inverse(x: float) -> float {
-  return 1.0 / x;
+fun float.inverse(self: float) -> float {
+  return 1.0 / self;
 }
 
 primitive bool;
 
-native fun print(str: [byte]);
+struct String {
+  bytes: [byte],
+}
+fun String.replace_first(self: String, other: [byte]) {
+  self.bytes[0] = other[0];
+}
+
+fun println(str: String) {
+  write(str.bytes);
+  write("\n");
+  flush();
+}
+
+native fun write(bytes: [byte]);
+native fun flush();
 native fun int_to_str(int: int) -> [byte];
 native fun float_to_str(float: float) -> [byte];
 native fun len(array: [int]) -> int;

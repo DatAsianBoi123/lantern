@@ -30,18 +30,17 @@ macro_rules! native_funs {
 }
 
 native_funs![for vm,
-    "print" = (string) => {
-        let string = unsafe { HeapArray::from_raw(*string.read::<*mut u8>()) };
+    "write" = (bytes) => {
+        let byte_ptr = unsafe { HeapArray::from_raw(*bytes.read::<*mut u8>()) };
         let mut stdout = std::io::stdout();
         unsafe {
-            let len = string.len();
-            for i in 0..len {
-                let byte = *string.element_ptr().add(i);
-                stdout.write_all(&[byte]).unwrap();
-            }
-            stdout.write_all(b"\n").unwrap();
-            stdout.flush().unwrap();
+            let bytes = std::slice::from_raw_parts(byte_ptr.element_ptr(), byte_ptr.len());
+            stdout.write_all(bytes).unwrap();
         }
+        Ok(Slot::new_primitive(0))
+    },
+    "flush" = () => {
+        std::io::stdout().flush();
         Ok(Slot::new_primitive(0))
     },
     "float_to_str" = (float) => {

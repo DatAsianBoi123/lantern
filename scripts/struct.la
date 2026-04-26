@@ -2,7 +2,14 @@ primitive byte;
 primitive int;
 primitive float;
 
-native fun print(x: [byte]);
+fun print(str: [byte]) {
+  write(str);
+  write("\n");
+  flush();
+}
+
+native fun write(x: [byte]);
+native fun flush();
 native fun float_to_str(float: float) -> [byte];
 
 struct Position {
