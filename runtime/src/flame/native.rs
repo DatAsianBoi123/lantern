@@ -43,6 +43,10 @@ native_funs![for vm,
         std::io::stdout().flush();
         Ok(Slot::new_primitive(0))
     },
+    "gc" = () => {
+        vm.heap.gc(&mut vm.frames);
+        Ok(Slot::new_primitive(0))
+    },
     "float_to_str" = (float) => {
         let float = unsafe { *float.read::<f64>() };
         Ok(Slot::new_ref(vm.alloc_string(float.to_string().as_bytes())?.as_ptr()))
