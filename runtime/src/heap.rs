@@ -101,7 +101,8 @@ impl Heap {
         unsafe {
             let header = &mut *(ptr as *mut ObjectHeader);
 
-            if !header.forwarding_ptr.is_null() && (self.to_space..self.to_space.add(self.size)).contains(&header.forwarding_ptr) {
+            // use from_space here because from_space and to_space get swapped during GC
+            if !header.forwarding_ptr.is_null() && (self.from_space..self.from_space.add(self.size)).contains(&header.forwarding_ptr) {
                 return Some(header.forwarding_ptr);
             }
 
