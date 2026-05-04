@@ -41,23 +41,23 @@ impl Heap {
     }
 
     pub fn gc(&mut self, frames: &mut [Frame]) {
-        println!("GC Cycle Start");
+        eprintln!("GC Cycle Start");
         let before = Instant::now();
         self.alloc_ptr = self.to_space;
         std::mem::swap(&mut self.from_space, &mut self.to_space);
 
         for frame in frames {
+            eprintln!("Start Frame");
             self.move_from_roots(frame);
         }
 
-        println!("GC Cycle End in {:?} (moved {} bytes)", Instant::now().duration_since(before), self.alloc_ptr as usize - self.from_space as usize);
+        eprintln!("GC Cycle End in {:?} (moved {} bytes)", Instant::now().duration_since(before), self.alloc_ptr as usize - self.from_space as usize);
     }
 
     fn move_from_roots(&mut self, frame: &mut Frame) {
         for slot in frame.locals.iter_mut().chain(frame.operand_stack.iter_mut()) {
             if slot.kind() == SlotType::Ref {
                 let Some(moved) = self.move_ref(slot.0 as *mut u8) else { continue; };
-                println!("Moved {:?} to {moved:?}", slot.0 as *const u8);
                 slot.write_ref(moved);
             }
         }
@@ -74,7 +74,6 @@ impl Heap {
                         let field = fields.add(*offset) as *mut *mut u8;
                         let obj = *field;
                         let Some(moved) = self.move_ref(obj) else { continue; };
-                        println!("Moved {:?} to {moved:?}", obj);
                         field.write(moved);
                     }
                 },
@@ -87,7 +86,6 @@ impl Heap {
                         let element = elements.add(i * element_size) as *mut *mut u8;
                         let obj = *element;
                         let Some(moved) = self.move_ref(obj) else { continue; };
-                        println!("Moved {:?} to {moved:?}", obj);
                         element.write(moved);
                     }
                 },
@@ -110,6 +108,7 @@ impl Heap {
             let moved_ptr = self.next_ptr(total_size).expect("heap overflow");
             std::ptr::copy_nonoverlapping(ptr, moved_ptr, total_size);
             header.forwarding_ptr = moved_ptr;
+            eprintln!("Moved {ptr:?} to {moved_ptr:?}");
 
             self.move_object_refs(moved_ptr);
 
