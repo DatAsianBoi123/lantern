@@ -10,6 +10,7 @@ fun print(str: [byte]) {
 
 native fun write(x: [byte]);
 native fun flush();
+native fun gc();
 native fun float_to_str(float: float) -> [byte];
 
 struct Position {
@@ -24,20 +25,20 @@ val my_pos: Position = Position {
   y: -55.11,
 };
 
-fun Position.print(pos: Position) {
+fun Position.print(self: Position) {
   print("name:");
-  print(pos.name);
+  print(self.name);
   print("x:");
-  print(float_to_str(pos.x));
+  print(float_to_str(self.x));
   print("y:");
-  print(float_to_str(pos.y));
+  print(float_to_str(self.y));
 }
 
-Position.print(my_pos);
+my_pos.print();
 
 print("");
 
 my_pos.x = my_pos.x * 2.0;
 my_pos.y = 5.28;
-Position.print(my_pos);
+my_pos.print();
 
