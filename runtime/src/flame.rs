@@ -190,7 +190,7 @@ fn compile_stmts(
                 if scope.insert_variable(ident.0.clone(), sink.emit_or(LanternType::from_type(&r#type, &scope), LanternType::Null)).is_none() {
                     error!(in sink; ident.span() => "variable `{}` already declared", ident.0);
                 }
-                inst! { frame.instructions; 
+                inst! { frame.instructions;
                     [PUSHU 0]
                     [STORE_LOCAL local_index]
                 }

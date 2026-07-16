@@ -64,7 +64,7 @@ impl Slot {
 
         self.1 = SlotType::Primitive;
         unsafe {
-            (&mut self.0 as *mut _ as *mut T).write(primitive);
+            (&raw mut self.0 as *mut T).write(primitive);
         }
     }
 
@@ -137,15 +137,15 @@ impl VM {
     }
 
     pub fn exec_one(&mut self) -> Result<(), RuntimeError> {
-        let Some(ref mut frame) = self.frames.last_mut() else { return Ok(()); };
+        let Some(frame) = self.frames.last_mut() else { return Ok(()); };
 
         let fun = &self.funs[frame.fun_index];
         match fun {
             GeneratedFunction::Instructions(instructions) => {
                 match instructions[frame.inst_ptr].clone() {
-                    Instruction::Pushu64(u64) => { frame.operand_stack.push_primitive(u64)?; },
-                    Instruction::Pushi64(i64) => { frame.operand_stack.push_primitive(i64)?; },
-                    Instruction::Pushf64(f64) => { frame.operand_stack.push_primitive(f64)?; },
+                    Instruction::Pushu64(u64) => frame.operand_stack.push_primitive(u64)?,
+                    Instruction::Pushi64(i64) => frame.operand_stack.push_primitive(i64)?,
+                    Instruction::Pushf64(f64) => frame.operand_stack.push_primitive(f64)?,
                     Instruction::Pop => { frame.operand_stack.pop()?; },
                     Instruction::Addf => args!((f64, f64) in frame.operand_stack, (rhs, lhs) => lhs + rhs),
                     Instruction::Addi => args!((i64, i64) in frame.operand_stack, (rhs, lhs) => lhs + rhs),
@@ -208,8 +208,8 @@ impl VM {
                     Instruction::Invoke(num_args) => {
                         frame.inst_ptr += 1;
                         let mut locals = [Default::default(); 256];
-                        for i in 0..num_args {
-                            locals[num_args - i - 1] = frame.operand_stack.pop()?;
+                        for i in (0..num_args).rev() {
+                            locals[i] = frame.operand_stack.pop()?;
                         }
                         let index = unsafe { *frame.operand_stack.pop()?.read::<usize>() };
                         let frame = Frame::with_locals(index, locals);
@@ -219,8 +219,8 @@ impl VM {
                     Instruction::InvokeMethod(num_args) => {
                         frame.inst_ptr += 1;
                         let mut locals = [Default::default(); 256];
-                        for i in 0..num_args {
-                            locals[num_args - i] = frame.operand_stack.pop()?;
+                        for i in (1..=num_args).rev() {
+                            locals[i] = frame.operand_stack.pop()?;
                         }
                         let index = unsafe { *frame.operand_stack.pop()?.read::<usize>() };
                         // first arg is the receiver
@@ -230,7 +230,7 @@ impl VM {
                         return Ok(());
                     },
                     Instruction::Read(len) => {
-                        let ptr = unsafe { *frame.operand_stack.pop()?.read::<*mut u8>() };
+                        let ptr = unsafe { *frame.operand_stack.pop()?.read::<*const u8>() };
 
                         if len == 0 {
                             // reference
@@ -246,7 +246,7 @@ impl VM {
                         }
                     },
                     Instruction::Write(len) => {
-                        let new_field = &frame.operand_stack.pop()?.0 as *const _ as *const u8;
+                        let new_field = frame.operand_stack.pop()?.read::<u8>();
                         let offset = unsafe { *frame.operand_stack.pop()?.read::<usize>() };
                         let ptr = unsafe { *frame.operand_stack.pop()?.read::<*mut u8>() };
 
