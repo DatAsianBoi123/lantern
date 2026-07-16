@@ -28,7 +28,6 @@ fn compile_stmts(
     globals: &mut Globals,
     sink: &mut DiagnosticSink,
 ) -> ControlFlow<()> {
-    let mut next_fun_index = globals.funs.len();
     statements.iter()
         .filter_map(|statement| {
             if let Stmt::Item(item) = statement {
@@ -50,7 +49,7 @@ fn compile_stmts(
                         .unwrap_or(LanternType::Null);
 
                     let name = path.last().0.clone();
-                    let fun = LanternFunction::new(next_fun_index, args, ret);
+                    let fun = LanternFunction::new(globals.funs.len(), args, ret);
                     if path.items.0.len() == 1 {
                         scope.insert_function(name, fun);
                     } else {
@@ -62,7 +61,7 @@ fn compile_stmts(
                             error!(in sink; ident.span() => "item {ident} not found");
                         }
                     }
-                    next_fun_index += 1;
+                    globals.funs.push(GeneratedFunction::Native(native::dummy_native));
                 },
                 Item::NativeFun(ItemNativeFun { ident, args, ret, .. }) => {
                     let args = args.0.iter()
@@ -73,8 +72,14 @@ fn compile_stmts(
                         .map(|(_, r#type)| sink.emit_or(LanternType::from_type(r#type, &scope), LanternType::Null))
                         .unwrap_or(LanternType::Null);
 
-                    scope.insert_function(ident.0.clone(), LanternFunction::new(next_fun_index, args, ret));
-                    next_fun_index += 1;
+                    scope.insert_function(ident.0.clone(), LanternFunction::new(globals.funs.len(), args, ret));
+
+                    let ptr = native::get_native_fn(&ident.0).unwrap_or_else(|| {
+                        error!(in sink; ident.span() => "unknown native `{}`", ident.0);
+                        native::dummy_native
+                    });
+
+                    globals.funs.push(GeneratedFunction::Native(ptr));
                 },
                 // TODO: add types before checking for types
                 Item::Struct(ItemStruct { ident, fields, .. }) => {
@@ -239,7 +244,7 @@ fn compile_stmts(
                 inst!(frame.instructions; POP);
             },
             Stmt::Item(Item::Using(_)) => todo!(),
-            Stmt::Item(Item::Fun(ItemFun { args, block, ret, .. })) => {
+            Stmt::Item(Item::Fun(ItemFun { path, args, block, ret, .. })) => {
                 let ret = ret
                     .map(|(_, r#type)| sink.emit_or(LanternType::from_type(&r#type, &scope), LanternType::Null))
                     .unwrap_or(LanternType::Null);
@@ -260,23 +265,17 @@ fn compile_stmts(
                         }
                     });
 
-                let current_index = globals.funs.len();
-                globals.funs.push(GeneratedFunction::Instructions(InstructionSet::default()));
                 let _ = compile_stmts(block.stmts.0, fun_scope, loop_context, &mut fun_frame, globals, sink);
 
-                globals.funs[current_index] = fun_frame.into_gen();
-            },
-            Stmt::Item(Item::NativeFun(ItemNativeFun { ident, .. })) => {
-                let ptr = native::get_native_fn(&ident.0).unwrap_or_else(|| {
-                    error!(in sink; ident.span() => "unknown native `{}`", ident.0);
-                    fn empty(_: &mut VM, _: [Slot; 256]) -> Result<Slot, RuntimeError> {
-                        Ok(Slot::new_primitive(0))
-                    }
-                    empty as fn(&mut VM, [Slot; 256]) -> Result<Slot, RuntimeError>
-                });
+                let index = if path.items.0.len() == 1 {
+                    scope.function(&path.last().0).expect("function in scope").index
+                } else {
+                    scope.associated(scope.item(&path.items.0[0].0).expect("item in scope").identifier(), &path.last().0).expect("assosiated in scope").index
+                };
 
-                globals.funs.push(GeneratedFunction::Native(ptr));
+                globals.funs[index] = fun_frame.into_gen();
             },
+            Stmt::Item(Item::NativeFun(_)) => {},
             Stmt::Item(Item::Struct(_)) => {},
             Stmt::Item(Item::Primitive(_)) => {},
         }

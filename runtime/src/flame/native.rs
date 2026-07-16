@@ -2,7 +2,7 @@ use std::io::Write;
 
 use anyhow::anyhow;
 
-use crate::{Slot, error::RuntimeError, flame::{LanternPrimitive, PrimitiveOps, instruction::Instruction}, heap::HeapArray};
+use crate::{Slot, VM, error::RuntimeError, flame::{LanternPrimitive, PrimitiveOps, instruction::Instruction}, heap::HeapArray};
 
 macro_rules! native_funs {
     (for $vm: pat, $( $name: literal = ( $($pat: pat),* $(,)? ) => $expr: expr ),* $(,)?) => {
@@ -27,6 +27,10 @@ macro_rules! native_funs {
             }
         }
     };
+}
+
+pub fn dummy_native(_: &mut VM, _: [Slot; 256]) -> Result<Slot, RuntimeError> {
+    Err(RuntimeError(anyhow!("Called dummy native function! (Report this)").into()))
 }
 
 native_funs![for vm,
