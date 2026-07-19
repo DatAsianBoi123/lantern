@@ -244,7 +244,7 @@ fn compile_stmts(
                 inst!(frame.instructions; POP);
             },
             Stmt::Item(Item::Using(_)) => todo!(),
-            Stmt::Item(Item::Fun(ItemFun { path, args, block, ret, .. })) => {
+            Stmt::Item(Item::Fun(ItemFun { path, block, ret, .. })) => {
                 let ret = ret
                     .map(|(_, r#type)| sink.emit_or(LanternType::from_type(&r#type, &scope), LanternType::Null))
                     .unwrap_or(LanternType::Null);
@@ -252,28 +252,22 @@ fn compile_stmts(
                 let mut fun_scope = scope.child_function(block.open_brace.span());
                 let mut fun_frame = StackFrame::new_fun(ret);
 
-                args.0.into_iter()
-                    .for_each(|FunArg { ident, r#type, .. }| {
-                        match LanternType::from_type(&r#type, &scope) {
-                            Ok(r#type) => {
-                                fun_frame.declare_local(ident.0.clone());
-                                if fun_scope.insert_variable(ident.0.clone(), r#type).is_none() {
-                                    error!(in sink; ident.span() => "argument `{}` already declared", ident.0);
-                                }
-                            },
-                            Err(err) => sink.emit(err),
-                        }
-                    });
+                let fun = if path.items.0.len() == 1 {
+                    scope.function(&path.last().0).expect("function in scope")
+                } else {
+                    scope.associated(scope.item(&path.items.0[0].0).expect("item in scope").identifier(), &path.last().0).expect("assosiated in scope")
+                };
+
+                for (ident, r#type) in &fun.args {
+                    fun_frame.declare_local(ident.0.clone());
+                    if fun_scope.insert_variable(ident.0.clone(), r#type.clone()).is_none() {
+                        error!(in sink; ident.span() => "argument `{}` already declared", ident.0);
+                    }
+                }
 
                 let _ = compile_stmts(block.stmts.0, fun_scope, loop_context, &mut fun_frame, globals, sink);
 
-                let index = if path.items.0.len() == 1 {
-                    scope.function(&path.last().0).expect("function in scope").index
-                } else {
-                    scope.associated(scope.item(&path.items.0[0].0).expect("item in scope").identifier(), &path.last().0).expect("assosiated in scope").index
-                };
-
-                globals.funs[index] = fun_frame.into_gen();
+                globals.funs[fun.index] = fun_frame.into_gen();
             },
             Stmt::Item(Item::NativeFun(_)) => {},
             Stmt::Item(Item::Struct(_)) => {},
