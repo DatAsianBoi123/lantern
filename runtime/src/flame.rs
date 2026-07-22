@@ -51,12 +51,15 @@ fn compile_stmts(
                     let name = path.last().0.clone();
                     let fun = LanternFunction::new(globals.funs.len(), args, ret);
                     if path.items.len() == 1 {
-                        scope.insert_function(name, fun);
+                        if scope.insert_function(name, fun).is_none() {
+                            error!(in sink; path.last().span() => "function already declared");
+                        }
                     } else {
                         let ident = &path.items[0];
                         if let Some(item) = scope.item(&ident.0) {
-                            // TODO: associated with same name
-                            scope.insert_associated(item.identifier(), name, fun);
+                            if scope.insert_associated(item.identifier(), name, fun).is_none() {
+                                error!(in sink; ident.span() => "associated function already declared");
+                            }
                         } else {
                             error!(in sink; ident.span() => "item {ident} not found");
                         }
