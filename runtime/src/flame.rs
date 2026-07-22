@@ -40,7 +40,7 @@ fn compile_stmts(
             match item {
                 Item::Using(_) => todo!(),
                 Item::Fun(ItemFun { path, args, ret, .. }) => {
-                    let args = args.0.iter()
+                    let args = args.iter()
                         .map(|FunArg { ident, r#type, .. }| (ident.clone(), sink.emit_or(LanternType::from_type(r#type, &scope), LanternType::Null)))
                         .collect();
 
@@ -50,10 +50,10 @@ fn compile_stmts(
 
                     let name = path.last().0.clone();
                     let fun = LanternFunction::new(globals.funs.len(), args, ret);
-                    if path.items.0.len() == 1 {
+                    if path.items.len() == 1 {
                         scope.insert_function(name, fun);
                     } else {
-                        let ident = &path.items.0[0];
+                        let ident = &path.items[0];
                         if let Some(item) = scope.item(&ident.0) {
                             // TODO: associated with same name
                             scope.insert_associated(item.identifier(), name, fun);
@@ -64,7 +64,7 @@ fn compile_stmts(
                     globals.funs.push(GeneratedFunction::Native(native::dummy_native));
                 },
                 Item::NativeFun(ItemNativeFun { ident, args, ret, .. }) => {
-                    let args = args.0.iter()
+                    let args = args.iter()
                         .map(|FunArg { ident, r#type, .. }| (ident.clone(), sink.emit_or(LanternType::from_type(r#type, &scope), LanternType::Null)))
                         .collect();
 
@@ -83,7 +83,7 @@ fn compile_stmts(
                 },
                 // TODO: add types before checking for types
                 Item::Struct(ItemStruct { ident, fields, .. }) => {
-                    let fields = fields.0.iter()
+                    let fields = fields.iter()
                         .map(|StructField { ident, r#type, .. }| {
                             (ident.0.clone(), sink.emit_or(LanternType::from_type(r#type, &scope), LanternType::Null))
                         })
@@ -121,7 +121,7 @@ fn compile_stmts(
                             inst!(frame.instructions; GOTO_IF_FALSE 0);
 
                             let block_scope = scope.child_block();
-                            let branch_return = compile_stmts(block.stmts.0, block_scope, loop_context, frame, globals, sink);
+                            let branch_return = compile_stmts(block.stmts, block_scope, loop_context, frame, globals, sink);
                             match (overall_return, branch_return) {
                                 (Some(ControlFlow::Break(_)), ControlFlow::Break(_)) => {},
                                 (Some(ControlFlow::Break(_)), ControlFlow::Continue(_)) => overall_return = Some(branch_return),
@@ -139,7 +139,7 @@ fn compile_stmts(
                         },
                         IfBranch::Else(block) => {
                             let block_scope = scope.child_block();
-                            let branch_return = compile_stmts(block.stmts.0, block_scope, loop_context, frame, globals, sink);
+                            let branch_return = compile_stmts(block.stmts, block_scope, loop_context, frame, globals, sink);
                             match (overall_return, branch_return) {
                                 (Some(ControlFlow::Break(_)), ControlFlow::Break(_)) => {},
                                 (Some(ControlFlow::Break(_)), ControlFlow::Continue(_)) => overall_return = Some(branch_return),
@@ -175,7 +175,7 @@ fn compile_stmts(
 
                 let block_scope = scope.child_block();
                 // we can't assume the initial condition is met so these may not even be ran
-                let _ = compile_stmts(block.stmts.0, block_scope, loop_context, frame, globals, sink);
+                let _ = compile_stmts(block.stmts, block_scope, loop_context, frame, globals, sink);
                 inst!(frame.instructions; GOTO head);
 
                 frame.instructions[break_index] = Instruction::PopGotoIfFalse(frame.instructions.len());
@@ -252,10 +252,10 @@ fn compile_stmts(
                 let mut fun_scope = scope.child_function(block.open_brace.span());
                 let mut fun_frame = StackFrame::new_fun(ret);
 
-                let fun = if path.items.0.len() == 1 {
+                let fun = if path.items.len() == 1 {
                     scope.function(&path.last().0).expect("function in scope")
                 } else {
-                    scope.associated(scope.item(&path.items.0[0].0).expect("item in scope").identifier(), &path.last().0).expect("assosiated in scope")
+                    scope.associated(scope.item(&path.items[0].0).expect("item in scope").identifier(), &path.last().0).expect("assosiated in scope")
                 };
 
                 for (ident, r#type) in &fun.args {
@@ -265,7 +265,7 @@ fn compile_stmts(
                     }
                 }
 
-                let _ = compile_stmts(block.stmts.0, fun_scope, loop_context, &mut fun_frame, globals, sink);
+                let _ = compile_stmts(block.stmts, fun_scope, loop_context, &mut fun_frame, globals, sink);
 
                 globals.funs[fun.index] = fun_frame.into_gen();
             },
@@ -335,11 +335,11 @@ fn compile_expr(
             let r#type = compile_expr(*expr, scope, loop_context, frame, globals, sink)?;
             if let LanternType::Function { is_method, args: fun_args, ret } = r#type {
                 let fun_args_len = fun_args.len();
-                if args.0.len() != fun_args_len {
-                    error!(in sink; span => "expected function to have {} args, got {} args instead", fun_args_len, args.0.len());
+                if args.len() != fun_args_len {
+                    error!(in sink; span => "expected function to have {} args, got {} args instead", fun_args_len, args.len());
                 }
 
-                for (expr, r#type) in args.0.into_iter().zip(fun_args) {
+                for (expr, r#type) in args.into_iter().zip(fun_args) {
                     let expr_span = expr.span();
                     let expr_type = compile_expr(expr, scope, loop_context, frame, globals, sink)?;
                     if expr_type != r#type {
@@ -504,9 +504,9 @@ fn compile_expr(
             };
             inst!(frame.instructions; ALLOC_OBJ r#struct.id);
             for field in &r#struct.fields {
-                match fields.0.iter().position(|expr_field| expr_field.ident.0 == field.name) {
+                match fields.iter().position(|expr_field| expr_field.ident.0 == field.name) {
                     Some(index) => {
-                        let expr_field = fields.0.swap_remove(index);
+                        let expr_field = fields.swap_remove(index);
                         let expr_span = expr_field.expr.span();
                         inst!(frame.instructions; PUSHU (HeapObject::field_offset() + field.offset) as u64);
                         let field_ty = compile_expr(expr_field.expr, scope, loop_context, frame, globals, sink)?;
@@ -519,7 +519,7 @@ fn compile_expr(
                 }
             }
 
-            for extraneous_field in fields.0 {
+            for extraneous_field in fields {
                 error!(in sink; extraneous_field.ident.span() => "unknown field");
             }
 
@@ -528,15 +528,15 @@ fn compile_expr(
         Expr::Paren(ExprParen { expr, .. }) => compile_expr(*expr, scope, loop_context, frame, globals, sink),
         Expr::Block(ExprBlock { stmts, .. }) => {
             let block_scope = scope.child_block();
-            compile_stmts(stmts.0, block_scope, loop_context, frame, globals, sink)?;
+            compile_stmts(stmts, block_scope, loop_context, frame, globals, sink)?;
             inst!(frame.instructions; PUSHU 0);
             ControlFlow::Continue(LanternType::Null)
         },
         Expr::Array(ExprArray { elements, .. }) => {
-            let len = elements.0.len();
+            let len = elements.len();
             let mut inner = None;
 
-            for expr in elements.0 {
+            for expr in elements {
                 let span = expr.span();
                 inner = match (inner, compile_expr(expr, scope, loop_context, frame, globals, sink)?) {
                     (None, r#type) => Some(r#type),

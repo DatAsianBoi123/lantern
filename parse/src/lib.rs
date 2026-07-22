@@ -4,7 +4,7 @@ use diagnostic::{Diagnostic, error};
 use lex::{ArrowRight, Break, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Continue, Else, Equals, Fun, Ident, If, Keyword, Native, OpenBrace, OpenBracket, OpenParen, Period, Primitive, Return, Semi, Struct, Token, TokenKind, Using, Val, While};
 use macros::Parse;
 
-use crate::{expr::{Expr, ExprBlock}, stream::{Punctuated, TokenStream, TrailingDenied}};
+use crate::{expr::{Expr, ExprBlock}, stream::{parse_punctuated, TokenStream}};
 
 pub use lex;
 
@@ -15,20 +15,13 @@ pub mod expr;
 
 pub trait ParseTokens: Sized {
     fn parse(stream: &mut TokenStream) -> Result<Self>;
-
-    fn can_parse(peek: &Token) -> bool;
 }
 
-// TODO: find impl for Box<T>, Option<T>, and (A, B, ...)
 impl<T: TokenKind> ParseTokens for T {
     fn parse(stream: &mut TokenStream) -> Result<Self> {
         let next = stream.next_token()?;
         let span = next.span();
         T::from_token(next).ok_or(error!(span => "expected {}", T::name()))
-    }
-
-    fn can_parse(peek: &Token) -> bool {
-        T::is_token(peek)
     }
 }
 
@@ -48,10 +41,6 @@ impl ParseTokens for LanternFile {
             stmts.push(Stmt::parse(stream)?);
         }
         Ok(Self { stmts })
-    }
-
-    fn can_parse(token: &Token) -> bool {
-        !matches!(token, Token::Eof(_))
     }
 }
 
@@ -76,10 +65,6 @@ impl ParseTokens for Item {
             _ => Err(error!(peek.span() => "expected `item`")),
         }
     }
-
-    fn can_parse(peek: &Token) -> bool {
-        matches!(peek, Token::Keyword(Keyword::Fun(_) | Keyword::Using(_) | Keyword::Struct(_) | Keyword::Native(_) | Keyword::Primitive(_)))
-    }
 }
 
 #[derive(Parse, Debug, Clone, PartialEq)]
@@ -87,15 +72,10 @@ pub struct ItemFun {
     pub fun: Fun,
     pub path: Path,
     pub open_paren: OpenParen,
-    pub args: Punctuated<0, FunArg, Comma>,
+    #[parse(with(parse_punctuated::<FunArg, Comma, ClosedParen>))]
+    pub args: Vec<FunArg>,
     pub closed_paren: ClosedParen,
-    #[parse({
-        if ArrowRight::can_parse(stream.peek()?) {
-            Some((ArrowRight::parse(stream)?, Type::parse(stream)?))
-        } else {
-            None
-        }
-    })]
+    #[parse(with_try(ArrowRight, Type))]
     pub ret: Option<(ArrowRight, Type)>,
     pub block: ExprBlock,
 }
@@ -106,15 +86,10 @@ pub struct ItemNativeFun {
     pub fun: Fun,
     pub ident: Ident,
     pub open_paren: OpenParen,
-    pub args: Punctuated<0, FunArg, Comma>,
+    #[parse(with(parse_punctuated::<FunArg, Comma, ClosedParen>))]
+    pub args: Vec<FunArg>,
     pub closed_paren: ClosedParen,
-    #[parse({
-        if ArrowRight::can_parse(stream.peek()?) {
-            Some((ArrowRight::parse(stream)?, Type::parse(stream)?))
-        } else {
-            None
-        }
-    })]
+    #[parse(with_try(ArrowRight, Type))]
     pub ret: Option<(ArrowRight, Type)>,
     pub semi: Semi,
 }
@@ -139,7 +114,8 @@ pub struct ItemUsing {
     pub path: Path,
     pub colon: Colon,
     pub open_brace: OpenBrace,
-    pub items: Punctuated<1, Ident, Comma>,
+    #[parse(with(parse_punctuated::<Ident, Comma, ClosedBrace>))] // TODO: allow {}?
+    pub items: Vec<Ident>,
     pub closed_brace: ClosedBrace,
 }
 
@@ -148,7 +124,8 @@ pub struct ItemStruct {
     pub r#struct: Struct,
     pub ident: Ident,
     pub open_brace: OpenBrace,
-    pub fields: Punctuated<0, StructField, Comma>,
+    #[parse(with(parse_punctuated::<StructField, Comma, ClosedBrace>))]
+    pub fields: Vec<StructField>,
     pub closed_brace: ClosedBrace,
 }
 
@@ -161,9 +138,13 @@ pub struct StructField {
 
 #[derive(Parse, Debug, Clone, PartialEq)]
 pub enum Stmt {
+    #[parse(using(Fun, Using, Struct, Native, Primitive))]
     Item(Item),
+    #[parse(using(If))]
     IfStmt(IfStmt),
+    #[parse(using(While))]
     WhileStmt(WhileStmt),
+    #[parse(using(Val))]
     ValDeclaration(ValDeclaration),
     Return(Return, Expr, Semi),
     Continue(Continue, Semi),
@@ -177,13 +158,7 @@ pub struct ValDeclaration {
     pub ident: Ident,
     pub colon: Colon,
     pub r#type: Type,
-    #[parse({
-        if Equals::can_parse(stream.peek()?) {
-            Some((Equals::parse(stream)?, Expr::parse(stream)?))
-        } else {
-            None
-        }
-    })]
+    #[parse(with_try(Equals, Expr))]
     pub init: Option<(Equals, Expr)>,
     pub semi: Semi,
 }
@@ -195,13 +170,7 @@ pub struct IfStmt {
     pub condition: Expr,
     pub closed_paren: ClosedParen,
     pub block: ExprBlock,
-    #[parse({
-        if Else::can_parse(stream.peek()?) {
-            Some((Else::parse(stream)?, Box::new(IfBranch::parse(stream)?)))
-        } else {
-            None
-        }
-    })]
+    #[parse(boxed, with_try(Else, IfBranch))]
     pub branch: Option<(Else, Box<IfBranch>)>,
 }
 
@@ -216,14 +185,18 @@ pub struct WhileStmt {
 
 #[derive(Parse, Debug, Clone, PartialEq)]
 pub enum IfBranch {
+    #[parse(using(If))]
     ElseIf(IfStmt),
+    #[parse(using(OpenBrace))]
     Else(ExprBlock),
 }
 
 #[derive(Parse, Debug, Clone, PartialEq, Eq)]
 pub enum Type {
-    Array(OpenBracket, #[parse(Box::new(Type::parse(stream)?))] Box<Type>, ClosedBracket),
+    Array(OpenBracket, #[parse(boxed(Type))] Box<Type>, ClosedBracket),
+    #[parse(using(Fun))]
     Fun(FunType),
+    #[parse(using(Ident))]
     Path(Path),
 }
 
@@ -232,7 +205,7 @@ impl Display for Type {
         match self {
             Self::Array(_, inner, _) => write!(f, "[{inner}]"),
             Self::Fun(FunType { args, ret, .. }) => {
-                write!(f, "fun({})", args.0.iter().map(|arg| arg.to_string()).collect::<Vec<_>>().join(", "))?;
+                write!(f, "fun({})", args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>().join(", "))?;
                 if let Some((_, ret)) = ret {
                     write!(f, " -> {ret}")?;
                 }
@@ -247,40 +220,46 @@ impl Display for Type {
 pub struct FunType {
     pub fun: Fun,
     pub open_paren: OpenParen,
-    pub args: Punctuated<0, Type, Comma>,
+    #[parse(with(parse_punctuated::<Type, Comma, ClosedParen>))]
+    pub args: Vec<Type>,
     pub closed_paren: ClosedParen,
-    #[parse({
-        if ArrowRight::can_parse(stream.peek()?) {
-            Some((ArrowRight::parse(stream)?, Box::new(Type::parse(stream)?)))
-        } else {
-            None
-        }
-    })]
+    #[parse(boxed, with_try(ArrowRight, Type))]
     pub ret: Option<(ArrowRight, Box<Type>)>,
 }
 
-#[derive(Parse, Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Path {
-    pub items: Punctuated<1, Ident, Period, TrailingDenied>,
+    pub items: Vec<Ident>,
 }
 
 impl Display for Path {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        self.items.0.iter()
-            .take(self.items.0.len() - 1)
+        self.items.iter()
+            .take(self.items.len() - 1)
             .try_for_each(|item| write!(f, "{}.", item.0))?;
-        write!(f, "{}", self.items.0.last().expect("path has at least 1 item").0)?;
+        write!(f, "{}", self.items.last().expect("path has at least 1 item").0)?;
         Ok(())
+    }
+}
+
+impl ParseTokens for Path {
+    fn parse(stream: &mut TokenStream) -> Result<Self> {
+        let mut items = vec![Ident::parse(stream)?];
+        while Period::is_token(stream.peek()?) {
+            Period::parse(stream)?;
+            items.push(Ident::parse(stream)?);
+        }
+        Ok(Self { items })
     }
 }
 
 impl Path {
     pub fn last(&self) -> &Ident {
-        self.items.0.last().unwrap()
+        self.items.last().unwrap()
     }
 
     pub fn into_last(mut self) -> Ident {
-        self.items.0.pop().unwrap()
+        self.items.pop().unwrap()
     }
 }
 

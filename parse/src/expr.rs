@@ -4,7 +4,7 @@ use diagnostic::{Span, error};
 use lex::{And, Asterisk, Bang, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Equals, EqualsEquals, Greater, GreaterEq, Hyphen, Less, LessEq, Literal, OpenBrace, OpenBracket, OpenParen, Or, Percent, Period, Plus, Punct, Slash, Token, TokenKind};
 use macros::Parse;
 
-use crate::{Ident, ParseTokens, Result, Stmt, stream::{Punctuated, Repetition, TokenStream}};
+use crate::{Ident, ParseTokens, Result, Stmt, stream::{TokenStream, parse_punctuated, parse_repetition}};
 
 #[derive(Debug, Clone, PartialEq)]
 enum PrimaryExpr {
@@ -28,7 +28,7 @@ impl ParseTokens for PrimaryExpr {
                     Ok(Self::Struct(ExprStruct {
                         ident,
                         open_brace: ParseTokens::parse(stream)?,
-                        fields: ParseTokens::parse(stream)?,
+                        fields: parse_punctuated::<ExprStructField, Comma, ClosedBrace>(stream)?,
                         closed_brace: ParseTokens::parse(stream)?,
                     }))
                 } else {
@@ -41,10 +41,6 @@ impl ParseTokens for PrimaryExpr {
             Token::Punct(Punct::OpenBracket(_)) => Ok(Self::Array(ExprArray::parse(stream)?)),
             token => Err(error!(token.span() => "expected `expr`")),
         }
-    }
-
-    fn can_parse(peek: &Token) -> bool {
-        Literal::can_parse(peek) || Ident::can_parse(peek) || ExprParen::can_parse(peek) || ExprBlock::can_parse(peek) || ExprArray::can_parse(peek)
     }
 }
 
@@ -97,13 +93,13 @@ impl Expr {
     fn parse_all(stream: &mut TokenStream, min_bp: u8) -> Result<Self> {
         let mut lhs = Self::parse_lhs(stream)?;
         loop {
-            if Period::can_parse(stream.peek()?) {
+            if Period::is_token(stream.peek()?) {
                 Period::parse(stream)?;
                 lhs = Self::Field(ExprField { expr: Box::new(lhs), ident: Ident::parse(stream)? });
                 continue;
             }
 
-            if BinaryOperator::can_parse(stream.peek()?) {
+            if BinaryOperator::is_token(stream.peek()?) {
                 let op = BinaryOperator::parse(&mut stream.clone())?;
                 let (left_bp, right_bp) = op.binding_power();
 
@@ -119,16 +115,16 @@ impl Expr {
                 continue;
             }
 
-            if OpenParen::can_parse(stream.peek()?) {
+            if OpenParen::is_token(stream.peek()?) {
                 // highest BP
                 let open_paren = OpenParen::parse(stream)?;
 
-                lhs = Self::FunCall(ExprFunCall { expr: Box::new(lhs), open_paren, args: ParseTokens::parse(stream)?, closed_paren: ClosedParen::parse(stream)? });
+                lhs = Self::FunCall(ExprFunCall { expr: Box::new(lhs), open_paren, args: parse_punctuated::<Expr, Comma, ClosedParen>(stream)?, closed_paren: ClosedParen::parse(stream)? });
 
                 continue;
             }
 
-            if OpenBracket::can_parse(stream.peek()?) {
+            if OpenBracket::is_token(stream.peek()?) {
                 // highest BP
                 let open_bracket = OpenBracket::parse(stream)?;
 
@@ -143,7 +139,7 @@ impl Expr {
     }
 
     fn parse_lhs(stream: &mut TokenStream) -> Result<Self> {
-        if UnaryOperator::can_parse(stream.peek()?) {
+        if UnaryOperator::is_token(stream.peek()?) {
             let op = UnaryOperator::parse(stream)?;
             let rhs = Self::parse_all(stream, op.right_binding_power())?;
             Ok(Self::Unary(ExprUnary { op, expr: Box::new(rhs) }))
@@ -157,10 +153,6 @@ impl ParseTokens for Expr {
     fn parse(stream: &mut TokenStream) -> Result<Self> {
         Self::parse_all(stream, 0)
     }
-
-    fn can_parse(peek: &Token) -> bool {
-        UnaryOperator::can_parse(peek) || PrimaryExpr::can_parse(peek)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -173,7 +165,7 @@ pub struct ExprField {
 pub struct ExprFunCall {
     pub expr: Box<Expr>,
     pub open_paren: OpenParen,
-    pub args: Punctuated<0, Expr, Comma>,
+    pub args: Vec<Expr>,
     pub closed_paren: ClosedParen,
 }
 
@@ -190,7 +182,8 @@ pub struct ExprMethodCall {
 pub struct ExprStruct {
     pub ident: Ident,
     pub open_brace: OpenBrace,
-    pub fields: Punctuated<0, ExprStructField, Comma>,
+    #[parse(with(parse_punctuated::<ExprStructField, Comma, ClosedBrace>))]
+    pub fields: Vec<ExprStructField>,
     pub closed_brace: ClosedBrace,
 }
 
@@ -204,7 +197,7 @@ pub struct ExprStructField {
 #[derive(Parse, Debug, Clone, PartialEq)]
 pub struct ExprParen {
     pub open_paren: OpenParen,
-    #[parse(Box::new(Expr::parse(stream)?))]
+    #[parse(boxed(Expr))]
     pub expr: Box<Expr>,
     pub closed_paren: ClosedParen,
 }
@@ -212,14 +205,16 @@ pub struct ExprParen {
 #[derive(Parse, Debug, Clone, PartialEq)]
 pub struct ExprBlock {
     pub open_brace: OpenBrace,
-    pub stmts: Repetition<0, Stmt>,
+    #[parse(with(parse_repetition::<Stmt, ClosedBrace>))]
+    pub stmts: Vec<Stmt>,
     pub closed_brace: ClosedBrace,
 }
 
 #[derive(Parse, Debug, Clone, PartialEq)]
 pub struct ExprArray {
     pub open_bracket: OpenBracket,
-    pub elements: Punctuated<0, Expr, Comma>,
+    #[parse(with(parse_punctuated::<Expr, Comma, ClosedBracket>))]
+    pub elements: Vec<Expr>,
     pub closed_bracket: ClosedBracket,
 }
 
@@ -294,6 +289,24 @@ impl BinaryOperator {
     pub fn is_comparison(&self) -> bool {
         matches!(self, Self::Lt(_) | Self::Le(_) | Self::Gt(_) | Self::Ge(_) | Self::Eq(_))
     }
+
+    pub fn is_token(token: &Token) -> bool {
+        matches!(token,
+            Token::Punct(Punct::Equals(_)) |
+            Token::Punct(Punct::Plus(_)) |
+            Token::Punct(Punct::Hyphen(_)) |
+            Token::Punct(Punct::Asterisk(_)) |
+            Token::Punct(Punct::Slash(_)) |
+            Token::Punct(Punct::Percent(_)) |
+            Token::Punct(Punct::EqualsEquals(_)) |
+            Token::Punct(Punct::LessEq(_)) |
+            Token::Punct(Punct::GreaterEq(_)) |
+            Token::Punct(Punct::Less(_)) |
+            Token::Punct(Punct::Greater(_)) |
+            Token::Punct(Punct::And(_)) |
+            Token::Punct(Punct::Or(_))
+        )
+    }
 }
 
 impl Display for BinaryOperator {
@@ -343,6 +356,10 @@ impl UnaryOperator {
         match self {
             Self::Negate(_) | Self::Not(_) => 13,
         }
+    }
+
+    pub fn is_token(token: &Token) -> bool {
+        matches!(token, Token::Punct(Punct::Hyphen(_)) | Token::Punct(Punct::Bang(_)))
     }
 }
 

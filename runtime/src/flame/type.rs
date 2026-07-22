@@ -40,14 +40,14 @@ impl LanternType {
         match r#type {
             Type::Array(_, inner, _) => Ok(Self::Array(Box::new(Self::from_type(inner, scope)?))),
             Type::Fun(FunType { args, ret, .. }) => {
-                let args = args.0.iter().map(|r#type| LanternType::from_type(r#type, scope)).collect::<Result<_, _>>()?;
+                let args = args.iter().map(|r#type| LanternType::from_type(r#type, scope)).collect::<Result<_, _>>()?;
                 let ret = ret.as_ref()
                     .map(|(_, r#type)| LanternType::from_type(r#type, scope))
                     .unwrap_or(Ok(LanternType::Null))?;
                 Ok(LanternType::Function { is_method: false, args, ret: Box::new(ret) })
             },
             Type::Path(path) => {
-                let span = path.items.0[0].span();
+                let span = path.items[0].span();
                 match scope.item(&path.last().0) {
                     Some(LanternItem::Struct(LanternStruct { id, .. })) => Ok(Self::Struct(*id)),
                     Some(LanternItem::Primitive(primitive)) => Ok(Self::Primitive(primitive)),

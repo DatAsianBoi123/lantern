@@ -1,12 +1,6 @@
-use std::{marker::PhantomData};
-
-use lex::{Lexer, Token};
+use lex::{Lexer, Token, TokenKind};
 
 use crate::{ParseTokens, Result};
-
-mod private {
-    pub trait Sealed {}
-}
 
 #[derive(Debug, Clone)]
 pub struct TokenStream<'a> {
@@ -36,127 +30,52 @@ impl<'a> TokenStream<'a> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Repetition<const L: usize, T>(pub Vec<T>);
-
-impl<const L: usize, T: ParseTokens> ParseTokens for Repetition<L, T> {
-    fn parse(stream: &mut TokenStream) -> Result<Self> {
-        let mut items = Vec::new();
-        for _ in 0..L {
-            items.push(T::parse(stream)?);
-        }
-        while T::can_parse(stream.peek()?) {
-            items.push(T::parse(stream)?);
-        }
-        Ok(Self(items))
+pub fn parse_repetition<T: ParseTokens, E: TokenKind>(stream: &mut TokenStream) -> Result<Vec<T>> {
+    let mut items = Vec::new();
+    while !E::is_token(stream.peek()?) {
+        items.push(T::parse(stream)?);
     }
-
-    fn can_parse(peek: &Token) -> bool {
-        if L == 0 {
-            true
-        } else {
-            T::can_parse(peek)
-        }
-    }
+    Ok(items)
 }
 
-pub trait TrailingBehavior: private::Sealed {}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TrailingAllowed;
-impl private::Sealed for TrailingAllowed {}
-impl TrailingBehavior for TrailingAllowed {}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TrailingDenied;
-impl private::Sealed for TrailingDenied {}
-impl TrailingBehavior for TrailingDenied {}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Punctuated<const L: usize, T, P, B: TrailingBehavior = TrailingAllowed>(pub Vec<T>, PhantomData<B>, PhantomData<P>);
-
-impl<const L: usize, T: ParseTokens, P: ParseTokens> ParseTokens for Punctuated<L, T, P, TrailingAllowed> {
-    fn parse(stream: &mut TokenStream) -> Result<Self> {
-        let mut items = Vec::new();
-
-        if L > 0 {
-            items.push(T::parse(stream)?);
-            for _ in 0..L - 1 {
-                P::parse(stream)?;
-                items.push(T::parse(stream)?);
-            }
-        } else if T::can_parse(stream.peek()?) {
-            items.push(T::parse(stream)?);
-        } else {
-            return Ok(Self(items, PhantomData, PhantomData));
+pub fn parse_punctuated<T: ParseTokens, P: ParseTokens, E: TokenKind>(stream: &mut TokenStream) -> Result<Vec<T>> {
+    let mut items = Vec::new();
+    while !E::is_token(stream.peek()?) {
+        items.push(T::parse(stream)?);
+        if E::is_token(stream.peek()?) {
+            break;
         }
-
-        while P::can_parse(stream.peek()?) {
-            P::parse(stream)?;
-            if T::can_parse(stream.peek()?) {
-                items.push(T::parse(stream)?);
-            } else {
-                break;
-            }
-        }
-        Ok(Self(items, PhantomData, PhantomData))
+        P::parse(stream)?;
     }
-
-    fn can_parse(peek: &Token) -> bool {
-        if L == 0 {
-            true
-        } else {
-            T::can_parse(peek)
-        }
-    }
+    Ok(items)
 }
 
-impl<const L: usize, T: ParseTokens, P: ParseTokens> ParseTokens for Punctuated<L, T, P, TrailingDenied> {
-    fn parse(stream: &mut TokenStream) -> Result<Self> {
-        let mut items = Vec::new();
-
-        if L > 0 {
-            items.push(T::parse(stream)?);
-            for _ in 0..L - 1 {
-                P::parse(stream)?;
-                items.push(T::parse(stream)?);
-            }
-        } else if T::can_parse(stream.peek()?) {
-            items.push(T::parse(stream)?);
-        } else {
-            return Ok(Self(items, PhantomData, PhantomData));
-        }
-
-        while P::can_parse(stream.peek()?) {
-            P::parse(stream)?;
-            items.push(T::parse(stream)?);
-        }
-        Ok(Self(items, PhantomData, PhantomData))
+pub fn parse_punctuated_untrailed<T: ParseTokens, P: ParseTokens, E: TokenKind>(stream: &mut TokenStream) -> Result<Vec<T>> {
+    if E::is_token(stream.peek()?) {
+        return Ok(Vec::new());
     }
-
-    fn can_parse(peek: &Token) -> bool {
-        if L == 0 {
-            true
-        } else {
-            T::can_parse(peek)
-        }
+    let mut items = vec![T::parse(stream)?];
+    while !E::is_token(stream.peek()?) {
+        P::parse(stream)?;
+        items.push(T::parse(stream)?);
     }
+    Ok(items)
 }
 
 #[cfg(test)]
 mod tests {
-    use lex::Literal;
+    use lex::{Eof, Literal};
 
-    use crate::*;
+    use crate::{stream::parse_punctuated_untrailed, *};
 
     #[test]
     fn test_punctuated() {
         let input = "1,23,4";
         let mut stream = TokenStream::from_input(input);
 
-        let parsed = <Punctuated<0, Literal, Comma, TrailingDenied>>::parse(&mut stream);
+        let parsed = parse_punctuated_untrailed::<Literal, Comma, Eof>(&mut stream);
         assert!(parsed.is_ok());
-        assert_eq!(parsed.unwrap().0.len(), 3);
+        assert_eq!(parsed.unwrap().len(), 3);
     }
 
     #[test]
