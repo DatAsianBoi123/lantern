@@ -42,16 +42,18 @@ impl Heap {
 
     pub fn gc(&mut self, frames: &mut [Frame]) {
         eprintln!("GC Cycle Start");
-        let before = Instant::now();
+        let alloc_before = self.alloc_ptr as usize - self.from_space as usize;
         self.alloc_ptr = self.to_space;
         std::mem::swap(&mut self.from_space, &mut self.to_space);
 
+        let before = Instant::now();
         for frame in frames {
             eprintln!("Start Frame");
             self.move_from_roots(frame);
         }
 
-        eprintln!("GC Cycle End in {:?} (moved {} bytes)", Instant::now().duration_since(before), self.alloc_ptr as usize - self.from_space as usize);
+        let moved = self.alloc_ptr as usize - self.from_space as usize;
+        eprintln!("GC Cycle End in {:?} (moved {} bytes, {:.2}%)", Instant::now().duration_since(before), moved, (moved as f64 / alloc_before as f64) * 100.0);
     }
 
     fn move_from_roots(&mut self, frame: &mut Frame) {
