@@ -167,7 +167,7 @@ pub enum Token {
     Keyword(Keyword),
     Ident(Ident),
     Punct(Punct),
-    Eof(Span),
+    Eof(Eof),
 }
 
 impl Display for Token {
@@ -177,7 +177,7 @@ impl Display for Token {
             Self::Keyword(keyword) => write!(f, "{keyword}"),
             Self::Ident(ident) => write!(f, "{ident}"),
             Self::Punct(punct) => write!(f, "{punct}"),
-            Self::Eof(_) => write!(f, "<eof>"),
+            Self::Eof(eof) => write!(f, "{eof}"),
         }
     }
 }
@@ -201,7 +201,7 @@ impl TokenKind for Token {
             Self::Keyword(keyword) => keyword.span(),
             Self::Ident(Ident(_, span)) => span.clone(),
             Self::Punct(punct) => punct.span(),
-            Self::Eof(span) => span.clone(),
+            Self::Eof(Eof(span)) => span.clone(),
         }
     }
 }
@@ -287,6 +287,36 @@ impl TokenKind for Ident {
 impl Ident {
     pub fn is_valid_char(char: char) -> bool {
         char == '_' || char.is_alphanumeric()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Eof(pub Span);
+
+impl Display for Eof {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<eof>")
+    }
+}
+
+impl TokenKind for Eof {
+    fn name() -> String {
+        "<eof>".to_string()
+    }
+
+    fn from_token(token: Token) -> Option<Self> {
+        match token {
+            Token::Eof(eof) => Some(eof),
+            _ => None,
+        }
+    }
+
+    fn is_token(token: &Token) -> bool {
+        matches!(token, Token::Eof(_))
+    }
+
+    fn span(&self) -> Span {
+        self.0.clone()
     }
 }
 
@@ -428,7 +458,7 @@ impl<'a> Lexer<'a> {
 
         let Some(next) = self.next_char() else {
             // <eof> is always the next character over
-            return Ok(Token::Eof(Span::new(self.line, self.col + 1)));
+            return Ok(Token::Eof(Eof(Span::new(self.line, self.col + 1))));
         };
         match next {
             ',' => Ok(punct!(Comma)),
