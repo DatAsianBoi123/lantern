@@ -34,9 +34,7 @@ pub struct Slot(u64, SlotType);
 
 impl Display for Slot {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        for byte in self.0.to_ne_bytes() {
-            write!(f, "{byte:0<2x} ")?;
-        }
+        write!(f, "{:0<16x}", self.0)?;
         Ok(())
     }
 }
