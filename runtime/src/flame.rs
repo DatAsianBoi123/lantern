@@ -634,6 +634,20 @@ fn compile_expr(
                         ControlFlow::Continue(LanternType::Null)
                     }
                 },
+                LanternType::Array(inner) => {
+                    if ident.0 == "len" {
+                        let size = if inner.is_primitive() { inner.size() } else { 0 };
+                        inst! { frame.instructions;
+                            [PUSHU size_of::<ObjectHeader>() as u64]
+                            [ADDI]
+                            [READ size]
+                        }
+                        ControlFlow::Continue(LanternType::Primitive(&native::INT_PRIMITIVE))
+                    } else {
+                        error!(in sink; ident.1 => "field {} does not exist on array", ident.0);
+                        ControlFlow::Continue(LanternType::Null)
+                    }
+                },
                 LanternType::Primitive(primitive) => {
                     if let Some(associated) = scope.associated(ItemIdentifier::Primitive(primitive.id), &ident.0) {
                         if associated.args.first().is_some_and(|(_, receiver)| *receiver == ty) {

@@ -10,11 +10,10 @@ fun print(str: [byte]) {
 native fun write(str: [byte]);
 native fun flush();
 native fun int_to_str(int: int) -> [byte];
-native fun len(array: [int]) -> int;
 
 fun print_array(array: [int]) {
   val i: std.int = 0;
-  while (i < len(array)) {
+  while (i < array.len) {
     print(int_to_str(array[i]));
     i = i + 1;
   }
@@ -22,7 +21,7 @@ fun print_array(array: [int]) {
 
 fun fold(array: [int], init: int, acc: fun(int, int) -> int) -> int {
   val i: std.int = 0;
-  while (i < len(array)) {
+  while (i < array.len) {
     init = acc(init, array[i]);
     i = i + 1;
   }
@@ -31,7 +30,7 @@ fun fold(array: [int], init: int, acc: fun(int, int) -> int) -> int {
 
 fun map(array: [int], mapper: fun(int) -> int) {
   val i: std.int = 0;
-  while (i < len(array)) {
+  while (i < array.len) {
     array[i] = mapper(array[i]);
     i = i + 1;
   }

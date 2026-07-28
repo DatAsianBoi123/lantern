@@ -59,10 +59,6 @@ native_funs![for vm,
         let int = unsafe { *int.read::<i64>() };
         Ok(Slot::new_ref(vm.alloc_string(int.to_string().as_bytes())?.as_ptr()))
     },
-    "len" = (array) => {
-        let array = unsafe { HeapArray::from_raw(*array.read::<*mut u8>()) };
-        Ok(Slot::new_primitive(array.len() as i64))
-    },
     "input_float" = () => {
         let mut input = String::new();
         std::io::stdin().read_line(&mut input).unwrap();

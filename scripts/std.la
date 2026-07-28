@@ -33,7 +33,6 @@ native fun write(bytes: [byte]);
 native fun flush();
 native fun int_to_str(int: int) -> [byte];
 native fun float_to_str(float: float) -> [byte];
-native fun len(array: [int]) -> int;
 native fun input_float() -> float;
 native fun input_int() -> int;
 
