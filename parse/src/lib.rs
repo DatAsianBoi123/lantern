@@ -146,7 +146,8 @@ pub enum Stmt {
     WhileStmt(WhileStmt),
     #[parse(using(Val))]
     ValDeclaration(ValDeclaration),
-    Return(Return, Expr, Semi),
+    #[parse(using(Return))]
+    Return(ReturnStmt),
     Continue(Continue, Semi),
     Break(Break, Semi),
     Expr(Expr, Semi),
@@ -181,6 +182,31 @@ pub struct WhileStmt {
     pub condition: Expr,
     pub closed_paren: ClosedParen,
     pub block: ExprBlock,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReturnStmt {
+    pub ret: Return,
+    pub expr: Option<Expr>,
+    pub semi: Semi,
+}
+
+impl ParseTokens for ReturnStmt {
+    fn parse(stream: &mut TokenStream) -> Result<Self> {
+        let ret = Return::parse(stream)?;
+        let expr = if Semi::is_token(stream.peek()?) {
+            None
+        } else {
+            Some(Expr::parse(stream)?)
+        };
+        let semi = Semi::parse(stream)?;
+
+        Ok(Self {
+            ret,
+            expr,
+            semi,
+        })
+    }
 }
 
 #[derive(Parse, Debug, Clone, PartialEq)]

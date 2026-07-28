@@ -212,7 +212,7 @@ fn compile_stmts(
                 }
                 inst!(frame.instructions; STORE_LOCAL local_index);
             },
-            Stmt::Return(ret_keyword, expr, _) => {
+            Stmt::Return(ReturnStmt { ret: ret_keyword, expr, .. }) => {
                 let expected_ret = match &frame.ret_type {
                     Some(ret) => ret.clone(),
                     _ => {
@@ -220,7 +220,12 @@ fn compile_stmts(
                         return ControlFlow::Break(());
                     },
                 };
-                let ret = compile_expr(expr, &scope, loop_context, frame, globals, sink)?;
+                let ret = if let Some(expr) = expr {
+                    compile_expr(expr, &scope, loop_context, frame, globals, sink)?
+                } else {
+                    inst!(frame.instructions; PUSHU 0);
+                    LanternType::Null
+                };
                 if expected_ret != ret {
                     error!(in sink; ret_keyword.span() => "expected {expected_ret}, but got {ret} instead");
                 }
