@@ -196,6 +196,7 @@ fn compile_stmts(
                 inst! { frame.instructions;
                     [PUSHU 0]
                     [STORE_LOCAL local_index]
+                    [POP]
                 }
             },
             Stmt::ValDeclaration(ValDeclaration { ident, r#type, init: Some((_, init)), .. }) => {
@@ -210,7 +211,10 @@ fn compile_stmts(
                 if scope.insert_variable(ident.0.clone(), var_type).is_none() {
                     error!(in sink; ident.span() => "variable `{}` already declared", ident.0);
                 }
-                inst!(frame.instructions; STORE_LOCAL local_index);
+                inst! { frame.instructions;
+                    [STORE_LOCAL local_index]
+                    [POP]
+                };
             },
             Stmt::Return(ReturnStmt { ret: ret_keyword, expr, .. }) => {
                 let expected_ret = match &frame.ret_type {
