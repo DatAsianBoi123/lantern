@@ -24,9 +24,10 @@ pub mod error;
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum SlotType {
+    // Primitive is 0 so GC doesn't think a zeroed Slot is a reference
     #[default]
-    Primitive,
-    Ref,
+    Primitive = 0,
+    Ref = 1,
 }
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
