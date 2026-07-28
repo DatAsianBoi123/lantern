@@ -2,11 +2,11 @@ use std::{fmt::{Display, Formatter}, ops::ControlFlow};
 
 use diagnostic::{DiagnosticSink, error};
 use instruction::InstructionSet;
-use parse::{FunArg, IfBranch, IfStmt, Item, ItemFun, ItemNativeFun, ItemPrimitive, ItemStruct, LanternFile, Stmt, StructField, ValDeclaration, WhileStmt, expr::{BinaryOperator, Expr, ExprArray, ExprBinary, ExprBlock, ExprField, ExprFunCall, ExprIndex, ExprParen, ExprStruct, ExprUnary, UnaryOperator}, lex::{Break, Ident, Literal, TokenKind}};
+use parse::{FunArg, IfBranch, IfStmt, Item, ItemFun, ItemNativeFun, ItemPrimitive, ItemStruct, LanternFile, ReturnStmt, Stmt, StructField, ValDeclaration, WhileStmt, expr::{BinaryOperator, Expr, ExprArray, ExprBinary, ExprBlock, ExprField, ExprFunCall, ExprIndex, ExprParen, ExprStruct, ExprUnary, UnaryOperator}, lex::{Break, Ident, Literal, TokenKind}};
 
-use crate::{Slot, VM, error::RuntimeError, flame::{instruction::Instruction, scope::{Globals, ItemIdentifier, LoopContext, LoopScope, Scope, ScopeKind, StackFrame}, r#type::LanternType}, heap::{HeapArray, HeapObject, TypeInfo}, inst};
+use crate::{Slot, VM, error::RuntimeError, flame::{instruction::Instruction, scope::{Globals, ItemIdentifier, LoopContext, LoopScope, Scope, ScopeKind, StackFrame}, r#type::LanternType}, heap::{HeapArray, HeapObject, ObjectHeader, TypeInfo}, inst};
 
-pub type NativeFn = fn(&mut VM, [Slot; 256]) -> Result<Slot, RuntimeError>;
+pub type NativeFn = fn(&mut VM) -> Result<Slot, RuntimeError>;
 
 pub mod instruction;
 pub mod r#type;
@@ -839,17 +839,16 @@ impl LanternVariable {
 
 #[derive(Debug, Clone)]
 pub enum GeneratedFunction {
-    Instructions(InstructionSet),
+    Instructions(InstructionSet, usize),
     Native(NativeFn),
 }
 
 impl Display for GeneratedFunction {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match &self {
-            Self::Instructions(instructions) => instructions.fmt(f)?,
-            Self::Native(ptr) => writeln!(f, "<native function @ {ptr:?}>")?,
-        };
-        Ok(())
+            Self::Instructions(instructions, locals) => write!(f, "{locals} local(s)\n{instructions}"),
+            Self::Native(ptr) => write!(f, "<native function @ {ptr:?}>"),
+        }
     }
 }
 

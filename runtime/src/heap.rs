@@ -1,6 +1,6 @@
 use std::{alloc::Layout, mem::size_of, time::Instant};
 
-use crate::{Frame, SlotType};
+use crate::{SlotType, stack::LanternStack};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Heap {
@@ -40,29 +40,22 @@ impl Heap {
         }
     }
 
-    pub fn gc(&mut self, frames: &mut [Frame]) {
+    pub fn gc(&mut self, stack: &mut LanternStack) {
         eprintln!("GC Cycle Start");
         let alloc_before = self.alloc_ptr as usize - self.from_space as usize;
         self.alloc_ptr = self.to_space;
         std::mem::swap(&mut self.from_space, &mut self.to_space);
 
         let before = Instant::now();
-        for frame in frames {
-            eprintln!("Start Frame");
-            self.move_from_roots(frame);
-        }
-
-        let moved = self.alloc_ptr as usize - self.from_space as usize;
-        eprintln!("GC Cycle End in {:?} (moved {} bytes, {:.2}%)", Instant::now().duration_since(before), moved, (moved as f64 / alloc_before as f64) * 100.0);
-    }
-
-    fn move_from_roots(&mut self, frame: &mut Frame) {
-        for slot in frame.locals.iter_mut().chain(frame.operand_stack.iter_mut()) {
+        for slot in stack {
             if slot.kind() == SlotType::Ref {
                 let Some(moved) = self.move_ref(slot.0 as *mut u8) else { continue; };
                 slot.write_ref(moved);
             }
         }
+
+        let moved = self.alloc_ptr as usize - self.from_space as usize;
+        eprintln!("GC Cycle End in {:?} (moved {} bytes, {:.2}%)", Instant::now().duration_since(before), moved, (moved as f64 / alloc_before as f64) * 100.0);
     }
 
     fn move_object_refs(&mut self, obj: *mut u8) {

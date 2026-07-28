@@ -236,7 +236,7 @@ impl StackFrame {
     }
 
     pub fn into_gen(self) -> GeneratedFunction {
-        GeneratedFunction::Instructions(self.instructions)
+        GeneratedFunction::Instructions(self.instructions, self.locals.len())
     }
 }
 

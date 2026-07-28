@@ -11,13 +11,15 @@ macro_rules! native_funs {
             $(
                 $name => {
                     #[allow(unused)]
-                    fn inner(vm: &mut $crate::VM, slots: [$crate::Slot; 256]) -> Result<crate::Slot, $crate::error::RuntimeError> {
-                        let $vm = vm;
+                    fn inner(vm: &mut $crate::VM) -> Result<crate::Slot, $crate::error::RuntimeError> {
+                        let stack = vm.stack();
+                        let frame = vm.frames().last().expect("called from a frame");
                         let mut curr = 0;
                         $(
-                            let $pat = slots[curr];
+                            let $pat = stack[frame.bottom + curr];
                             curr += 1;
                         )*
+                        let $vm = vm;
                         $expr
                     }
                     Some(inner as $crate::flame::NativeFn)
@@ -29,7 +31,7 @@ macro_rules! native_funs {
     };
 }
 
-pub fn dummy_native(_: &mut VM, _: [Slot; 256]) -> Result<Slot, RuntimeError> {
+pub fn dummy_native(_: &mut VM) -> Result<Slot, RuntimeError> {
     Err(RuntimeError(anyhow!("Called dummy native function! (Report this)").into()))
 }
 
@@ -48,7 +50,7 @@ native_funs![for vm,
         Ok(Slot::new_primitive(0))
     },
     "gc" = () => {
-        vm.heap.gc(&mut vm.frames);
+        vm.heap.gc(&mut vm.stack);
         Ok(Slot::new_primitive(0))
     },
     "float_to_str" = (float) => {
