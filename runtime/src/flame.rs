@@ -251,6 +251,9 @@ fn compile_stmts(
                     error!(in sink; span => "`break` not allowed here");
                 }
             },
+            Stmt::Throw(_, _, _) => {
+                todo!()
+            },
             Stmt::Expr(expr, _) => {
                 compile_expr(expr, &scope, loop_context, frame, globals, sink)?;
                 inst!(frame.instructions; POP);

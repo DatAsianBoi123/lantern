@@ -1,7 +1,7 @@
 use std::fmt::{Display, Formatter};
 
 use diagnostic::{Diagnostic, error};
-use lex::{ArrowRight, Break, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Continue, Else, Equals, Fun, Ident, If, Keyword, Native, OpenBrace, OpenBracket, OpenParen, Period, Primitive, Return, Semi, Struct, Token, TokenKind, Using, Val, While};
+use lex::{ArrowRight, Break, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Continue, Else, Equals, Fun, Ident, If, Keyword, Native, OpenBrace, OpenBracket, OpenParen, Period, Primitive, Return, Semi, Struct, Throw, Token, TokenKind, Using, Val, While};
 use macros::Parse;
 
 use crate::{expr::{Expr, ExprBlock}, stream::{parse_punctuated, TokenStream}};
@@ -150,6 +150,7 @@ pub enum Stmt {
     Return(ReturnStmt),
     Continue(Continue, Semi),
     Break(Break, Semi),
+    Throw(Throw, Expr, Semi),
     Expr(Expr, Semi),
 }
 

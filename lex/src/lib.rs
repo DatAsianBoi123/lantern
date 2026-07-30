@@ -335,6 +335,7 @@ define_keywords! {
         Return = "return",
         Continue = "continue",
         Break = "break",
+        Throw = "throw",
     }
 }
 
