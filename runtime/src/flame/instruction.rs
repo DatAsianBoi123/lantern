@@ -2,135 +2,138 @@ use std::{fmt::{Display, Formatter}, ops::{Deref, DerefMut}};
 
 #[macro_export]
 macro_rules! inst {
-    ($inst: expr; PUSHU $b: expr) => {
-        $inst.push($crate::flame::instruction::Instruction::Pushu64($b))
+    (PUSHU $b: expr) => {
+        $crate::flame::instruction::Instruction::Pushu64($b)
     };
-    ($inst: expr; PUSHI $i: expr) => {
-        $inst.push($crate::flame::instruction::Instruction::Pushi64($i))
+    (PUSHI $i: expr) => {
+        $crate::flame::instruction::Instruction::Pushi64($i)
     };
-    ($inst: expr; PUSHF $f: expr) => {
-        $inst.push($crate::flame::instruction::Instruction::Pushf64($f))
+    (PUSHF $f: expr) => {
+        $crate::flame::instruction::Instruction::Pushf64($f)
     };
-    ($inst: expr; POP) => {
-        $inst.push($crate::flame::instruction::Instruction::Pop)
+    (POP) => {
+        $crate::flame::instruction::Instruction::Pop
     };
-    ($inst: expr; ADDF) => {
-        $inst.push($crate::flame::instruction::Instruction::Addf)
+    (ADDF) => {
+        $crate::flame::instruction::Instruction::Addf
     };
-    ($inst: expr; ADDI) => {
-        $inst.push($crate::flame::instruction::Instruction::Addi)
+    (ADDI) => {
+        $crate::flame::instruction::Instruction::Addi
     };
-    ($inst: expr; SUBF) => {
-        $inst.push($crate::flame::instruction::Instruction::Subf)
+    (SUBF) => {
+        $crate::flame::instruction::Instruction::Subf
     };
-    ($inst: expr; SUBI) => {
-        $inst.push($crate::flame::instruction::Instruction::Subi)
+    (SUBI) => {
+        $crate::flame::instruction::Instruction::Subi
     };
-    ($inst: expr; MULTF) => {
-        $inst.push($crate::flame::instruction::Instruction::Multf)
+    (MULTF) => {
+        $crate::flame::instruction::Instruction::Multf
     };
-    ($inst: expr; MULTI) => {
-        $inst.push($crate::flame::instruction::Instruction::Multi)
+    (MULTI) => {
+        $crate::flame::instruction::Instruction::Multi
     };
-    ($inst: expr; DIVF) => {
-        $inst.push($crate::flame::instruction::Instruction::Divf)
+    (DIVF) => {
+        $crate::flame::instruction::Instruction::Divf
     };
-    ($inst: expr; DIVI) => {
-        $inst.push($crate::flame::instruction::Instruction::Divi)
+    (DIVI) => {
+        $crate::flame::instruction::Instruction::Divi
     };
-    ($inst: expr; MODF) => {
-        $inst.push($crate::flame::instruction::Instruction::Modf)
+    (MODF) => {
+        $crate::flame::instruction::Instruction::Modf
     };
-    ($inst: expr; MODI) => {
-        $inst.push($crate::flame::instruction::Instruction::Modi)
+    (MODI) => {
+        $crate::flame::instruction::Instruction::Modi
     };
-    ($inst: expr; NEGF) => {
-        $inst.push($crate::flame::instruction::Instruction::Negf)
+    (NEGF) => {
+        $crate::flame::instruction::Instruction::Negf
     };
-    ($inst: expr; NEGI) => {
-        $inst.push($crate::flame::instruction::Instruction::Negi)
+    (NEGI) => {
+        $crate::flame::instruction::Instruction::Negi
     };
-    ($inst: expr; FCOMP_LT) => {
-        $inst.push($crate::flame::instruction::Instruction::FCompareLt)
+    (FCOMP_LT) => {
+        $crate::flame::instruction::Instruction::FCompareLt
     };
-    ($inst: expr; ICOMP_LT) => {
-        $inst.push($crate::flame::instruction::Instruction::ICompareLt)
+    (ICOMP_LT) => {
+        $crate::flame::instruction::Instruction::ICompareLt
     };
-    ($inst: expr; FCOMP_LE) => {
-        $inst.push($crate::flame::instruction::Instruction::FCompareLe)
+    (FCOMP_LE) => {
+        $crate::flame::instruction::Instruction::FCompareLe
     };
-    ($inst: expr; ICOMP_LE) => {
-        $inst.push($crate::flame::instruction::Instruction::ICompareLe)
+    (ICOMP_LE) => {
+        $crate::flame::instruction::Instruction::ICompareLe
     };
-    ($inst: expr; FCOMP_GT) => {
-        $inst.push($crate::flame::instruction::Instruction::FCompareGt)
+    (FCOMP_GT) => {
+        $crate::flame::instruction::Instruction::FCompareGt
     };
-    ($inst: expr; ICOMP_GT) => {
-        $inst.push($crate::flame::instruction::Instruction::ICompareGt)
+    (ICOMP_GT) => {
+        $crate::flame::instruction::Instruction::ICompareGt
     };
-    ($inst: expr; FCOMP_GE) => {
-        $inst.push($crate::flame::instruction::Instruction::FCompareGe)
+    (FCOMP_GE) => {
+        $crate::flame::instruction::Instruction::FCompareGe
     };
-    ($inst: expr; ICOMP_GE) => {
-        $inst.push($crate::flame::instruction::Instruction::ICompareGe)
+    (ICOMP_GE) => {
+        $crate::flame::instruction::Instruction::ICompareGe
     };
-    ($inst: expr; FCOMP_EQ) => {
-        $inst.push($crate::flame::instruction::Instruction::FCompareEq)
+    (FCOMP_EQ) => {
+        $crate::flame::instruction::Instruction::FCompareEq
     };
-    ($inst: expr; ICOMP_EQ) => {
-        $inst.push($crate::flame::instruction::Instruction::ICompareEq)
+    (ICOMP_EQ) => {
+        $crate::flame::instruction::Instruction::ICompareEq
     };
-    ($inst: expr; NOT) => {
-        $inst.push($crate::flame::instruction::Instruction::Not)
+    (NOT) => {
+        $crate::flame::instruction::Instruction::Not
     };
-    ($inst: expr; ALLOC_OBJ $i: expr) => {
-        $inst.push($crate::flame::instruction::Instruction::AllocObj($i))
+    (ALLOC_OBJ $i: expr) => {
+        $crate::flame::instruction::Instruction::AllocObj($i)
     };
-    ($inst: expr; ALLOC_STR $str: expr) => {
-        $inst.push($crate::flame::instruction::Instruction::AllocString($str))
+    (ALLOC_STR $str: expr) => {
+        $crate::flame::instruction::Instruction::AllocString($str)
     };
-    ($inst: expr; ALLOC_ARR $t: expr, $l: expr) => {
-        $inst.push($crate::flame::instruction::Instruction::AllocArray($t, $l))
+    (ALLOC_ARR $t: expr, $l: expr) => {
+        $crate::flame::instruction::Instruction::AllocArray($t, $l)
     };
-    ($inst: expr; STORE_LOCAL $i: expr) => {
-        $inst.push($crate::flame::instruction::Instruction::StoreLocal($i))
+    (STORE_LOCAL $i: expr) => {
+        $crate::flame::instruction::Instruction::StoreLocal($i)
     };
-    ($inst: expr; LOAD_LOCAL $i: expr) => {
-        $inst.push($crate::flame::instruction::Instruction::LoadLocal($i))
+    (LOAD_LOCAL $i: expr) => {
+        $crate::flame::instruction::Instruction::LoadLocal($i)
     };
-    ($inst: expr; RET) => {
-        $inst.push($crate::flame::instruction::Instruction::Return)
+    (RET) => {
+        $crate::flame::instruction::Instruction::Return
     };
-    ($inst: expr; INV $i: expr) => {
-        $inst.push($crate::flame::instruction::Instruction::Invoke($i))
+    (INV $i: expr) => {
+        $crate::flame::instruction::Instruction::Invoke($i)
     };
-    ($inst: expr; INV_MET $i: expr) => {
-        $inst.push($crate::flame::instruction::Instruction::InvokeMethod($i))
+    (INV_MET $i: expr) => {
+        $crate::flame::instruction::Instruction::InvokeMethod($i)
     };
-    ($inst: expr; READ $l: expr) => {
-        $inst.push($crate::flame::instruction::Instruction::Read($l))
+    (READ $l: expr) => {
+        $crate::flame::instruction::Instruction::Read($l)
     };
-    ($inst: expr; WRITE $l: expr) => {
-        $inst.push($crate::flame::instruction::Instruction::Write($l))
+    (WRITE $l: expr) => {
+        $crate::flame::instruction::Instruction::Write($l)
     };
-    ($inst: expr; GOTO $j: expr) => {
-        $inst.push($crate::flame::instruction::Instruction::Goto($j))
+    (GOTO $j: expr) => {
+        $crate::flame::instruction::Instruction::Goto($j)
     };
-    ($inst: expr; GOTO_IF_TRUE $j: expr) => {
-        $inst.push($crate::flame::instruction::Instruction::GotoIfTrue($j))
+    (GOTO_IF_TRUE $j: expr) => {
+        $crate::flame::instruction::Instruction::GotoIfTrue($j)
     };
-    ($inst: expr; GOTO_IF_FALSE $j: expr) => {
-        $inst.push($crate::flame::instruction::Instruction::GotoIfFalse($j))
+    (GOTO_IF_FALSE $j: expr) => {
+        $crate::flame::instruction::Instruction::GotoIfFalse($j)
     };
-    ($inst: expr; POP_GOTO_IF_TRUE $j: expr) => {
-        $inst.push($crate::flame::instruction::Instruction::PopGotoIfTrue($j))
+    (POP_GOTO_IF_TRUE $j: expr) => {
+        $crate::flame::instruction::Instruction::PopGotoIfTrue($j)
     };
-    ($inst: expr; POP_GOTO_IF_FALSE $j: expr) => {
-        $inst.push($crate::flame::instruction::Instruction::PopGotoIfFalse($j))
+    (POP_GOTO_IF_FALSE $j: expr) => {
+        $crate::flame::instruction::Instruction::PopGotoIfFalse($j)
     };
 
     ($inst: expr; $([$($tt: tt)+])*) => {
-        $($crate::inst!($inst; $($tt)+));*
+        $($inst.push(inst!($($tt)+)));*
+    };
+    ($inst: expr; $($tt: tt)+) => {
+        $inst.push(inst!($($tt)+))
     };
 }
 
