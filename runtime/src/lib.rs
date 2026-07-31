@@ -238,14 +238,15 @@ impl VM {
                         // ARG_n
                         // ARG_2
                         // ARG_1
-                        // FUN_IDX
-                        // RECV (bottom)
+                        // FUN_IDX (bottom, RECV copied here)
+                        // RECV
                         frame.inst_ptr += 1;
-                        let bottom = self.stack.top() - num_args - 2;
-                        let index = unsafe { *self.stack[bottom + 1].read::<usize>() };
-                        // copy args down so local indices match
-                        unsafe { std::ptr::copy(&raw const self.stack[bottom + 2], &raw mut self.stack[bottom + 1], num_args); };
-                        *self.stack.top_mut() -= 1;
+                        let bottom = self.stack.top() - num_args - 1;
+                        let index_slot = &mut self.stack[bottom];
+                        let index = unsafe { *index_slot.read::<usize>() };
+                        // unsafe is needed here since Rust won't allow two mutable references to
+                        // self.stack
+                        unsafe { std::ptr::write(index_slot, self.stack[bottom - 1]); };
                         // TODO: find a better way to do this
                         if let GeneratedFunction::Instructions(_, locals) = self.funs[index] {
                             *self.stack.top_mut() += locals - num_args - 1;
