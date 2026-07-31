@@ -1,8 +1,8 @@
-use std::{fmt::{Display, Formatter}, mem::MaybeUninit, ops::{Index, IndexMut}};
+use std::{fmt::{Debug, Display, Formatter}, mem::MaybeUninit, ops::{Index, IndexMut}};
 
 use crate::{Slot, error::{AccessUndefinedError, StackOverflowError, StackUnderflowError}};
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct LanternStack {
     inner: Box<[MaybeUninit<Slot>]>,
     top: usize,
@@ -17,6 +17,14 @@ impl Display for LanternStack {
             }
         }
         Ok(())
+    }
+}
+
+impl Debug for LanternStack {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_list()
+            .entries(self.as_ref())
+            .finish()
     }
 }
 
@@ -70,7 +78,7 @@ impl IndexMut<usize> for LanternStack {
 impl LanternStack {
     pub fn new(len: usize) -> Self {
         Self {
-            inner: Box::new_zeroed_slice(len),
+            inner: Box::new_uninit_slice(len),
             top: 0,
         }
     }
@@ -79,8 +87,19 @@ impl LanternStack {
         self.top
     }
 
-    pub fn top_mut(&mut self) -> &mut usize {
-        &mut self.top
+    pub fn reserve(&mut self, slots: usize) -> Result<(), StackOverflowError> {
+        if slots == 0 { return Ok(()); };
+        if slots + self.top > self.inner.len() { return Err(StackOverflowError); };
+
+        // initialize top data
+        self.inner[self.top..self.top + slots].fill(MaybeUninit::zeroed());
+        self.top += slots;
+        Ok(())
+    }
+
+    pub fn shrink_to(&mut self, top: usize) {
+        if top >= self.top { return; };
+        self.top = top;
     }
 
     pub fn read(&self, addr: usize) -> Result<&Slot, AccessUndefinedError> {

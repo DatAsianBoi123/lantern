@@ -101,7 +101,7 @@ impl VM {
         }
         let mut stack = LanternStack::new(2048);
         if let GeneratedFunction::Instructions(_, locals) = root { 
-            *stack.top_mut() = locals;
+            stack.reserve(locals).expect("too many locals");
         }
         globals.funs.push(root);
         let mut frames = Vec::with_capacity(512);
@@ -215,7 +215,8 @@ impl VM {
                     Instruction::Return => {
                         let ret = self.stack.pop()?;
                         let bottom = self.frames.pop().expect("frame exists").bottom;
-                        if !self.frames.is_empty() { *self.stack.top_mut() = bottom - 1; };
+                        // bottom-most slot is the function index
+                        if !self.frames.is_empty() { self.stack.shrink_to(bottom - 1); };
                         self.stack.push_slot(ret)?;
                         return Ok(());
                     },
@@ -229,7 +230,7 @@ impl VM {
                         let index = unsafe { *self.stack[bottom - 1].read::<usize>() };
                         // TODO: find a better way to do this
                         if let GeneratedFunction::Instructions(_, locals) = self.funs[index] {
-                            *self.stack.top_mut() += locals - num_args;
+                            self.stack.reserve(locals - num_args)?;
                         }
                         self.frames.push(Frame::new(index, bottom));
                         return Ok(());
@@ -249,7 +250,7 @@ impl VM {
                         unsafe { std::ptr::write(index_slot, self.stack[bottom - 1]); };
                         // TODO: find a better way to do this
                         if let GeneratedFunction::Instructions(_, locals) = self.funs[index] {
-                            *self.stack.top_mut() += locals - num_args - 1;
+                            self.stack.reserve(locals - num_args - 1)?;
                         }
                         let frame = Frame::new(index, bottom);
                         self.frames.push(frame);
@@ -317,7 +318,8 @@ impl VM {
                 let ret = ptr(self)?;
 
                 let bottom = self.frames.pop().expect("frame exists").bottom;
-                *self.stack.top_mut() = bottom - 1;
+                // bottom-most slot is the function index
+                self.stack.shrink_to(bottom - 1);
                 self.stack.push_slot(ret)?;
                 Ok(())
             },
