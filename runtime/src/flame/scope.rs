@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use diagnostic::Span;
 
-use crate::{flame::{GeneratedFunction, LanternFunction, LanternItem, LanternStruct, LanternVariable, instruction::InstructionSet, r#type::LanternType}, heap::TypeInfo};
+use crate::{flame::{FunctionKind, GeneratedFunction, LanternFunction, LanternItem, LanternStruct, LanternVariable, instruction::InstructionSet, r#type::LanternType}, heap::TypeInfo};
 
 #[derive(Debug, Clone)]
 pub struct Scope<'a> {
@@ -201,24 +201,30 @@ impl LoopScope {
 
 #[derive(Debug, Clone)]
 pub struct StackFrame {
+    pub name: String,
     pub instructions: InstructionSet,
     locals: Vec<String>,
+    pub line_table: Vec<LineMap>,
     pub ret_type: Option<LanternType>,
 }
 
 impl StackFrame {
     pub fn new_module() -> Self {
         Self {
+            name: "<module>".to_string(),
             instructions: InstructionSet::new(),
             locals: Vec::new(),
+            line_table: Vec::new(),
             ret_type: None,
         }
     }
 
-    pub fn new_fun(ret_type: LanternType) -> Self {
+    pub fn new_fun(name: String, ret_type: LanternType) -> Self {
         Self {
+            name,
             instructions: InstructionSet::new(),
             locals: Vec::new(),
+            line_table: Vec::new(),
             ret_type: Some(ret_type),
         }
     }
@@ -236,7 +242,21 @@ impl StackFrame {
     }
 
     pub fn into_gen(self) -> GeneratedFunction {
-        GeneratedFunction::Instructions(self.instructions, self.locals.len())
+        let mut fun = GeneratedFunction::new(self.name, FunctionKind::Instructions(self.instructions, self.locals.len()));
+        fun.line_table = self.line_table;
+        fun
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LineMap {
+    pub ip: usize,
+    pub line: u32,
+}
+
+impl LineMap {
+    pub fn new(ip: usize, line: u32) -> Self {
+        Self { ip, line }
     }
 }
 

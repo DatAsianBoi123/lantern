@@ -1,0 +1,24 @@
+primitive byte;
+primitive float;
+
+native fun float_to_str(float: float) -> [byte];
+native fun write(str: [byte]);
+native fun flush();
+
+fun div(a: float, b: float) -> float {
+  // no divide by zeroes!
+  if (b == 0.0) {
+    throw "attempted to divide by 0";
+  }
+  return a / b;
+}
+
+fun nested(secret: float) -> float {
+  val page: float = secret % 5.0;
+  val normalized: float = div(5.0, page);
+  return div(normalized, 2.0);
+}
+
+val inf: float = 2.0 / 0.0;
+write(float_to_str(inf));
+

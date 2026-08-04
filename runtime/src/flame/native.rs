@@ -1,7 +1,5 @@
 use std::io::Write;
 
-use anyhow::anyhow;
-
 use crate::{Slot, VM, error::RuntimeError, flame::{LanternPrimitive, PrimitiveOps, instruction::Instruction}, heap::HeapArray};
 
 macro_rules! native_funs {
@@ -31,8 +29,8 @@ macro_rules! native_funs {
     };
 }
 
-pub fn dummy_native(_: &mut VM) -> Result<Slot, RuntimeError> {
-    Err(RuntimeError(anyhow!("Called dummy native function! (Report this)").into()))
+pub fn dummy_native(vm: &mut VM) -> Result<Slot, RuntimeError> {
+    Err(vm.throw("Called dummy native function! (Report this)".to_string()))
 }
 
 native_funs![for vm,
@@ -64,12 +62,12 @@ native_funs![for vm,
     "input_float" = () => {
         let mut input = String::new();
         std::io::stdin().read_line(&mut input).unwrap();
-        Ok(Slot::new_primitive(input.trim().parse::<f64>().map_err(|_| RuntimeError(anyhow!("not a float").into()))?))
+        Ok(Slot::new_primitive(input.trim().parse::<f64>().map_err(|_| vm.throw("not a float"))?))
     },
     "input_int" = () => {
         let mut input = String::new();
         std::io::stdin().read_line(&mut input).unwrap();
-        Ok(Slot::new_primitive(input.trim().parse::<i64>().map_err(|_| RuntimeError(anyhow!("not an integer").into()))?))
+        Ok(Slot::new_primitive(input.trim().parse::<i64>().map_err(|_| vm.throw("not an integer"))?))
     },
 ];
 

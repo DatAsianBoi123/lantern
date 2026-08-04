@@ -1,22 +1,24 @@
-use std::error::Error;
-
-macro_rules! runtime_err_from {
-    ($($e: ident),* $(,)?) => {
-        $(
-        impl From<$e> for RuntimeError {
-            fn from(error: $e) -> Self {
-                Self(Box::new(error))
-            }
-        }
-        )*
-    };
-}
+use std::fmt::{Display, Formatter};
 
 #[derive(thiserror::Error, Debug)]
-#[error("Lantern runtime crashed: {0}")]
-pub struct RuntimeError(#[from] pub Box<dyn Error>);
+pub struct RuntimeError {
+    pub message: String,
+    pub stacktrace: Vec<(String, u32)>,
+}
 
-runtime_err_from![StackOverflowError, StackUnderflowError, AccessUndefinedError];
+impl Display for RuntimeError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Error: {}", self.message)?;
+        for element in &self.stacktrace {
+            write!(f, "\n  at {} (line {})", element.0, element.1)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(thiserror::Error, Default, Debug, Clone, PartialEq, Eq)]
+#[error("{0}")]
+pub struct UserError(pub String);
 
 #[derive(thiserror::Error, Default, Debug, Clone, Copy, PartialEq, Eq)]
 #[error("Stack overflow")]

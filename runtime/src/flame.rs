@@ -1,10 +1,10 @@
-use std::{fmt::{Display, Formatter}, ops::ControlFlow};
+use std::ops::ControlFlow;
 
 use diagnostic::{DiagnosticSink, error};
 use instruction::InstructionSet;
 use parse::{FunArg, IfBranch, IfStmt, Item, ItemFun, ItemNativeFun, ItemPrimitive, ItemStruct, LanternFile, ReturnStmt, Stmt, StructField, ValDeclaration, WhileStmt, expr::{BinaryOperator, Expr, ExprArray, ExprBinary, ExprBlock, ExprField, ExprFunCall, ExprIndex, ExprParen, ExprStruct, ExprUnary, UnaryOperator}, lex::{Break, Ident, Literal, TokenKind}};
 
-use crate::{Slot, VM, error::RuntimeError, flame::{instruction::Instruction, scope::{Globals, ItemIdentifier, LoopContext, LoopScope, Scope, ScopeKind, StackFrame}, r#type::LanternType}, heap::{HeapArray, HeapObject, ObjectHeader, TypeInfo}, inst};
+use crate::{Slot, VM, error::RuntimeError, flame::{instruction::Instruction, scope::{Globals, ItemIdentifier, LineMap, LoopContext, LoopScope, Scope, ScopeKind, StackFrame}, r#type::LanternType}, heap::{HeapArray, HeapObject, ObjectHeader, TypeInfo}, inst};
 
 pub type NativeFn = fn(&mut VM) -> Result<Slot, RuntimeError>;
 
@@ -81,7 +81,8 @@ impl<'a> FlameGen<'a> {
                             error!(in self.sink; ident.span() => "item {ident} not found");
                         }
                     }
-                    self.globals.funs.push(GeneratedFunction::Native(native::dummy_native));
+                    // this gets overridden when the function is generated
+                    self.globals.funs.push(GeneratedFunction::new(String::new(), FunctionKind::Native(native::dummy_native)));
                 },
                 Item::NativeFun(ItemNativeFun { ident, args, ret, .. }) => {
                     let args = args.iter()
@@ -99,7 +100,7 @@ impl<'a> FlameGen<'a> {
                         native::dummy_native
                     });
 
-                    self.globals.funs.push(GeneratedFunction::Native(ptr));
+                    self.globals.funs.push(GeneratedFunction::new(ident.0.clone(), FunctionKind::Native(ptr)));
                 },
                 // TODO: add types before checking for types
                 Item::Struct(ItemStruct { ident, fields, .. }) => {
@@ -138,7 +139,7 @@ impl<'a> FlameGen<'a> {
                                 }
 
                                 let false_index = self.frame.instructions.len();
-                                inst!(self.frame.instructions; GOTO_IF_FALSE 0);
+                                inst!(with self.frame => block.open_brace.span(); GOTO_IF_FALSE 0);
 
                                 let block_scope = scope.child_block();
                                 let branch_return = self.compile_stmts(block.stmts, block_scope);
@@ -149,7 +150,7 @@ impl<'a> FlameGen<'a> {
                                     (None, _) => overall_return = Some(branch_return),
                                 }
                                 end_indices.push(self.frame.instructions.len());
-                                inst!(self.frame.instructions; GOTO 0);
+                                inst!(with self.frame => block.closed_brace.span(); GOTO 0);
                                 self.frame.instructions[false_index] = Instruction::PopGotoIfFalse(self.frame.instructions.len());
 
                                 match branch {
@@ -189,13 +190,13 @@ impl<'a> FlameGen<'a> {
                         error!(in self.sink; condition_span => "expected `bool`, but got {type} instead");
                     }
                     let condition_index = self.frame.instructions.len();
-                    inst!(self.frame.instructions; POP_GOTO_IF_FALSE 0);
+                    inst!(with self.frame => block.open_brace.span(); POP_GOTO_IF_FALSE 0);
 
                     self.loop_context.scopes.push(LoopScope::new(head));
                     let block_scope = scope.child_block();
                     // we can't assume the initial condition is met so these may not even be ran
                     let _ = self.compile_stmts(block.stmts, block_scope);
-                    inst!(self.frame.instructions; GOTO head);
+                    inst!(with self.frame => block.closed_brace.span(); GOTO head);
 
                     self.frame.instructions[condition_index] = Instruction::PopGotoIfFalse(self.frame.instructions.len());
 
@@ -203,13 +204,13 @@ impl<'a> FlameGen<'a> {
                         self.frame.instructions[break_index] = Instruction::Goto(self.frame.instructions.len());
                     }
                 },
-                Stmt::ValDeclaration(ValDeclaration { ident, r#type, init: None, .. }) => {
+                Stmt::ValDeclaration(ValDeclaration { val, ident, r#type, init: None, .. }) => {
                     // TODO: unitialized vars
                     let local_index = self.frame.declare_local(ident.0.clone());
                     if scope.insert_variable(ident.0.clone(), self.sink.emit_or(LanternType::from_type(&r#type, &scope), LanternType::Null)).is_none() {
                         error!(in self.sink; ident.span() => "variable `{}` already declared", ident.0);
                     }
-                    inst! { self.frame.instructions;
+                    inst! { with self.frame => val.span();
                         [PUSHU 0]
                         [STORE_LOCAL local_index]
                         [POP]
@@ -243,7 +244,7 @@ impl<'a> FlameGen<'a> {
                     let ret = if let Some(expr) = expr {
                         self.compile_expr(expr, &scope)?
                     } else {
-                        inst!(self.frame.instructions; PUSHU 0);
+                        inst!(with self.frame => ret_keyword.span(); PUSHU 0);
                         LanternType::Null
                     };
                     if expected_ret != ret {
@@ -254,7 +255,7 @@ impl<'a> FlameGen<'a> {
                 },
                 Stmt::Continue(continue_keyword, _) => {
                     if let Some(LoopScope { head, .. }) = self.loop_context.scopes.last() {
-                        inst!(self.frame.instructions; GOTO *head);
+                        inst!(with self.frame => continue_keyword.span(); GOTO *head);
                     } else {
                         error!(in self.sink; continue_keyword.span() => "{continue_keyword} not allowed here");
                     }
@@ -262,19 +263,19 @@ impl<'a> FlameGen<'a> {
                 Stmt::Break(Break(span), _) => {
                     if let Some(LoopScope { breaks, .. }) = self.loop_context.scopes.last_mut() {
                         breaks.push(self.frame.instructions.len());
-                        inst!(self.frame.instructions; GOTO 0);
+                        inst!(with self.frame => span; GOTO 0);
                     } else {
                         error!(in self.sink; span => "`break` not allowed here");
                     }
                 },
-                Stmt::Throw(_, expr, _) => {
+                Stmt::Throw(_, expr, semi) => {
                     let span = expr.span();
                     let ty = self.compile_expr(expr, &scope)?;
                     // TODO: string type
                     if ty != LanternType::Array(Box::new(LanternType::Primitive(&native::BYTE_PRIMITIVE))) {
                         error!(in self.sink; span => "expected `[u8]`, but got {ty} instead");
                     }
-                    inst!(self.frame.instructions; THRW);
+                    inst!(with self.frame => semi.span(); THRW);
                 },
                 Stmt::Expr(expr, _) => {
                     self.compile_expr(expr, &scope)?;
@@ -291,10 +292,9 @@ impl<'a> FlameGen<'a> {
                     } else {
                         scope.associated(scope.item(&path.items[0].0).expect("item in scope").identifier(), &path.last().0).expect("assosiated in scope")
                     };
-                    let name = path.into_last().0;
 
-                    let mut fun_scope = scope.child_function(block.open_brace.span());
-                    let mut fun_frame = StackFrame::new_fun(name, ret);
+                    let mut fun_scope = scope.child_function(block.closed_brace.span());
+                    let mut fun_frame = StackFrame::new_fun(path.to_string(), ret);
 
                     for (ident, r#type) in &fun.args {
                         fun_frame.declare_local(ident.0.clone());
@@ -320,15 +320,16 @@ impl<'a> FlameGen<'a> {
             ScopeKind::Function(_, span) => {
                 let ret_type = self.frame.ret_type.clone().expect("function scope has return type");
                 if ret_type != LanternType::Null {
-                    error!(in self.sink; span => "expected function to return {}", LanternType::Null);
+                    error!(in self.sink; span.clone() => "expected function to return {}", LanternType::Null);
                 };
-                inst! { self.frame.instructions;
+                inst! { with self.frame => span;
                     [PUSHU 0]
                     [RET]
                 }
                 ControlFlow::Break(())
             },
             ScopeKind::Module => {
+                // TODO: figure out what span to use
                 inst! { self.frame.instructions;
                     [PUSHU 0]
                     [RET]
@@ -341,29 +342,29 @@ impl<'a> FlameGen<'a> {
 
     pub fn compile_expr(&mut self, expression: Expr, scope: &Scope) -> ControlFlow<(), LanternType> {
         match expression {
-            Expr::Literal(Literal::Integer(int, _)) => {
-                inst!(self.frame.instructions; PUSHI int);
+            Expr::Literal(Literal::Integer(int, span)) => {
+                inst!(with self.frame => span; PUSHI int);
                 ControlFlow::Continue(LanternType::Primitive(&native::INT_PRIMITIVE))
             },
-            Expr::Literal(Literal::Float(float, _)) => {
-                inst!(self.frame.instructions; PUSHF float);
+            Expr::Literal(Literal::Float(float, span)) => {
+                inst!(with self.frame => span; PUSHF float);
                 ControlFlow::Continue(LanternType::Primitive(&native::FLOAT_PRIMITIVE))
             },
-            Expr::Literal(Literal::True(_)) => {
-                inst!(self.frame.instructions; PUSHU 1);
+            Expr::Literal(Literal::True(span)) => {
+                inst!(with self.frame => span; PUSHU crate::bool_to_slot(true));
                 ControlFlow::Continue(LanternType::Primitive(&native::BOOL_PRIMITIVE))
             },
-            Expr::Literal(Literal::False(_)) => {
-                inst!(self.frame.instructions; PUSHU 0);
+            Expr::Literal(Literal::False(span)) => {
+                inst!(with self.frame => span; PUSHU crate::bool_to_slot(false));
                 ControlFlow::Continue(LanternType::Primitive(&native::BOOL_PRIMITIVE))
             },
-            Expr::Literal(Literal::String(string, _)) => {
+            Expr::Literal(Literal::String(string, span)) => {
                 // TODO: better string alloc
-                inst!(self.frame.instructions; ALLOC_STR string.clone());
+                inst!(with self.frame => span; ALLOC_STR string.clone());
                 // TODO: make string a struct instead of array
                 ControlFlow::Continue(LanternType::Array(Box::new(LanternType::Primitive(&native::BYTE_PRIMITIVE))))
             },
-            Expr::FunCall(ExprFunCall { expr, args, .. }) => {
+            Expr::FunCall(ExprFunCall { expr, args, closed_paren, .. }) => {
                 let span = expr.span();
                 let r#type = self.compile_expr(*expr, scope)?;
                 if let LanternType::Function { is_method, args: fun_args, ret } = r#type {
@@ -381,9 +382,9 @@ impl<'a> FlameGen<'a> {
                     }
 
                     if is_method {
-                        inst!(self.frame.instructions; INV_MET fun_args_len);
+                        inst!(with self.frame => closed_paren.span(); INV_MET fun_args_len);
                     } else {
-                        inst!(self.frame.instructions; INV fun_args_len);
+                        inst!(with self.frame => closed_paren.span(); INV fun_args_len);
                     }
 
                     ControlFlow::Continue(*ret)
@@ -399,9 +400,9 @@ impl<'a> FlameGen<'a> {
                         let lhs_type = self.compile_expr(*lhs, scope)?;
                         let goto_index = self.frame.instructions.len();
 
-                        match op {
-                            BinaryOperator::And(_) => inst!(self.frame.instructions; GOTO_IF_FALSE 0),
-                            BinaryOperator::Or(_) => inst!(self.frame.instructions; GOTO_IF_TRUE 0),
+                        match &op {
+                            BinaryOperator::And(and) => inst!(with self.frame => and.span(); GOTO_IF_FALSE 0),
+                            BinaryOperator::Or(or) => inst!(with self.frame => or.span(); GOTO_IF_TRUE 0),
                             _ => unreachable!(),
                         };
                         inst!(self.frame.instructions; POP);
@@ -436,9 +437,9 @@ impl<'a> FlameGen<'a> {
                                     error!(in self.sink; rhs_span => "expected {}, but got {rhs} instead", var.r#type);
                                 }
                                 let local_index = self.frame.find_local(&ident.0).expect("local var exists");
-                                inst!(self.frame.instructions; STORE_LOCAL local_index);
+                                inst!(with self.frame => punct.span(); STORE_LOCAL local_index);
                             },
-                            Expr::Index(ExprIndex { expr, index, .. }) => {
+                            Expr::Index(ExprIndex { expr, index, closed_bracket, .. }) => {
                                 let expr_span = expr.span();
                                 let r#type = self.compile_expr(*expr, scope)?;
                                 let inner = match r#type {
@@ -455,7 +456,7 @@ impl<'a> FlameGen<'a> {
                                     error!(in self.sink; index_span => "expected index to be an `int`");
                                 }
 
-                                inst! { self.frame.instructions;
+                                inst! { with self.frame => closed_bracket.span();
                                     [PUSHU inner.size() as u64]
                                     [MULTI]
                                     [PUSHU HeapArray::element_offset() as u64]
@@ -477,12 +478,12 @@ impl<'a> FlameGen<'a> {
                                 match ty {
                                     LanternType::Struct(type_id) => {
                                         if let Some(field) = scope.find_struct(type_id).fields.iter().find(|field| field.name == ident.0) {
-                                            inst!(self.frame.instructions; PUSHU (HeapObject::field_offset() + field.offset) as u64);
+                                            inst!(with self.frame => ident.span(); PUSHU (HeapObject::field_offset() + field.offset) as u64);
                                             let field_type = self.compile_expr(*rhs, scope)?;
                                             if field_type != field.r#type {
                                                 error!(in self.sink; rhs_span => "expected {}, but got {field_type} instead", field.r#type);
                                             }
-                                            inst! (self.frame.instructions; WRITE field.size);
+                                            inst!(self.frame.instructions; WRITE field.size);
                                         } else {
                                             // TODO: type name
                                             error!(in self.sink; expr_span => "field `{}` does not exist", ident.0);
@@ -535,13 +536,13 @@ impl<'a> FlameGen<'a> {
                     error!(in self.sink; ident.span() => "unknown struct");
                     return ControlFlow::Continue(LanternType::Null);
                 };
-                inst!(self.frame.instructions; ALLOC_OBJ r#struct.id);
+                inst!(with self.frame => ident.span(); ALLOC_OBJ r#struct.id);
                 for field in &r#struct.fields {
                     match fields.iter().position(|expr_field| expr_field.ident.0 == field.name) {
                         Some(index) => {
                             let expr_field = fields.swap_remove(index);
                             let expr_span = expr_field.expr.span();
-                            inst!(self.frame.instructions; PUSHU (HeapObject::field_offset() + field.offset) as u64);
+                            inst!(with self.frame => expr_field.ident.span(); PUSHU (HeapObject::field_offset() + field.offset) as u64);
                             let field_ty = self.compile_expr(expr_field.expr, scope)?;
                             if field_ty != field.r#type {
                                 error!(in self.sink; expr_span => "expected {}, but got {field_ty} instead", field.r#type);
@@ -559,13 +560,13 @@ impl<'a> FlameGen<'a> {
                 ControlFlow::Continue(LanternType::Struct(r#struct.id))
             },
             Expr::Paren(ExprParen { expr, .. }) => self.compile_expr(*expr, scope),
-            Expr::Block(ExprBlock { stmts, .. }) => {
+            Expr::Block(ExprBlock { stmts, closed_brace, .. }) => {
                 let block_scope = scope.child_block();
                 self.compile_stmts(stmts, block_scope)?;
-                inst!(self.frame.instructions; PUSHU 0);
+                inst!(with self.frame => closed_brace.span(); PUSHU 0);
                 ControlFlow::Continue(LanternType::Null)
             },
-            Expr::Array(ExprArray { elements, .. }) => {
+            Expr::Array(ExprArray { elements, closed_bracket, .. }) => {
                 let len = elements.len();
                 let mut inner = None;
 
@@ -580,15 +581,17 @@ impl<'a> FlameGen<'a> {
                         },
                     }
                 }
+                // TODO: type hint
+                let inner = inner.unwrap_or(LanternType::Null);
 
-                inst!(self.frame.instructions; ALLOC_ARR VM::PRIMITIVE_ARR_TYPE_INDEX, len);
-                match inner {
-                    Some(inner) => ControlFlow::Continue(LanternType::Array(Box::new(inner))),
-                    // TODO: type hint
-                    None => ControlFlow::Continue(LanternType::Array(Box::new(LanternType::Null))),
+                if inner.is_ref() {
+                    inst!(with self.frame => closed_bracket.span(); ALLOC_ARR VM::REF_ARR_TYPE_INDEX, len);
+                } else {
+                    inst!(with self.frame => closed_bracket.span(); ALLOC_ARR VM::PRIMITIVE_ARR_TYPE_INDEX, len);
                 }
+                ControlFlow::Continue(LanternType::Array(Box::new(inner)))
             },
-            Expr::Index(ExprIndex { expr, index, .. }) => {
+            Expr::Index(ExprIndex { expr, index, closed_bracket, .. }) => {
                 let expr_span = expr.span();
                 let r#type = self.compile_expr(*expr, scope)?;
                 let inner = match r#type {
@@ -604,7 +607,7 @@ impl<'a> FlameGen<'a> {
                     error!(in self.sink; index_span => "expected index to be an `int`");
                 }
 
-                inst! { self.frame.instructions;
+                inst! { with self.frame => closed_bracket.span();
                     [PUSHU inner.size() as u64]
                     [MULTI]
                     [PUSHU HeapArray::element_offset() as u64]
@@ -618,10 +621,10 @@ impl<'a> FlameGen<'a> {
                 let span = ident.span();
                 if let Some(var) = scope.variable(&ident.0) {
                     let local_index = self.frame.find_local(&ident.0).expect("local var exists");
-                    inst!(self.frame.instructions; LOAD_LOCAL local_index);
+                    inst!(with self.frame => span; LOAD_LOCAL local_index);
                     ControlFlow::Continue(var.r#type)
                 } else if let Some(fun) = scope.function(&ident.0) {
-                    inst!(self.frame.instructions; PUSHU fun.index as u64);
+                    inst!(with self.frame => span; PUSHU fun.index as u64);
                     ControlFlow::Continue(fun.to_assoc_type())
                 } else if let Some(item) = scope.item(&ident.0) {
                     ControlFlow::Continue(LanternType::ItemStatic(item.identifier()))
@@ -636,7 +639,7 @@ impl<'a> FlameGen<'a> {
                     LanternType::Struct(type_id) => {
                         if let Some(field) = scope.find_struct(type_id).fields.iter().find(|field| field.name == ident.0) {
                             let size = if field.r#type.is_primitive() { field.size } else { 0 };
-                            inst! { self.frame.instructions;
+                            inst! { with self.frame => ident.span();
                                 [PUSHU (HeapObject::field_offset() + field.offset) as u64]
                                 [ADDI]
                                 [READ size]
@@ -644,7 +647,7 @@ impl<'a> FlameGen<'a> {
                             ControlFlow::Continue(field.r#type.clone())
                         } else if let Some(associated) = scope.associated(ItemIdentifier::Struct(type_id), &ident.0) {
                             if associated.args.first().is_some_and(|(_, receiver)| *receiver == ty) {
-                                inst!(self.frame.instructions; PUSHU associated.index as u64);
+                                inst!(with self.frame => ident.span(); PUSHU associated.index as u64);
                             } else {
                                 error!(in self.sink; ident.1 => "method must have a receiver");
                             }
@@ -658,10 +661,10 @@ impl<'a> FlameGen<'a> {
                     LanternType::Array(inner) => {
                         if ident.0 == "len" {
                             let size = if inner.is_primitive() { inner.size() } else { 0 };
-                            inst! { self.frame.instructions;
+                            inst! { with self.frame => ident.span();
                                 [PUSHU size_of::<ObjectHeader>() as u64]
-                                    [ADDI]
-                                        [READ size]
+                                [ADDI]
+                                [READ size]
                             }
                             ControlFlow::Continue(LanternType::Primitive(&native::INT_PRIMITIVE))
                         } else {
@@ -672,7 +675,7 @@ impl<'a> FlameGen<'a> {
                     LanternType::Primitive(primitive) => {
                         if let Some(associated) = scope.associated(ItemIdentifier::Primitive(primitive.id), &ident.0) {
                             if associated.args.first().is_some_and(|(_, receiver)| *receiver == ty) {
-                                inst!(self.frame.instructions; PUSHU associated.index as u64);
+                                inst!(with self.frame => ident.span(); PUSHU associated.index as u64);
                             } else {
                                 error!(in self.sink; ident.1 => "method must have a receiver");
                             }
@@ -688,7 +691,7 @@ impl<'a> FlameGen<'a> {
                             error!(in self.sink; ident.span() => "static item {} does not exist", ident.0);
                             return ControlFlow::Continue(LanternType::Null)
                         };
-                        inst!(self.frame.instructions; PUSHU fun.index as u64);
+                        inst!(with self.frame => ident.span(); PUSHU fun.index as u64);
                         ControlFlow::Continue(fun.to_assoc_type())
                     },
                     _ => {
@@ -860,17 +863,28 @@ impl LanternVariable {
 }
 
 #[derive(Debug, Clone)]
-pub enum GeneratedFunction {
-    Instructions(InstructionSet, usize),
-    Native(NativeFn),
+pub struct GeneratedFunction {
+    pub line_table: Vec<LineMap>,
+    pub name: String,
+    pub kind: FunctionKind,
 }
 
-impl Display for GeneratedFunction {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match &self {
-            Self::Instructions(instructions, locals) => write!(f, "{locals} local(s)\n{instructions}"),
-            Self::Native(ptr) => write!(f, "<native function @ {ptr:?}>"),
+impl GeneratedFunction {
+    pub fn new(name: String, kind: FunctionKind) -> Self {
+        Self { line_table: Vec::new(), name, kind }
+    }
+
+    pub fn line_for(&self, inst_ptr: usize) -> u32 {
+        match self.line_table.binary_search_by_key(&inst_ptr, |map| map.ip) {
+            Ok(i) => self.line_table[i].line,
+            Err(i) => self.line_table[i - 1].line,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub enum FunctionKind {
+    Instructions(InstructionSet, usize),
+    Native(NativeFn),
 }
 

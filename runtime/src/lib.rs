@@ -1,11 +1,11 @@
-use std::fmt::{Display, Formatter};
+use std::{error::Error, fmt::{Display, Formatter}};
 
 use diagnostic::DiagnosticSink;
 use error::RuntimeError;
 use flame::{GeneratedFunction, instruction::Instruction};
 use parse::LanternFile;
 
-use crate::{flame::scope::Globals, heap::{Heap, HeapArray, TypeInfo}, stack::LanternStack};
+use crate::{error::UserError, flame::{FunctionKind, scope::Globals}, heap::{Heap, HeapArray, TypeInfo}, stack::LanternStack};
 
 macro_rules! args {
     ( ( $($ty: ty),+ $(,)? ) in $stack: expr, $pat: pat => $ret: expr) => {{
@@ -88,19 +88,20 @@ pub struct VM {
 impl VM {
     pub const STRING_TYPE_INDEX: usize = 0;
     pub const PRIMITIVE_ARR_TYPE_INDEX: usize = 1;
+    pub const REF_ARR_TYPE_INDEX: usize = 2;
 
     pub fn new(file: LanternFile, sink: &mut DiagnosticSink) -> Option<Self> {
         let mut globals = Globals {
             funs: Vec::new(),
             // TODO: better way of array type info
-            types: vec![TypeInfo::Array { element_size: 1, is_ref: false }, TypeInfo::Array { element_size: 8, is_ref: false }],
+            types: vec![TypeInfo::Array { element_size: 1, is_ref: false }, TypeInfo::Array { element_size: 8, is_ref: false }, TypeInfo::Array { element_size: size_of::<usize>(), is_ref: true }],
         };
         let root = flame::ignite(file, &mut globals, sink);
         if sink.fatal() {
             return None;
         }
         let mut stack = LanternStack::new(2048);
-        if let GeneratedFunction::Instructions(_, locals) = root { 
+        if let FunctionKind::Instructions(_, locals) = root.kind { 
             stack.reserve(locals).expect("too many locals");
         }
         globals.funs.push(root);
@@ -144,6 +145,18 @@ impl VM {
         Ok(array)
     }
 
+    pub fn throw(&mut self, message: impl ToString) -> RuntimeError {
+        let mut stacktrace = Vec::with_capacity(self.frames.len());
+        while let Some(frame) = self.frames.pop() {
+            let fun = &self.funs[frame.fun_index];
+            stacktrace.push((fun.name.clone(), fun.line_for(frame.inst_ptr)));
+        }
+        RuntimeError {
+            message: message.to_string(),
+            stacktrace,
+        }
+    }
+
     pub fn exec(mut self) -> Result<(), RuntimeError> {
         while !self.frames.is_empty() {
             self.exec_one()?;
@@ -152,11 +165,18 @@ impl VM {
     }
 
     pub fn exec_one(&mut self) -> Result<(), RuntimeError> {
+        match self.exec_one_inner() {
+            Ok(_) => Ok(()),
+            Err(err) => Err(self.throw(err)),
+        }
+    }
+
+    fn exec_one_inner(&mut self) -> Result<(), Box<dyn Error>> {
         let Some(frame) = self.frames.last_mut() else { return Ok(()); };
 
         let fun = &self.funs[frame.fun_index];
-        match fun {
-            GeneratedFunction::Instructions(instructions, _) => {
+        match fun.kind {
+            FunctionKind::Instructions(ref instructions, _) => {
                 match instructions[frame.inst_ptr].clone() {
                     Instruction::Pushu64(u64) => self.stack.push_primitive(u64)?,
                     Instruction::Pushi64(i64) => self.stack.push_primitive(i64)?,
@@ -220,6 +240,11 @@ impl VM {
                         self.stack.push_slot(ret)?;
                         return Ok(());
                     },
+                    Instruction::Throw => {
+                        let ptr = unsafe { HeapArray::from_raw(*self.stack.pop()?.read::<*mut u8>()) };
+                        let message = unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr.element_ptr(), ptr.len())) };
+                        return Err(Box::new(UserError(message.to_string())))
+                    },
                     Instruction::Invoke(num_args) => {
                         // ARG_n
                         // ARG_2
@@ -229,7 +254,7 @@ impl VM {
                         let bottom = self.stack.top() - num_args;
                         let index = unsafe { *self.stack[bottom - 1].read::<usize>() };
                         // TODO: find a better way to do this
-                        if let GeneratedFunction::Instructions(_, locals) = self.funs[index] {
+                        if let FunctionKind::Instructions(_, locals) = self.funs[index].kind {
                             self.stack.reserve(locals - num_args)?;
                         }
                         self.frames.push(Frame::new(index, bottom));
@@ -249,7 +274,7 @@ impl VM {
                         // self.stack
                         unsafe { std::ptr::write(index_slot, self.stack[bottom - 1]); };
                         // TODO: find a better way to do this
-                        if let GeneratedFunction::Instructions(_, locals) = self.funs[index] {
+                        if let FunctionKind::Instructions(_, locals) = self.funs[index].kind {
                             self.stack.reserve(locals - num_args - 1)?;
                         }
                         let frame = Frame::new(index, bottom);
@@ -314,7 +339,7 @@ impl VM {
                 frame.inst_ptr += 1;
                 Ok(())
             },
-            GeneratedFunction::Native(ptr) => {
+            FunctionKind::Native(ptr) => {
                 let ret = ptr(self)?;
 
                 let bottom = self.frames.pop().expect("frame exists").bottom;
@@ -344,7 +369,7 @@ impl Frame {
     }
 }
 
-fn bool_to_slot(bool: bool) -> u64 {
+const fn bool_to_slot(bool: bool) -> u64 {
     if bool {
         1
     } else {

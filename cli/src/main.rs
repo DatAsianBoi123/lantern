@@ -2,7 +2,7 @@ use std::{fs::File, io::Read, time::Instant};
 
 use clap::Parser;
 use diagnostic::DiagnosticSink;
-use runtime::VM;
+use runtime::{VM, flame::FunctionKind};
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
@@ -55,7 +55,11 @@ fn main() {
 
     if verbose {
         vm.funs().iter().enumerate().for_each(|(i, fun)| {
-            println!("Generated {i}:\n{fun}");
+            println!("Generated {i} ({}):", fun.name);
+            match &fun.kind {
+                FunctionKind::Instructions(instructions, locals) => println!("{locals} locals\n{instructions}"),
+                FunctionKind::Native(native) => println!("<native function {native:?}>"),
+            }
         });
         println!("Compiled in {:?}", Instant::now().duration_since(before));
     }

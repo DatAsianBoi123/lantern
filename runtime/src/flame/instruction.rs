@@ -128,6 +128,22 @@ macro_rules! inst {
     (POP_GOTO_IF_FALSE $j: expr) => {
         $crate::flame::instruction::Instruction::PopGotoIfFalse($j)
     };
+    (THRW) => {
+        $crate::flame::instruction::Instruction::Throw
+    };
+
+    (with $frame: expr => $span: expr; $([$($tt: tt)+])*) => {{
+        if $frame.line_table.last().is_none_or(|map| $span.line() > map.line) {
+            $frame.line_table.push($crate::flame::scope::LineMap::new($frame.instructions.len(), $span.line()));
+        }
+        inst!($frame.instructions; $([$($tt)+])*);
+    }};
+    (with $frame: expr => $span: expr; $($tt: tt)+) => {{
+        if $frame.line_table.last().is_none_or(|map| $span.line() > map.line) {
+            $frame.line_table.push($crate::flame::scope::LineMap::new($frame.instructions.len(), $span.line()));
+        }
+        inst!($frame.instructions; $($tt)+);
+    }};
 
     ($inst: expr; $([$($tt: tt)+])*) => {
         $($inst.push(inst!($($tt)+)));*
@@ -230,6 +246,7 @@ pub enum Instruction {
     LoadLocal(usize),
 
     Return,
+    Throw,
 
     Invoke(usize),
     InvokeMethod(usize),
@@ -274,6 +291,7 @@ impl Display for Instruction {
             Self::FCompareEq => write!(f, "FCOMP_EQ"),
             Self::ICompareEq => write!(f, "ICOMP_EQ"),
             Self::Not => write!(f, "NOT"),
+            Self::Throw => write!(f, "THRW"),
             Self::AllocObj(index) => write!(f, "{:20}{index}", "ALLOC_OBJ"),
             Self::AllocString(str) => write!(f, "{:20}{str:?}", "ALLOC_STR"),
             Self::AllocArray(index, len) => write!(f, "{:20}{index} {len}", "ALLOC_ARRAY"),
