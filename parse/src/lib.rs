@@ -158,8 +158,8 @@ pub enum Stmt {
 pub struct ValDeclaration {
     pub val: Val,
     pub ident: Ident,
-    pub colon: Colon,
-    pub r#type: Type,
+    #[parse(with_try(Colon, Type))]
+    pub r#type: Option<(Colon, Type)>,
     #[parse(with_try(Equals, Expr))]
     pub init: Option<(Equals, Expr)>,
     pub semi: Semi,

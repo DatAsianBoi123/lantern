@@ -204,7 +204,7 @@ impl<'a> FlameGen<'a> {
                         self.frame.instructions[break_index] = Instruction::Goto(self.frame.instructions.len());
                     }
                 },
-                Stmt::ValDeclaration(ValDeclaration { val, ident, r#type, init: None, .. }) => {
+                Stmt::ValDeclaration(ValDeclaration { val, ident, r#type: Some((_, r#type)), init: None, .. }) => {
                     // TODO: unitialized vars
                     let local_index = self.frame.declare_local(ident.0.clone());
                     if scope.insert_variable(ident.0.clone(), self.sink.emit_or(LanternType::from_type(&r#type, &scope), LanternType::Null)).is_none() {
@@ -216,7 +216,7 @@ impl<'a> FlameGen<'a> {
                         [POP]
                     }
                 },
-                Stmt::ValDeclaration(ValDeclaration { ident, r#type, init: Some((_, init)), .. }) => {
+                Stmt::ValDeclaration(ValDeclaration { ident, r#type: Some((_, r#type)), init: Some((_, init)), .. }) => {
                     let init_span = init.span();
                     let init_type = self.compile_expr(init, &scope)?;
 
@@ -232,6 +232,9 @@ impl<'a> FlameGen<'a> {
                         [STORE_LOCAL local_index]
                         [POP]
                     };
+                },
+                Stmt::ValDeclaration(ValDeclaration { r#type: None, .. }) => {
+                    todo!()
                 },
                 Stmt::Return(ReturnStmt { ret: ret_keyword, expr, .. }) => {
                     let expected_ret = match &self.frame.ret_type {
