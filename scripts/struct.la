@@ -19,7 +19,7 @@ struct Position {
   y: float,
 }
 
-val my_pos: Position = Position {
+val my_pos = Position {
   name: "hi",
   x: 5.2,
   y: -55.11,

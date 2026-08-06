@@ -21,7 +21,7 @@ fun factorial(num: int) -> int {
 }
 
 print("Enter number:");
-val num: int = input_int();
+val num = input_int();
 print("Factorial is:");
 print(int_to_str(factorial(num)));
 

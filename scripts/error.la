@@ -14,11 +14,11 @@ fun div(a: float, b: float) -> float {
 }
 
 fun nested(secret: float) -> float {
-  val page: float = secret % 5.0;
-  val normalized: float = div(5.0, page);
+  val page = secret % 5.0;
+  val normalized = div(5.0, page);
   return div(normalized, 2.0);
 }
 
-val inf: float = 2.0 / 0.0;
-write(float_to_str(inf));
+val num = nested(10.0);
+write(float_to_str(num));
 

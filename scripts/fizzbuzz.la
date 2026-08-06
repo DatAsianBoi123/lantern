@@ -15,7 +15,7 @@ native fun input_int() -> int;
 val index: int = 1;
 
 print("Enter max:");
-val max: int = input_int();
+val max = input_int();
 
 while (index <= max) {
   fizzbuzz(index);

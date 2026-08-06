@@ -204,10 +204,13 @@ impl<'a> FlameGen<'a> {
                         self.frame.instructions[break_index] = Instruction::Goto(self.frame.instructions.len());
                     }
                 },
-                Stmt::ValDeclaration(ValDeclaration { val, ident, r#type: Some((_, r#type)), init: None, .. }) => {
+                Stmt::ValDeclaration(ValDeclaration { val, ident, r#type, init: None, .. }) => {
                     // TODO: unitialized vars
                     let local_index = self.frame.declare_local(ident.0.clone());
-                    if scope.insert_variable(ident.0.clone(), self.sink.emit_or(LanternType::from_type(&r#type, &scope), LanternType::Null)).is_none() {
+                    let r#type = r#type
+                        .ok_or(error!(val.span() => "explicit type required on an initialized variable"))
+                        .and_then(|(_, r#type)| LanternType::from_type(&r#type, &scope));
+                    if scope.insert_variable(ident.0.clone(), self.sink.emit_or(r#type, LanternType::Null)).is_none() {
                         error!(in self.sink; ident.span() => "variable `{}` already declared", ident.0);
                     }
                     inst! { with self.frame => val.span();
@@ -216,14 +219,20 @@ impl<'a> FlameGen<'a> {
                         [POP]
                     }
                 },
-                Stmt::ValDeclaration(ValDeclaration { ident, r#type: Some((_, r#type)), init: Some((_, init)), .. }) => {
+                Stmt::ValDeclaration(ValDeclaration { ident, r#type, init: Some((_, init)), .. }) => {
                     let init_span = init.span();
                     let init_type = self.compile_expr(init, &scope)?;
 
-                    let var_type = self.sink.emit_or(LanternType::from_type(&r#type, &scope), LanternType::Null);
-                    if var_type != init_type {
-                        error!(in self.sink; init_span => "expected {var_type}, but got {init_type} instead");
-                    }
+                    let var_type = match r#type {
+                        Some((_, r#type)) => {
+                            let var_type = self.sink.emit_or(LanternType::from_type(&r#type, &scope), LanternType::Null);
+                            if var_type != init_type {
+                                error!(in self.sink; init_span => "expected {var_type}, but got {init_type} instead");
+                            }
+                            var_type
+                        },
+                        None => init_type,
+                    };
                     let local_index = self.frame.declare_local(ident.0.clone());
                     if scope.insert_variable(ident.0.clone(), var_type).is_none() {
                         error!(in self.sink; ident.span() => "variable `{}` already declared", ident.0);
@@ -232,9 +241,6 @@ impl<'a> FlameGen<'a> {
                         [STORE_LOCAL local_index]
                         [POP]
                     };
-                },
-                Stmt::ValDeclaration(ValDeclaration { r#type: None, .. }) => {
-                    todo!()
                 },
                 Stmt::Return(ReturnStmt { ret: ret_keyword, expr, .. }) => {
                     let expected_ret = match &self.frame.ret_type {
