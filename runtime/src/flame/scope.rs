@@ -42,18 +42,16 @@ impl<'a> Scope<'a> {
         match self.kind {
             ScopeKind::Module => {
                 for item in self.items.values() {
-                    match item {
-                        LanternItem::Struct(r#struct @ LanternStruct { id, .. }) if *id == type_id => return r#struct,
-                        _ => {}
+                    if let LanternItem::Struct(r#struct @ LanternStruct { id, .. }) = item && *id == type_id {
+                        return r#struct
                     }
                 }
                 panic!("struct with type id {type_id} not found");
             },
             ScopeKind::Block(parent) | ScopeKind::Function(parent, _) => {
                 for item in self.items.values() {
-                    match item {
-                        LanternItem::Struct(r#struct @ LanternStruct { id, .. }) if *id == type_id => return r#struct,
-                        _ => {}
+                    if let LanternItem::Struct(r#struct @ LanternStruct { id, .. }) = item && *id == type_id {
+                        return r#struct
                     }
                 }
                 parent.find_struct(type_id)

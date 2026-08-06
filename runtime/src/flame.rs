@@ -498,7 +498,7 @@ impl<'a> FlameGen<'a> {
                                             error!(in self.sink; expr_span => "field `{}` does not exist", ident.0);
                                         }
                                     },
-                                    _ => error!(in self.sink; expr_span => "field `{}` does not exist on {ty}", ident.0),
+                                    _ => error!(in self.sink; expr_span => "field `{}` is not writable in {ty}", ident.0),
                                 }
                             },
                             _ => error!(in self.sink; punct.span() => "bad left-hand-side of assignment"),
@@ -616,6 +616,7 @@ impl<'a> FlameGen<'a> {
                     error!(in self.sink; index_span => "expected index to be an `int`");
                 }
 
+                // TODO: bounds checking
                 inst! { with self.frame => closed_bracket.span();
                     [PUSHU inner.size() as u64]
                     [MULTI]
@@ -646,7 +647,8 @@ impl<'a> FlameGen<'a> {
                 let ty = self.compile_expr(*expr, scope)?;
                 match ty {
                     LanternType::Struct(type_id) => {
-                        if let Some(field) = scope.find_struct(type_id).fields.iter().find(|field| field.name == ident.0) {
+                        let r#struct = scope.find_struct(type_id);
+                        if let Some(field) = r#struct.fields.iter().find(|field| field.name == ident.0) {
                             let size = if field.r#type.is_primitive() { field.size } else { 0 };
                             inst! { with self.frame => ident.span();
                                 [PUSHU (HeapObject::field_offset() + field.offset) as u64]
