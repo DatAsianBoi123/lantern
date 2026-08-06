@@ -72,6 +72,7 @@ native_funs![for vm,
 ];
 
 pub static BYTE_PRIMITIVE: LanternPrimitive = LanternPrimitive {
+    name: "byte",
     id: 0,
     size: 1,
     align: 1,
@@ -91,6 +92,7 @@ pub static BYTE_PRIMITIVE: LanternPrimitive = LanternPrimitive {
     },
 };
 pub static INT_PRIMITIVE: LanternPrimitive = LanternPrimitive {
+    name: "int",
     id: 1,
     size: 8,
     align: 8,
@@ -110,6 +112,7 @@ pub static INT_PRIMITIVE: LanternPrimitive = LanternPrimitive {
     },
 };
 pub static FLOAT_PRIMITIVE: LanternPrimitive = LanternPrimitive {
+    name: "float",
     id: 2,
     size: 8,
     align: 8,
@@ -129,6 +132,7 @@ pub static FLOAT_PRIMITIVE: LanternPrimitive = LanternPrimitive {
     },
 };
 pub static BOOL_PRIMITIVE: LanternPrimitive = LanternPrimitive {
+    name: "bool",
     id: 3,
     size: 1,
     align: 1,

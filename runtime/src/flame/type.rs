@@ -23,7 +23,7 @@ impl Display for LanternType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Struct(_) => f.write_str("struct"),
-            Self::Primitive(_) => f.write_str("primitive"),
+            Self::Primitive(LanternPrimitive { name, .. }) => f.write_str(name),
             Self::Array(inner) => write!(f, "[{inner}]"),
             Self::Function { args, ret, .. } => {
                 write!(f, "fun({}) -> {}", args.iter().map(|r#type| r#type.to_string()).collect::<Vec<String>>().join(", "), ret)

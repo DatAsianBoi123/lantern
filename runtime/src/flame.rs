@@ -690,8 +690,7 @@ impl<'a> FlameGen<'a> {
                             }
                             ControlFlow::Continue(associated.to_method_type())
                         } else {
-                            // TODO: type name
-                            error!(in self.sink; ident.1 => "method {} does not exist", ident.0);
+                            error!(in self.sink; ident.1 => "method {} does not exist in {}", ident.0, primitive.name);
                             ControlFlow::Continue(LanternType::Null)
                         }
                     },
@@ -793,6 +792,7 @@ impl LanternStruct {
 
 #[derive(Debug, Clone)]
 pub struct LanternPrimitive {
+    pub name: &'static str,
     pub id: usize,
     pub size: usize,
     pub align: usize,
