@@ -59,6 +59,15 @@ impl<'a> Scope<'a> {
         }
     }
 
+    pub fn find_struct_mut_in_scope(&mut self, type_id: usize) -> Option<&mut LanternStruct> {
+        self.items.values_mut().find_map(|item| match item {
+            LanternItem::Struct(r#struct) if r#struct.id == type_id => {
+                Some(r#struct)
+            },
+            _ => None,
+        })
+    }
+
     pub fn item(&self, name: &str) -> Option<&LanternItem> {
         match self.kind {
             ScopeKind::Module => self.items.get(name),

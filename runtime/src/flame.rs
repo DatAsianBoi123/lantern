@@ -45,6 +45,8 @@ impl<'a> FlameGen<'a> {
     }
 
     pub fn compile_stmts(&mut self, statements: Vec<Stmt>, mut scope: Scope) -> ControlFlow<()> {
+        self.resolve_types(&statements, &mut scope);
+
         statements.iter()
             .filter_map(|statement| {
                 if let Stmt::Item(item) = statement {
@@ -55,7 +57,7 @@ impl<'a> FlameGen<'a> {
             })
         .for_each(|item| {
             match item {
-                Item::Using(_) => todo!(),
+                Item::Using(_) => {},
                 Item::Fun(ItemFun { path, args, ret, .. }) => {
                     let args = args.iter()
                         .map(|FunArg { ident, r#type, .. }| (ident.clone(), self.sink.emit_or(LanternType::from_type(r#type, &scope), LanternType::Null)))
@@ -102,22 +104,22 @@ impl<'a> FlameGen<'a> {
 
                     self.globals.funs.push(GeneratedFunction::new(ident.0.clone(), FunctionKind::Native(ptr)));
                 },
-                // TODO: add types before checking for types
                 Item::Struct(ItemStruct { ident, fields, .. }) => {
                     let fields = fields.iter()
                         .map(|StructField { ident, r#type, .. }| {
+                            // type may not have fields initialized, but all structs have the same
+                            // size/alignment no matter its fields and primitives are hardcoded
                             (ident.0.clone(), self.sink.emit_or(LanternType::from_type(r#type, &scope), LanternType::Null))
                         })
                         .collect();
 
-                    let lantern_struct = LanternStruct::new(self.globals.types.len(), fields);
-                    self.globals.types.push(lantern_struct.to_type_info());
-                    scope.insert_item(ident.0.clone(), LanternItem::Struct(lantern_struct));
+                    let item = scope.item(&ident.0).expect("types were resolved");
+                    let ItemIdentifier::Struct(id) = item.identifier() else { return; };
+                    let r#struct = scope.find_struct_mut_in_scope(id).expect("struct exists in scope");
+                    *r#struct = LanternStruct::new(id, fields);
+                    self.globals.types[id] = r#struct.to_type_info();
                 },
-                Item::Primitive(ItemPrimitive { ident, .. }) => {
-                    let Some(primitive) = native::get_primitive(&ident.0) else { panic!("unknown primitive `{}`", ident.0) };
-                    scope.insert_item(ident.0.clone(), LanternItem::Primitive(primitive));
-                },
+                Item::Primitive(_) => {},
             }
         });
 
@@ -711,6 +713,35 @@ impl<'a> FlameGen<'a> {
                 }
             },
         }
+    }
+
+    pub fn resolve_types(&mut self, statements: &[Stmt], scope: &mut Scope) {
+        statements.iter()
+            .filter_map(|statement| {
+                if let Stmt::Item(item) = statement {
+                    Some(item)
+                } else {
+                    None
+                }
+            })
+            .for_each(|item| match item {
+                Item::Using(_) => todo!(),
+                Item::Struct(ItemStruct { ident, .. }) => {
+                    // this gets overridden during the 2nd pass
+                    let r#struct = LanternStruct::new(self.globals.types.len(), Box::new([]));
+                    self.globals.types.push(r#struct.to_type_info());
+                    if scope.insert_item(ident.0.clone(), LanternItem::Struct(r#struct)).is_none() {
+                        error!(in self.sink; ident.span() => "struct already declared");
+                    }
+                },
+                Item::Primitive(ItemPrimitive { ident, .. }) => {
+                    let Some(primitive) = native::get_primitive(&ident.0) else { panic!("unknown primitive `{}`", ident.0) };
+                    if scope.insert_item(ident.0.clone(), LanternItem::Primitive(primitive)).is_none() {
+                        error!(in self.sink; ident.span() => "primitive already declared");
+                    }
+                },
+                _ => {},
+            });
     }
 }
 
