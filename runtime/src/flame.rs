@@ -515,10 +515,12 @@ impl<'a> FlameGen<'a> {
 
                 match (lhs, op, rhs) {
                     (LanternType::Primitive(lhs), op, LanternType::Primitive(rhs)) if lhs == rhs && op.is_comparison() && lhs.ops.get_bin_op(&op).is_some() => {
+                        inst!(with self.frame => op.span());
                         self.frame.instructions.push(lhs.ops.get_bin_op(&op).unwrap());
                         ControlFlow::Continue(LanternType::Primitive(&native::BOOL_PRIMITIVE))
                     },
                     (LanternType::Primitive(lhs), op, LanternType::Primitive(rhs)) if lhs == rhs && lhs.ops.get_bin_op(&op).is_some() => {
+                        inst!(with self.frame => op.span());
                         self.frame.instructions.push(lhs.ops.get_bin_op(&op).unwrap());
                         ControlFlow::Continue(LanternType::Primitive(lhs))
                     },
@@ -533,6 +535,7 @@ impl<'a> FlameGen<'a> {
                 let r#type = self.compile_expr(*expr, scope)?;
                 match (op, r#type) {
                     (op, LanternType::Primitive(primitive)) if primitive.ops.get_un_op(&op).is_some() => {
+                        inst!(with self.frame => op.span());
                         self.frame.instructions.push(primitive.ops.get_un_op(&op).unwrap());
                         ControlFlow::Continue(LanternType::Primitive(primitive))
                     },
