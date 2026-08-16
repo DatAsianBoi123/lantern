@@ -1,7 +1,7 @@
 use std::fmt::{Display, Formatter};
 
 use diagnostic::{Span, error};
-use lex::{And, Asterisk, Bang, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Equals, EqualsEquals, Greater, GreaterEq, Hyphen, Less, LessEq, Literal, OpenBrace, OpenBracket, OpenParen, Or, Percent, Period, Plus, Punct, Slash, Token, TokenKind};
+use lex::{And, Asterisk, Bang, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Equals, EqualsEquals, Greater, GreaterEq, Hyphen, Less, LessEq, Literal, NotEquals, OpenBrace, OpenBracket, OpenParen, Or, Percent, Period, Plus, Punct, Slash, Token, TokenKind};
 use macros::Parse;
 
 use crate::{Ident, ParseTokens, Result, Stmt, stream::{TokenStream, parse_punctuated, parse_repetition}};
@@ -243,6 +243,7 @@ pub enum BinaryOperator {
     Div(Slash),
     Mod(Percent),
 
+    Neq(NotEquals),
     Eq(EqualsEquals),
     Le(LessEq),
     Ge(GreaterEq),
@@ -269,6 +270,7 @@ impl BinaryOperator {
             Self::Gt(punct) => punct.span(),
             Self::Ge(punct) => punct.span(),
             Self::Eq(punct) => punct.span(),
+            Self::Neq(punct) => punct.span(),
 
             Self::And(punct) => punct.span(),
             Self::Or(punct) => punct.span(),
@@ -279,7 +281,7 @@ impl BinaryOperator {
         match self {
             Self::Mult(_) | Self::Div(_) | Self::Mod(_) => (11, 12),
             Self::Add(_) | Self::Sub(_) => (9, 10),
-            Self::Lt(_) | Self::Le(_) | Self::Gt(_) | Self::Ge(_) | Self::Eq(_) => (7, 8),
+            Self::Lt(_) | Self::Le(_) | Self::Gt(_) | Self::Ge(_) | Self::Eq(_) | Self::Neq(_) => (7, 8),
             Self::And(_) => (5, 6),
             Self::Or(_) => (3, 4),
             Self::Assign(_) => (2, 1),
@@ -287,7 +289,7 @@ impl BinaryOperator {
     }
 
     pub fn is_comparison(&self) -> bool {
-        matches!(self, Self::Lt(_) | Self::Le(_) | Self::Gt(_) | Self::Ge(_) | Self::Eq(_))
+        matches!(self, Self::Lt(_) | Self::Le(_) | Self::Gt(_) | Self::Ge(_) | Self::Eq(_) | Self::Neq(_))
     }
 
     pub fn is_token(token: &Token) -> bool {
@@ -299,6 +301,7 @@ impl BinaryOperator {
             Token::Punct(Punct::Slash(_)) |
             Token::Punct(Punct::Percent(_)) |
             Token::Punct(Punct::EqualsEquals(_)) |
+            Token::Punct(Punct::NotEquals(_)) |
             Token::Punct(Punct::LessEq(_)) |
             Token::Punct(Punct::GreaterEq(_)) |
             Token::Punct(Punct::Less(_)) |
@@ -325,6 +328,7 @@ impl Display for BinaryOperator {
             Self::Gt(punct) => punct.fmt(f),
             Self::Ge(punct) => punct.fmt(f),
             Self::Eq(punct) => punct.fmt(f),
+            Self::Neq(punct) => punct.fmt(f),
 
             Self::And(punct) => punct.fmt(f),
             Self::Or(punct) => punct.fmt(f),

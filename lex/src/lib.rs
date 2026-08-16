@@ -360,6 +360,7 @@ define_puncts! {
         Greater = '>',
         GreaterEq = ">=",
         EqualsEquals = "==",
+        NotEquals = "!=",
 
         And = "&&",
         Or = "||",
@@ -466,6 +467,10 @@ impl<'a> Lexer<'a> {
             ';' => Ok(punct!(Semi)),
             ':' => Ok(punct!(Colon)),
             '.' => Ok(punct!(Period)),
+            '!' if self.peek_is('=') => {
+                self.next_char();
+                Ok(punct!(NotEquals))
+            },
             '!' => Ok(punct!(Bang)),
 
             '+' => Ok(punct!(Plus)),

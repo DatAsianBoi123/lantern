@@ -513,13 +513,23 @@ impl<'a> FlameGen<'a> {
                 let lhs = self.compile_expr(*lhs, scope)?;
                 let rhs = self.compile_expr(*rhs, scope)?;
 
+                if lhs != rhs {
+                    error!(in self.sink; op.span() => "{op} cannot be applied to {lhs} and {rhs}");
+                    return ControlFlow::Continue(LanternType::Null);
+                }
                 match (lhs, op, rhs) {
-                    (LanternType::Primitive(lhs), op, LanternType::Primitive(rhs)) if lhs == rhs && op.is_comparison() && lhs.ops.get_bin_op(&op).is_some() => {
+                    (LanternType::Primitive(lhs), op @ BinaryOperator::Neq(_), LanternType::Primitive(_)) if lhs.ops.get_bin_op(&op).is_some() => {
+                        inst!(with self.frame => op.span());
+                        self.frame.instructions.push(lhs.ops.get_bin_op(&op).unwrap());
+                        inst!(self.frame.instructions; NOT);
+                        ControlFlow::Continue(LanternType::Primitive(&native::BOOL_PRIMITIVE))
+                    },
+                    (LanternType::Primitive(lhs), op, LanternType::Primitive(_)) if op.is_comparison() && lhs.ops.get_bin_op(&op).is_some() => {
                         inst!(with self.frame => op.span());
                         self.frame.instructions.push(lhs.ops.get_bin_op(&op).unwrap());
                         ControlFlow::Continue(LanternType::Primitive(&native::BOOL_PRIMITIVE))
                     },
-                    (LanternType::Primitive(lhs), op, LanternType::Primitive(rhs)) if lhs == rhs && lhs.ops.get_bin_op(&op).is_some() => {
+                    (LanternType::Primitive(lhs), op, LanternType::Primitive(_)) if lhs.ops.get_bin_op(&op).is_some() => {
                         inst!(with self.frame => op.span());
                         self.frame.instructions.push(lhs.ops.get_bin_op(&op).unwrap());
                         ControlFlow::Continue(LanternType::Primitive(lhs))
@@ -867,7 +877,7 @@ impl PrimitiveOps {
             BinaryOperator::Le(_) => self.le_inst.clone(),
             BinaryOperator::Gt(_) => self.gt_inst.clone(),
             BinaryOperator::Ge(_) => self.ge_inst.clone(),
-            BinaryOperator::Eq(_) => self.eq_inst.clone(),
+            BinaryOperator::Eq(_) | BinaryOperator::Neq(_) => self.eq_inst.clone(),
             _ => None,
         }
     }
