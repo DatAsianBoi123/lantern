@@ -666,8 +666,7 @@ impl<'a> FlameGen<'a> {
                             }
                             ControlFlow::Continue(associated.to_method_type())
                         } else {
-                            // TODO: type name
-                            error!(in self.sink; ident.1 => "field {} does not exist", ident.0);
+                            error!(in self.sink; ident.1 => "field {} does not exist in {ty}", ident.0);
                             ControlFlow::Continue(LanternType::Null)
                         }
                     },
@@ -700,6 +699,7 @@ impl<'a> FlameGen<'a> {
                     },
                     LanternType::ItemStatic(type_id) => {
                         let Some(fun) = scope.associated(type_id, &ident.0) else {
+                            // TODO: type name
                             error!(in self.sink; ident.span() => "static item {} does not exist", ident.0);
                             return ControlFlow::Continue(LanternType::Null)
                         };
