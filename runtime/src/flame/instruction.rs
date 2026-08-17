@@ -132,17 +132,16 @@ macro_rules! inst {
         $crate::flame::instruction::Instruction::Throw
     };
 
-    (with $frame: expr => $span: expr) => {
+    (with $frame: expr => $span: expr; $([$($tt: tt)+])*) => {{
         if $frame.line_table.last().is_none_or(|map| $span.line() > map.line) {
             $frame.line_table.push($crate::flame::scope::LineMap::new($frame.instructions.len(), $span.line()));
         }
-    };
-    (with $frame: expr => $span: expr; $([$($tt: tt)+])*) => {{
-        inst!(with $frame => $span);
         inst!($frame.instructions; $([$($tt)+])*);
     }};
     (with $frame: expr => $span: expr; $($tt: tt)+) => {{
-        inst!(with $frame => $span);
+        if $frame.line_table.last().is_none_or(|map| $span.line() > map.line) {
+            $frame.line_table.push($crate::flame::scope::LineMap::new($frame.instructions.len(), $span.line()));
+        }
         inst!($frame.instructions; $($tt)+);
     }};
 
