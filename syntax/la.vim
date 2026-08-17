@@ -5,7 +5,7 @@ sy keyword Boolean true false
 
 sy match Identifier /\w\+/
 sy match Function /\w\+\ze\s*(\_.*)/
-sy match Operator /[=+\-*/%<>]\|==\|!=\|||\|&&/
+sy match Operator /[=+\-*/%<>!]\|==\|!=\|||\|&&/
 sy match Delimiter /[;:.,(){}\[\]]\|->/
 sy match Type /\(:\s*\)\@<=\w\+/
 sy match Type /\(->\s*\)\@<=\w\+/
@@ -17,6 +17,9 @@ sy match Special /@\w*/
 sy match Comment /\/\/.*/
 
 sy region String start=/"/ end=/"/ skip=/\\"/ contains=EscapeCharacter
+sy region String start=/$"/ end=/"/ skip=/\\"/ contains=EscapeCharacter,StringTemplate
+sy region StringTemplate start=/{/ end=/}/ contains=ALL contained
 
 hi link EscapeCharacter Special
+hi link StringTemplate Special
 
