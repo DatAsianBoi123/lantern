@@ -1,6 +1,6 @@
 use std::ops::ControlFlow;
 
-use diagnostic::{DiagnosticSink, error};
+use diagnostic::{Diagnostic, DiagnosticSink, error};
 use instruction::InstructionSet;
 use parse::{FunArg, IfBranch, IfStmt, Item, ItemFun, ItemNativeFun, ItemPrimitive, ItemStruct, LanternFile, ReturnStmt, Stmt, StructField, ValDeclaration, WhileStmt, expr::{BinaryOperator, Expr, ExprArray, ExprBinary, ExprBlock, ExprField, ExprFunCall, ExprIndex, ExprParen, ExprStruct, ExprUnary, UnaryOperator}, lex::{Break, Ident, Literal, TokenKind}};
 
@@ -433,76 +433,24 @@ impl<'a> FlameGen<'a> {
 
                         return ControlFlow::Continue(LanternType::Primitive(&native::BOOL_PRIMITIVE));
                     },
-                    BinaryOperator::Assign(punct) => {
-                        let rhs_span = rhs.span();
-                        match *lhs {
-                            Expr::Identifier(ident) => {
-                                let Some(var) = scope.variable(&ident.0) else {
-                                    error!(in self.sink; ident.span() => "unknown variable `{}`", ident.0);
-                                    return ControlFlow::Continue(LanternType::Null);
-                                };
-
+                    BinaryOperator::Assign(_) => {
+                        match self.compile_lvalue(scope, *lhs)? {
+                            Ok(lvalue) => {
+                                let lhs = lvalue.write_type();
+                                let rhs_span = rhs.span();
                                 let rhs = self.compile_expr(*rhs, scope)?;
-
-                                if var.r#type != rhs {
-                                    error!(in self.sink; rhs_span => "expected {}, but got {rhs} instead", var.r#type);
-                                }
-                                inst!(with self.frame => punct.span(); STORE_LOCAL var.index);
-                            },
-                            Expr::Index(ExprIndex { expr, index, closed_bracket, .. }) => {
-                                let expr_span = expr.span();
-                                let r#type = self.compile_expr(*expr, scope)?;
-                                let inner = match r#type {
-                                    LanternType::Array(inner) => *inner,
-                                    _ => {
-                                        error!(in self.sink; expr_span => "expected array or string");
-                                        LanternType::Null
-                                    },
-                                };
-
-                                let index_span = index.span();
-                                let index_type = self.compile_expr(*index, scope)?;
-                                if index_type != LanternType::Primitive(&native::INT_PRIMITIVE) {
-                                    error!(in self.sink; index_span => "expected index to be an `int`");
+                                if *lhs != rhs {
+                                    error!(in self.sink; rhs_span => "expected {lhs}, but got {rhs} instead");
                                 }
 
-                                inst! { with self.frame => closed_bracket.span();
-                                    [PUSHU inner.size() as u64]
-                                    [MULTI]
-                                    [PUSHU HeapArray::element_offset() as u64]
-                                    [ADDI]
-                                }
-
-                                let rhs = self.compile_expr(*rhs, scope)?;
-
-                                if rhs != inner {
-                                    error!(in self.sink; rhs_span => "expected {inner}, but got {rhs} instead");
-                                }
-
-                                // TODO: bounds checking
-                                inst!(self.frame.instructions; WRITE inner.size());
-                            },
-                            Expr::Field(ExprField { expr, ident }) => {
-                                let expr_span = expr.span();
-                                let ty = self.compile_expr(*expr, scope)?;
-                                match ty {
-                                    LanternType::Struct(type_id) => {
-                                        if let Some(field) = scope.find_struct(type_id).fields.iter().find(|field| field.name == ident.0) {
-                                            inst!(with self.frame => ident.span(); PUSHU (HeapObject::field_offset() + field.offset) as u64);
-                                            let field_type = self.compile_expr(*rhs, scope)?;
-                                            if field_type != field.r#type {
-                                                error!(in self.sink; rhs_span => "expected {}, but got {field_type} instead", field.r#type);
-                                            }
-                                            inst!(self.frame.instructions; WRITE field.size);
-                                        } else {
-                                            // TODO: type name
-                                            error!(in self.sink; expr_span => "field `{}` does not exist", ident.0);
-                                        }
-                                    },
-                                    _ => error!(in self.sink; expr_span => "field `{}` is not writable in {ty}", ident.0),
+                                match lvalue {
+                                    LValue::Local(var) => inst!(self.frame.instructions; STORE_LOCAL var.index),
+                                    // TODO: bounds checking
+                                    LValue::ArrayElement(ty) => inst!(self.frame.instructions; WRITE ty.size()),
+                                    LValue::StructField(ty) => inst!(self.frame.instructions; WRITE ty.size()),
                                 }
                             },
-                            _ => error!(in self.sink; punct.span() => "bad left-hand-side of assignment"),
+                            Err(err) => self.sink.emit(err),
                         }
                         return ControlFlow::Continue(LanternType::Null);
                     },
@@ -749,6 +697,79 @@ impl<'a> FlameGen<'a> {
                 },
                 _ => {},
             });
+    }
+
+    fn compile_lvalue<'s>(&mut self, scope: &'s Scope, lhs: Expr) -> ControlFlow<(), Result<LValue<'s>, Diagnostic>> {
+        match lhs {
+            Expr::Identifier(ident) => {
+                ControlFlow::Continue(scope.variable(&ident.0)
+                    .map(LValue::Local)
+                    .ok_or(error!(ident.span() => "unknown variable `{ident}`")))
+            },
+            Expr::Index(ExprIndex { expr, index, closed_bracket, .. }) => {
+                let expr_span = expr.span();
+                let inner = match self.compile_expr(*expr, scope)? {
+                    LanternType::Array(inner) => *inner,
+                    r#type => {
+                        error!(in self.sink; expr_span => "cannot index a {type}");
+                        LanternType::Null
+                    },
+                };
+
+                let index_span = index.span();
+                let index = self.compile_expr(*index, scope)?;
+                if index != LanternType::Primitive(&native::INT_PRIMITIVE) {
+                    error!(in self.sink; index_span => "expected index to be an int");
+                }
+
+                inst! { with self.frame => closed_bracket.span();
+                    [PUSHU inner.size() as u64]
+                    [MULTI]
+                    [PUSHU HeapArray::element_offset() as u64]
+                    [ADDI]
+                };
+                ControlFlow::Continue(Ok(LValue::ArrayElement(inner)))
+            },
+            Expr::Field(ExprField { expr, ident }) => {
+                let expr_span = expr.span();
+                match self.compile_expr(*expr, scope)? {
+                    LanternType::Struct(type_id) => {
+                        let r#struct = scope.find_struct(type_id);
+                        let field_type = if let Some(field) = r#struct.fields.iter().find(|field| field.name == ident.0) {
+                            inst!(with self.frame => ident.span(); PUSHU (HeapObject::field_offset() + field.offset) as u64);
+                            &field.r#type
+                        } else {
+                            // TODO: type name
+                            error!(in self.sink; ident.span() => "unknown field {ident}");
+                            &LanternType::Null
+                        };
+                        ControlFlow::Continue(Ok(LValue::StructField(field_type)))
+                    },
+                    r#type => {
+                        error!(in self.sink; expr_span => "field {ident} does not exist on {type}");
+                        ControlFlow::Continue(Ok(LValue::StructField(&LanternType::Null)))
+                    },
+                }
+            },
+            _ => ControlFlow::Continue(Err(error!(lhs.span() => "bad left-hand-side of assignment"))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LValue<'a> {
+    Local(&'a LanternVariable),
+    ArrayElement(LanternType),
+    StructField(&'a LanternType),
+}
+
+impl<'a> LValue<'a> {
+    pub fn write_type(&'a self) -> &'a LanternType {
+        match self {
+            Self::Local(var) => &var.r#type,
+            Self::ArrayElement(ty) => ty,
+            Self::StructField(ty) => ty,
+        }
     }
 }
 
