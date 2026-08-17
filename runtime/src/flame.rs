@@ -208,11 +208,11 @@ impl<'a> FlameGen<'a> {
                 },
                 Stmt::ValDeclaration(ValDeclaration { val, ident, r#type, init: None, .. }) => {
                     // TODO: unitialized vars
-                    let local_index = self.frame.declare_local(ident.0.clone());
+                    let local_index = self.frame.declare_local();
                     let r#type = r#type
                         .ok_or(error!(val.span() => "explicit type required on an initialized variable"))
                         .and_then(|(_, r#type)| LanternType::from_type(&r#type, &scope));
-                    if scope.insert_variable(ident.0.clone(), self.sink.emit_or(r#type, LanternType::Null)).is_none() {
+                    if scope.insert_variable(ident.0.clone(), local_index, self.sink.emit_or(r#type, LanternType::Null)).is_none() {
                         error!(in self.sink; ident.span() => "variable `{}` already declared", ident.0);
                     }
                     inst! { with self.frame => val.span();
@@ -235,8 +235,8 @@ impl<'a> FlameGen<'a> {
                         },
                         None => init_type,
                     };
-                    let local_index = self.frame.declare_local(ident.0.clone());
-                    if scope.insert_variable(ident.0.clone(), var_type).is_none() {
+                    let local_index = self.frame.declare_local();
+                    if scope.insert_variable(ident.0.clone(), local_index, var_type).is_none() {
                         error!(in self.sink; ident.span() => "variable `{}` already declared", ident.0);
                     }
                     inst! { self.frame.instructions;
@@ -308,8 +308,8 @@ impl<'a> FlameGen<'a> {
                     let mut fun_frame = StackFrame::new_fun(path.to_string(), ret);
 
                     for (ident, r#type) in &fun.args {
-                        fun_frame.declare_local(ident.0.clone());
-                        if fun_scope.insert_variable(ident.0.clone(), r#type.clone()).is_none() {
+                        let local_index = fun_frame.declare_local();
+                        if fun_scope.insert_variable(ident.0.clone(), local_index, r#type.clone()).is_none() {
                             error!(in self.sink; ident.span() => "argument `{}` already declared", ident.0);
                         }
                     }
@@ -447,8 +447,7 @@ impl<'a> FlameGen<'a> {
                                 if var.r#type != rhs {
                                     error!(in self.sink; rhs_span => "expected {}, but got {rhs} instead", var.r#type);
                                 }
-                                let local_index = self.frame.find_local(&ident.0).expect("local var exists");
-                                inst!(with self.frame => punct.span(); STORE_LOCAL local_index);
+                                inst!(with self.frame => punct.span(); STORE_LOCAL var.index);
                             },
                             Expr::Index(ExprIndex { expr, index, closed_bracket, .. }) => {
                                 let expr_span = expr.span();
@@ -641,8 +640,7 @@ impl<'a> FlameGen<'a> {
             Expr::Identifier(ident) => {
                 let span = ident.span();
                 if let Some(var) = scope.variable(&ident.0) {
-                    let local_index = self.frame.find_local(&ident.0).expect("local var exists");
-                    inst!(with self.frame => span; LOAD_LOCAL local_index);
+                    inst!(with self.frame => span; LOAD_LOCAL var.index);
                     ControlFlow::Continue(var.r#type)
                 } else if let Some(fun) = scope.function(&ident.0) {
                     inst!(with self.frame => span; PUSHU fun.index as u64);
@@ -904,12 +902,13 @@ pub struct LanternStructField {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LanternVariable {
+    pub index: usize,
     pub r#type: LanternType,
 }
 
 impl LanternVariable {
-    pub fn new(r#type: LanternType) -> Self {
-        Self { r#type }
+    pub fn new(index: usize, r#type: LanternType) -> Self {
+        Self { index, r#type }
     }
 }
 

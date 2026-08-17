@@ -110,9 +110,9 @@ impl<'a> Scope<'a> {
         }
     }
 
-    pub fn insert_variable(&mut self, name: String, r#type: LanternType) -> Option<()> {
+    pub fn insert_variable(&mut self, name: String, index: usize, r#type: LanternType) -> Option<()> {
         if self.variables.contains_key(&name) { return None; };
-        self.variables.insert(name, LanternVariable::new(r#type));
+        self.variables.insert(name, LanternVariable::new(index, r#type));
         Some(())
     }
 
@@ -210,7 +210,7 @@ impl LoopScope {
 pub struct StackFrame {
     pub name: String,
     pub instructions: InstructionSet,
-    locals: Vec<String>,
+    pub locals: usize,
     pub line_table: Vec<LineMap>,
     pub ret_type: Option<LanternType>,
 }
@@ -220,7 +220,7 @@ impl StackFrame {
         Self {
             name: "<module>".to_string(),
             instructions: InstructionSet::new(),
-            locals: Vec::new(),
+            locals: 0,
             line_table: Vec::new(),
             ret_type: None,
         }
@@ -230,26 +230,19 @@ impl StackFrame {
         Self {
             name,
             instructions: InstructionSet::new(),
-            locals: Vec::new(),
+            locals: 0,
             line_table: Vec::new(),
             ret_type: Some(ret_type),
         }
     }
 
-    pub fn declare_local(&mut self, name: String) -> usize {
-        let index = self.locals.len();
-        self.locals.push(name);
-        index
-    }
-
-    pub fn find_local(&self, name: &str) -> Option<usize> {
-        self.locals.iter()
-            .enumerate()
-            .find_map(|(i, var)| (var == name).then_some(i))
+    pub fn declare_local(&mut self) -> usize {
+        self.locals += 1;
+        self.locals - 1
     }
 
     pub fn into_gen(self) -> GeneratedFunction {
-        let mut fun = GeneratedFunction::new(self.name, FunctionKind::Instructions(self.instructions, self.locals.len()));
+        let mut fun = GeneratedFunction::new(self.name, FunctionKind::Instructions(self.instructions, self.locals));
         fun.line_table = self.line_table;
         fun
     }
