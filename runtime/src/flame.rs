@@ -641,7 +641,7 @@ impl<'a> FlameGen<'a> {
                 let span = ident.span();
                 if let Some(var) = scope.variable(&ident.0) {
                     inst!(with self.frame => span; LOAD_LOCAL var.index);
-                    ControlFlow::Continue(var.r#type)
+                    ControlFlow::Continue(var.r#type.clone())
                 } else if let Some(fun) = scope.function(&ident.0) {
                     inst!(with self.frame => span; PUSHU fun.index as u64);
                     ControlFlow::Continue(fun.to_assoc_type())

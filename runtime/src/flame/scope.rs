@@ -100,11 +100,11 @@ impl<'a> Scope<'a> {
         Some(())
     }
 
-    pub fn variable(&self, name: &str) -> Option<LanternVariable> {
+    pub fn variable(&self, name: &str) -> Option<&LanternVariable> {
         match self.kind {
-            ScopeKind::Module | ScopeKind::Function(..) => self.variables.get(name).cloned(),
+            ScopeKind::Module | ScopeKind::Function(..) => self.variables.get(name),
             ScopeKind::Block(parent) => {
-                self.variables.get(name).cloned()
+                self.variables.get(name)
                     .or_else(|| parent.variable(name))
             }
         }
