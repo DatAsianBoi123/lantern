@@ -580,7 +580,6 @@ impl<'a> FlameGen<'a> {
                     [MULTI]
                     [PUSHU HeapArray::element_offset() as u64]
                     [ADDI]
-                    [ADDI]
                     [READ if inner.is_primitive() { inner.size() } else { 0 }]
                 }
                 ControlFlow::Continue(inner)
@@ -609,7 +608,6 @@ impl<'a> FlameGen<'a> {
                             let size = if field.r#type.is_primitive() { field.size } else { 0 };
                             inst! { with self.frame => ident.span();
                                 [PUSHU (HeapObject::field_offset() + field.offset) as u64]
-                                [ADDI]
                                 [READ size]
                             }
                             ControlFlow::Continue(field.r#type.clone())
@@ -630,7 +628,6 @@ impl<'a> FlameGen<'a> {
                             let size = if inner.is_primitive() { inner.size() } else { 0 };
                             inst! { with self.frame => ident.span();
                                 [PUSHU size_of::<ObjectHeader>() as u64]
-                                [ADDI]
                                 [READ size]
                             }
                             ControlFlow::Continue(LanternType::Primitive(&native::INT_PRIMITIVE))

@@ -282,7 +282,9 @@ impl VM {
                         return Ok(());
                     },
                     Instruction::Read(len) => {
-                        let ptr = unsafe { *self.stack.pop()?.read::<*const u8>() };
+                        let offset = unsafe { *self.stack.pop()?.read::<usize>() };
+                        let head = unsafe { *self.stack.pop()?.read::<*const u8>() };
+                        let ptr = unsafe { head.add(offset) };
 
                         if len == 0 {
                             // reference
@@ -298,11 +300,11 @@ impl VM {
                         }
                     },
                     Instruction::Write(len) => {
-                        let new_field = self.stack.pop()?.read::<u8>();
+                        let src = self.stack.pop()?.read::<u8>();
                         let offset = unsafe { *self.stack.pop()?.read::<usize>() };
                         let ptr = unsafe { *self.stack.pop()?.read::<*mut u8>() };
 
-                        unsafe { ptr.add(offset).copy_from(new_field, len); };
+                        unsafe { ptr.add(offset).copy_from(src, len); };
 
                         self.stack.push_ref(ptr)?;
                     },
