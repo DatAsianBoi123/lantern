@@ -355,6 +355,12 @@ define_puncts! {
         Percent = '%',
         Equals = '=',
 
+        PlusEq = "+=",
+        HyphenEq = "-=",
+        AsteriskEq = "*=",
+        SlashEq = "/=",
+        PercentEq = "%=",
+
         Less = '<',
         LessEq = "<=",
         Greater = '>',
@@ -468,18 +474,34 @@ impl<'a> Lexer<'a> {
             ':' => Ok(punct!(Colon)),
             '.' => Ok(punct!(Period)),
             '!' if self.peek_is('=') => {
+                let punct = punct!(NotEquals);
                 self.next_char();
-                Ok(punct!(NotEquals))
-            },
+                Ok(punct)
+            }
             '!' => Ok(punct!(Bang)),
 
+            '+' if self.peek_is('=') => {
+                let punct = punct!(PlusEq);
+                self.next_char();
+                Ok(punct)
+            }
             '+' => Ok(punct!(Plus)),
             '-' if self.peek_is('>') => {
                 let punct = punct!(ArrowRight);
                 self.next_char();
                 Ok(punct)
             }
+            '-' if self.peek_is('=') => {
+                let punct = punct!(HyphenEq);
+                self.next_char();
+                Ok(punct)
+            }
             '-' => Ok(punct!(Hyphen)),
+            '*' if self.peek_is('=') => {
+                let punct = punct!(AsteriskEq);
+                self.next_char();
+                Ok(punct)
+            }
             '*' => Ok(punct!(Asterisk)),
             '/' if self.peek_is('/') => {
                 // comment, ignore characters until newline
@@ -492,7 +514,17 @@ impl<'a> Lexer<'a> {
                 // don't output comment tokens
                 self.next_token()
             }
+            '/' if self.peek_is('=') => {
+                let punct = punct!(SlashEq);
+                self.next_char();
+                Ok(punct)
+            }
             '/' => Ok(punct!(Slash)),
+            '%' if self.peek_is('=') => {
+                let punct = punct!(PercentEq);
+                self.next_char();
+                Ok(punct)
+            }
             '%' => Ok(punct!(Percent)),
             '=' if self.peek_is('=') => {
                 let punct = punct!(EqualsEquals);
@@ -546,7 +578,7 @@ impl<'a> Lexer<'a> {
                         while let Some(char) = self.peek_char() && char != '\n' {
                             if char == '"' {
                                 self.next_char();
-                                return Ok(Token::Literal(Literal::String(word, span)))
+                                return Ok(Token::Literal(Literal::String(word, span)));
                             }
                             if char == '\\' {
                                 self.next_char();

@@ -292,7 +292,6 @@ impl<'a> FlameGen<'a> {
                     self.compile_expr(expr, &scope)?;
                     inst!(self.frame.instructions; POP);
                 },
-                Stmt::Item(Item::Using(_)) => todo!(),
                 Stmt::Item(Item::Fun(ItemFun { path, block, ret, .. })) => {
                     let ret = ret
                         .map(|(_, r#type)| self.sink.emit_or(LanternType::from_type(&r#type, &scope), LanternType::Null))
@@ -320,6 +319,7 @@ impl<'a> FlameGen<'a> {
 
                     self.globals.funs[fun.index] = generated;
                 },
+                Stmt::Item(Item::Using(_)) => {},
                 Stmt::Item(Item::NativeFun(_)) => {},
                 Stmt::Item(Item::Struct(_)) => {},
                 Stmt::Item(Item::Primitive(_)) => {},
@@ -454,6 +454,11 @@ impl<'a> FlameGen<'a> {
                         }
                         return ControlFlow::Continue(LanternType::Null);
                     },
+                    BinaryOperator::AddAssign(_)
+                    | BinaryOperator::SubAssign(_)
+                    | BinaryOperator::MultAssign(_)
+                    | BinaryOperator::DivAssign(_)
+                    | BinaryOperator::ModAssign(_) => return self.compile_op_assign(scope, *lhs, op, *rhs),
                     _ => {},
                 }
 
@@ -751,6 +756,36 @@ impl<'a> FlameGen<'a> {
             _ => ControlFlow::Continue(Err(error!(lhs.span() => "bad left-hand-side of assignment"))),
         }
     }
+
+    fn compile_op_assign(&mut self, scope: &Scope, lhs: Expr, op: BinaryOperator, rhs: Expr) -> ControlFlow<(), LanternType> {
+        match lhs {
+            Expr::Identifier(ident) => {
+                let Some(var) = scope.variable(&ident.0) else {
+                    error!(in self.sink; ident.span() => "unknown variable `{}`", ident.0);
+                    return ControlFlow::Continue(LanternType::Null);
+                };
+
+                inst!(with self.frame => op.span(); LOAD_LOCAL var.index);
+
+                let rhs = self.compile_expr(rhs, scope)?;
+                if var.r#type != rhs {
+                    error!(in self.sink; op.span() => "{op} cannot be applied to {} and {rhs}", var.r#type);
+                    return ControlFlow::Continue(LanternType::Null);
+                }
+                match (&var.r#type, rhs) {
+                    (LanternType::Primitive(lhs), LanternType::Primitive(_)) if lhs.ops.get_bin_op(&op).is_some() => {
+                        self.frame.instructions.push(lhs.ops.get_bin_op(&op).unwrap());
+                    },
+                    (lhs, rhs) => error!(in self.sink; op.span() => "{op} cannot be applied to {lhs} and {rhs}"),
+                }
+                inst!(self.frame.instructions; STORE_LOCAL var.index);
+            },
+            Expr::Index(_) => todo!("operator assignment is currently only supported on locals"),
+            Expr::Field(_) => todo!("operator assignment is currently only supported on locals"),
+            _ => error!(in self.sink; op.span() => "bad left-hand-side of assignment"),
+        }
+        ControlFlow::Continue(LanternType::Null)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -880,11 +915,11 @@ impl PrimitiveOps {
 
     pub fn get_bin_op(&self, op: &BinaryOperator) -> Option<Instruction> {
         match op {
-            BinaryOperator::Add(_) => self.add_inst.clone(),
-            BinaryOperator::Sub(_) => self.sub_inst.clone(),
-            BinaryOperator::Mult(_) => self.mult_inst.clone(),
-            BinaryOperator::Div(_) => self.div_inst.clone(),
-            BinaryOperator::Mod(_) => self.mod_inst.clone(),
+            BinaryOperator::Add(_) | BinaryOperator::AddAssign(_) => self.add_inst.clone(),
+            BinaryOperator::Sub(_) | BinaryOperator::SubAssign(_) => self.sub_inst.clone(),
+            BinaryOperator::Mult(_) | BinaryOperator::MultAssign(_) => self.mult_inst.clone(),
+            BinaryOperator::Div(_) | BinaryOperator::DivAssign(_) => self.div_inst.clone(),
+            BinaryOperator::Mod(_) | BinaryOperator::ModAssign(_) => self.mod_inst.clone(),
             BinaryOperator::Lt(_) => self.lt_inst.clone(),
             BinaryOperator::Le(_) => self.le_inst.clone(),
             BinaryOperator::Gt(_) => self.gt_inst.clone(),

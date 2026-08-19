@@ -1,7 +1,7 @@
 use std::fmt::{Display, Formatter};
 
 use diagnostic::{Span, error};
-use lex::{And, Asterisk, Bang, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Equals, EqualsEquals, Greater, GreaterEq, Hyphen, Less, LessEq, Literal, NotEquals, OpenBrace, OpenBracket, OpenParen, Or, Percent, Period, Plus, Punct, Slash, Token, TokenKind};
+use lex::{And, Asterisk, AsteriskEq, Bang, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Equals, EqualsEquals, Greater, GreaterEq, Hyphen, HyphenEq, Less, LessEq, Literal, NotEquals, OpenBrace, OpenBracket, OpenParen, Or, Percent, PercentEq, Period, Plus, PlusEq, Punct, Slash, SlashEq, Token, TokenKind};
 use macros::Parse;
 
 use crate::{Ident, ParseTokens, Result, Stmt, stream::{TokenStream, parse_punctuated, parse_repetition}};
@@ -243,6 +243,12 @@ pub enum BinaryOperator {
     Div(Slash),
     Mod(Percent),
 
+    AddAssign(PlusEq),
+    SubAssign(HyphenEq),
+    MultAssign(AsteriskEq),
+    DivAssign(SlashEq),
+    ModAssign(PercentEq),
+
     Neq(NotEquals),
     Eq(EqualsEquals),
     Le(LessEq),
@@ -265,6 +271,12 @@ impl BinaryOperator {
             Self::Div(punct) => punct.span(),
             Self::Mod(punct) => punct.span(),
 
+            Self::AddAssign(punct) => punct.span(),
+            Self::SubAssign(punct) => punct.span(),
+            Self::MultAssign(punct) => punct.span(),
+            Self::DivAssign(punct) => punct.span(),
+            Self::ModAssign(punct) => punct.span(),
+
             Self::Lt(punct) => punct.span(),
             Self::Le(punct) => punct.span(),
             Self::Gt(punct) => punct.span(),
@@ -284,7 +296,12 @@ impl BinaryOperator {
             Self::Lt(_) | Self::Le(_) | Self::Gt(_) | Self::Ge(_) | Self::Eq(_) | Self::Neq(_) => (7, 8),
             Self::And(_) => (5, 6),
             Self::Or(_) => (3, 4),
-            Self::Assign(_) => (2, 1),
+            Self::Assign(_)
+            | Self::AddAssign(_)
+            | Self::SubAssign(_)
+            | Self::MultAssign(_)
+            | Self::DivAssign(_)
+            | Self::ModAssign(_) => (2, 1),
         }
     }
 
@@ -300,6 +317,11 @@ impl BinaryOperator {
             Token::Punct(Punct::Asterisk(_)) |
             Token::Punct(Punct::Slash(_)) |
             Token::Punct(Punct::Percent(_)) |
+            Token::Punct(Punct::PlusEq(_)) |
+            Token::Punct(Punct::HyphenEq(_)) |
+            Token::Punct(Punct::AsteriskEq(_)) |
+            Token::Punct(Punct::SlashEq(_)) |
+            Token::Punct(Punct::PercentEq(_)) |
             Token::Punct(Punct::EqualsEquals(_)) |
             Token::Punct(Punct::NotEquals(_)) |
             Token::Punct(Punct::LessEq(_)) |
@@ -322,6 +344,12 @@ impl Display for BinaryOperator {
             Self::Mult(punct) => punct.fmt(f),
             Self::Div(punct) => punct.fmt(f),
             Self::Mod(punct) => punct.fmt(f),
+
+            Self::AddAssign(punct) => punct.fmt(f),
+            Self::SubAssign(punct) => punct.fmt(f),
+            Self::MultAssign(punct) => punct.fmt(f),
+            Self::DivAssign(punct) => punct.fmt(f),
+            Self::ModAssign(punct) => punct.fmt(f),
 
             Self::Lt(punct) => punct.fmt(f),
             Self::Le(punct) => punct.fmt(f),
