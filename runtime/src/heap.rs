@@ -140,11 +140,14 @@ impl Heap {
             panic!("attempted to allocate a ZST");
         }
         unsafe {
-            if self.alloc_ptr.add(size) > self.from_space.add(self.size) {
+            // TODO: no hardcoded alignment
+            let padding = self.alloc_ptr.align_offset(8);
+            let total_size = padding + size;
+            if self.alloc_ptr.add(total_size) > self.from_space.add(self.size) {
                 None
             } else {
-                let ptr = self.alloc_ptr;
-                self.alloc_ptr = self.alloc_ptr.add(size);
+                let ptr = self.alloc_ptr.add(padding);
+                self.alloc_ptr = self.alloc_ptr.add(total_size);
 
                 Some(ptr)
             }
