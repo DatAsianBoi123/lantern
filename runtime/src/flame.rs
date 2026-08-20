@@ -883,13 +883,24 @@ impl LanternStruct {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct LanternPrimitive {
     pub name: &'static str,
     pub id: usize,
     pub size: usize,
     pub align: usize,
     pub ops: PrimitiveOps,
+}
+
+impl std::fmt::Debug for LanternPrimitive {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LanternPrimitive")
+            .field("name", &self.name)
+            .field("id", &self.id)
+            .field("size", &self.size)
+            .field("align", &self.align)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Default, Debug, Clone, PartialEq)]
