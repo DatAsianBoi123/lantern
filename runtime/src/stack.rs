@@ -20,14 +20,6 @@ impl Display for LanternStack {
     }
 }
 
-impl Debug for LanternStack {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_list()
-            .entries(self.as_ref())
-            .finish()
-    }
-}
-
 impl AsRef<[Slot]> for LanternStack {
     fn as_ref(&self) -> &[Slot] {
         // SAFETY: stack contains all valid Slots
@@ -117,12 +109,20 @@ impl LanternStack {
         unsafe { Ok(self.inner.get_unchecked(self.top - 1).assume_init()) }
     }
 
-    pub fn push_ref(&mut self, ptr: *const u8) -> Result<(), StackOverflowError> {
+    pub fn push_ref(&mut self, ptr: *mut u8) -> Result<(), StackOverflowError> {
         self.push_slot(Slot::new_ref(ptr))
     }
 
-    pub fn push_primitive<T>(&mut self, primitive: T) -> Result<(), StackOverflowError> {
-        self.push_slot(Slot::new_primitive(primitive))
+    pub fn push_usize(&mut self, usize: usize) -> Result<(), StackOverflowError> {
+        self.push_slot(Slot::new_usize(usize))
+    }
+
+    pub fn push_int(&mut self, int: i64) -> Result<(), StackOverflowError> {
+        self.push_slot(Slot::new_int(int))
+    }
+
+    pub fn push_float(&mut self, float: f64) -> Result<(), StackOverflowError> {
+        self.push_slot(Slot::new_float(float))
     }
 
     pub fn push_slot(&mut self, slot: Slot) -> Result<(), StackOverflowError> {

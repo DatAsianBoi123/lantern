@@ -3,7 +3,7 @@ use std::{fmt::{Display, Formatter}, ops::{Deref, DerefMut}};
 #[macro_export]
 macro_rules! inst {
     (PUSHU $b: expr) => {
-        $crate::flame::instruction::Instruction::Pushu64($b)
+        $crate::flame::instruction::Instruction::Pushusize($b)
     };
     (PUSHI $i: expr) => {
         $crate::flame::instruction::Instruction::Pushi64($i)
@@ -197,7 +197,7 @@ impl InstructionSet {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
-    Pushu64(u64),
+    Pushusize(usize),
     Pushi64(i64),
     Pushf64(f64),
     Pop,
@@ -264,7 +264,7 @@ pub enum Instruction {
 impl Display for Instruction {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Pushu64(u64) => write!(f, "{:20}{u64}", "PUSHU"),
+            Self::Pushusize(usize) => write!(f, "{:20}{usize}", "PUSHU"),
             Self::Pushi64(i64) => write!(f, "{:20}{i64}", "PUSHI"),
             Self::Pushf64(f64) => write!(f, "{:20}{f64}", "PUSHF"),
             Self::Pop => write!(f, "POP"),

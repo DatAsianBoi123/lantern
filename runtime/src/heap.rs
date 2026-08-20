@@ -49,7 +49,7 @@ impl Heap {
         let before = Instant::now();
         for slot in stack {
             if slot.kind() == SlotType::Ref {
-                let Some(moved) = self.move_ref(slot.0 as *mut u8) else { continue; };
+                let Some(moved) = self.move_ref(unsafe { slot.read_ptr() }) else { continue; };
                 slot.write_ref(moved);
             }
         }
@@ -222,6 +222,10 @@ impl HeapObject {
         self.0
     }
 
+    pub fn as_mut_ptr(&mut self) -> *mut u8 {
+        self.0
+    }
+
     pub fn header(&self) -> &ObjectHeader {
         unsafe { &*(self.0 as *const ObjectHeader) }
     }
@@ -310,6 +314,10 @@ impl HeapArray {
     }
 
     pub fn as_ptr(&self) -> *const u8 {
+        self.0
+    }
+
+    pub fn as_mut_ptr(&mut self) -> *mut u8 {
         self.0
     }
 

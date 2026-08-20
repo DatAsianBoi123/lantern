@@ -35,39 +35,39 @@ pub fn dummy_native(vm: &mut VM) -> Result<Slot, RuntimeError> {
 
 native_funs![for vm,
     "write" = (bytes) => {
-        let byte_ptr = unsafe { HeapArray::from_raw(*bytes.read::<*mut u8>()) };
+        let byte_ptr = unsafe { HeapArray::from_raw(bytes.read_ptr()) };
         let mut stdout = std::io::stdout();
         unsafe {
             let bytes = std::slice::from_raw_parts(byte_ptr.element_ptr(), byte_ptr.len());
             stdout.write_all(bytes).unwrap();
         }
-        Ok(Slot::new_primitive(0))
+        Ok(Slot::new_usize(0))
     },
     "flush" = () => {
         std::io::stdout().flush();
-        Ok(Slot::new_primitive(0))
+        Ok(Slot::new_usize(0))
     },
     "gc" = () => {
         vm.heap.gc(&mut vm.stack);
-        Ok(Slot::new_primitive(0))
+        Ok(Slot::new_usize(0))
     },
     "float_to_str" = (float) => {
-        let float = unsafe { *float.read::<f64>() };
-        Ok(Slot::new_ref(vm.alloc_string(float.to_string().as_bytes())?.as_ptr()))
+        let float = unsafe { float.read_float() };
+        Ok(Slot::new_ref(vm.alloc_string(float.to_string().as_bytes())?.as_mut_ptr()))
     },
     "int_to_str" = (int) => {
-        let int = unsafe { *int.read::<i64>() };
-        Ok(Slot::new_ref(vm.alloc_string(int.to_string().as_bytes())?.as_ptr()))
+        let int = unsafe { int.read_int() };
+        Ok(Slot::new_ref(vm.alloc_string(int.to_string().as_bytes())?.as_mut_ptr()))
     },
     "input_float" = () => {
         let mut input = String::new();
         std::io::stdin().read_line(&mut input).unwrap();
-        Ok(Slot::new_primitive(input.trim().parse::<f64>().map_err(|_| vm.throw("not a float"))?))
+        Ok(Slot::new_float(input.trim().parse::<f64>().map_err(|_| vm.throw("not a float"))?))
     },
     "input_int" = () => {
         let mut input = String::new();
         std::io::stdin().read_line(&mut input).unwrap();
-        Ok(Slot::new_primitive(input.trim().parse::<i64>().map_err(|_| vm.throw("not an integer"))?))
+        Ok(Slot::new_int(input.trim().parse::<i64>().map_err(|_| vm.throw("not an integer"))?))
     },
 ];
 

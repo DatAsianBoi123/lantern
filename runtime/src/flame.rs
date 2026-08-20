@@ -514,7 +514,7 @@ impl<'a> FlameGen<'a> {
                         Some(index) => {
                             let expr_field = fields.swap_remove(index);
                             let expr_span = expr_field.expr.span();
-                            inst!(with self.frame => expr_field.ident.span(); PUSHU (HeapObject::field_offset() + field.offset) as u64);
+                            inst!(with self.frame => expr_field.ident.span(); PUSHU HeapObject::field_offset() + field.offset);
                             let field_ty = self.compile_expr(expr_field.expr, scope)?;
                             if field_ty != field.r#type {
                                 error!(in self.sink; expr_span => "expected {}, but got {field_ty} instead", field.r#type);
@@ -581,9 +581,9 @@ impl<'a> FlameGen<'a> {
 
                 // TODO: bounds checking
                 inst! { with self.frame => closed_bracket.span();
-                    [PUSHU inner.size() as u64]
+                    [PUSHU inner.size()]
                     [MULTI]
-                    [PUSHU HeapArray::element_offset() as u64]
+                    [PUSHU HeapArray::element_offset()]
                     [ADDI]
                     [READ if inner.is_primitive() { inner.size() } else { 0 }]
                 }
@@ -595,7 +595,7 @@ impl<'a> FlameGen<'a> {
                     inst!(with self.frame => span; LOAD_LOCAL var.index);
                     ControlFlow::Continue(var.r#type.clone())
                 } else if let Some(fun) = scope.function(&ident.0) {
-                    inst!(with self.frame => span; PUSHU fun.index as u64);
+                    inst!(with self.frame => span; PUSHU fun.index);
                     ControlFlow::Continue(fun.to_assoc_type())
                 } else if let Some(item) = scope.item(&ident.0) {
                     ControlFlow::Continue(LanternType::ItemStatic(item.identifier()))
@@ -612,13 +612,13 @@ impl<'a> FlameGen<'a> {
                         if let Some(field) = r#struct.fields.iter().find(|field| field.name == ident.0) {
                             let size = if field.r#type.is_primitive() { field.size } else { 0 };
                             inst! { with self.frame => ident.span();
-                                [PUSHU (HeapObject::field_offset() + field.offset) as u64]
+                                [PUSHU (HeapObject::field_offset() + field.offset)]
                                 [READ size]
                             }
                             ControlFlow::Continue(field.r#type.clone())
                         } else if let Some(associated) = scope.associated(ItemIdentifier::Struct(type_id), &ident.0) {
                             if associated.args.first().is_some_and(|(_, receiver)| *receiver == ty) {
-                                inst!(with self.frame => ident.span(); PUSHU associated.index as u64);
+                                inst!(with self.frame => ident.span(); PUSHU associated.index);
                             } else {
                                 error!(in self.sink; ident.1 => "method must have a receiver");
                             }
@@ -632,7 +632,7 @@ impl<'a> FlameGen<'a> {
                         if ident.0 == "len" {
                             let size = if inner.is_primitive() { inner.size() } else { 0 };
                             inst! { with self.frame => ident.span();
-                                [PUSHU size_of::<ObjectHeader>() as u64]
+                                [PUSHU size_of::<ObjectHeader>()]
                                 [READ size]
                             }
                             ControlFlow::Continue(LanternType::Primitive(&native::INT_PRIMITIVE))
@@ -644,7 +644,7 @@ impl<'a> FlameGen<'a> {
                     LanternType::Primitive(primitive) => {
                         if let Some(associated) = scope.associated(ItemIdentifier::Primitive(primitive.id), &ident.0) {
                             if associated.args.first().is_some_and(|(_, receiver)| *receiver == ty) {
-                                inst!(with self.frame => ident.span(); PUSHU associated.index as u64);
+                                inst!(with self.frame => ident.span(); PUSHU associated.index);
                             } else {
                                 error!(in self.sink; ident.1 => "method must have a receiver");
                             }
@@ -660,7 +660,7 @@ impl<'a> FlameGen<'a> {
                             error!(in self.sink; ident.span() => "static item {} does not exist", ident.0);
                             return ControlFlow::Continue(LanternType::Null)
                         };
-                        inst!(with self.frame => ident.span(); PUSHU fun.index as u64);
+                        inst!(with self.frame => ident.span(); PUSHU fun.index);
                         ControlFlow::Continue(fun.to_assoc_type())
                     },
                     _ => {
@@ -725,9 +725,9 @@ impl<'a> FlameGen<'a> {
                 }
 
                 inst! { with self.frame => closed_bracket.span();
-                    [PUSHU inner.size() as u64]
+                    [PUSHU inner.size()]
                     [MULTI]
-                    [PUSHU HeapArray::element_offset() as u64]
+                    [PUSHU HeapArray::element_offset()]
                     [ADDI]
                 };
                 ControlFlow::Continue(Ok(LValue::ArrayElement(inner)))
@@ -738,7 +738,7 @@ impl<'a> FlameGen<'a> {
                     LanternType::Struct(type_id) => {
                         let r#struct = scope.find_struct(type_id);
                         let field_type = if let Some(field) = r#struct.fields.iter().find(|field| field.name == ident.0) {
-                            inst!(with self.frame => ident.span(); PUSHU (HeapObject::field_offset() + field.offset) as u64);
+                            inst!(with self.frame => ident.span(); PUSHU (HeapObject::field_offset() + field.offset));
                             &field.r#type
                         } else {
                             // TODO: type name

@@ -8,11 +8,29 @@ use parse::LanternFile;
 use crate::{error::UserError, flame::{FunctionKind, scope::Globals}, heap::{Heap, HeapArray, TypeInfo}, stack::LanternStack};
 
 macro_rules! args {
-    ( ( $($ty: ty),+ $(,)? ) in $stack: expr, $pat: pat => $ret: expr) => {{
-        let args = ( $( unsafe { *($stack.pop()?.read::<$ty>()) } ),+ );
+    (@pop usize, $stack: expr) => {
+        unsafe { $stack.pop()?.read_usize() }
+    };
+    (@pop i64, $stack: expr) => {
+        unsafe { $stack.pop()?.read_int() }
+    };
+    (@pop f64, $stack: expr) => {
+        unsafe { $stack.pop()?.read_float() }
+    };
+    (@push usize, $stack: expr, $ret: expr) => {
+        $stack.push_usize($ret)?
+    };
+    (@push i64, $stack: expr, $ret: expr) => {
+        $stack.push_int($ret)?
+    };
+    (@push f64, $stack: expr, $ret: expr) => {
+        $stack.push_float($ret)?
+    };
+    ( ( $($ty: tt),+ $(,)? ) -> $ret_ty: tt in $stack: expr, $pat: pat => $ret: expr) => {{
+        let args = ( $( args!(@pop $ty, $stack) ),+ );
 
         let $pat = args;
-        $stack.push_primitive($ret)?;
+        args!(@push $ret_ty, $stack, $ret)
     }};
 }
 
@@ -30,45 +48,71 @@ pub enum SlotType {
     Ref = 1,
 }
 
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Slot(u64, SlotType);
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub union SlotData {
+    usize: usize,
+    int: i64,
+    float: f64,
+    ptr: *mut u8,
+}
+
+#[derive(Clone, Copy)]
+pub struct Slot(SlotData, SlotType);
 
 impl Display for Slot {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:0<16x}", self.0)?;
+        write!(f, "{:0>16x}", unsafe { self.0.int })?;
         Ok(())
     }
 }
 
 impl Slot {
-    pub fn new_primitive<T>(primitive: T) -> Self {
-        let mut slot = Self(0, SlotType::Primitive);
-        slot.write_primitive(primitive);
-        slot
+    pub fn new_usize(usize: usize) -> Self {
+        Self(SlotData { usize }, SlotType::Primitive)
     }
 
-    pub fn new_ref(ptr: *const u8) -> Self {
-        Self(ptr as u64, SlotType::Ref)
+    pub fn new_int(int: i64) -> Self {
+        Self(SlotData { int }, SlotType::Primitive)
     }
 
-    pub fn write_ref(&mut self, ptr: *const u8) {
-        self.0 = ptr as u64;
+    pub fn new_float(float: f64) -> Self {
+        Self(SlotData { float }, SlotType::Primitive)
+    }
+
+    pub fn new_ref(ptr: *mut u8) -> Self {
+        Self(SlotData { ptr }, SlotType::Ref)
+    }
+
+    pub fn write_ref(&mut self, ptr: *mut u8) {
+        self.0 = SlotData { ptr };
         self.1 = SlotType::Ref;
     }
 
-    pub fn write_primitive<T>(&mut self, primitive: T) {
-        if size_of::<T>() > 8 {
-            panic!("attempted to write more than 8 bytes into a Slot");
-        }
-
-        self.1 = SlotType::Primitive;
+    /// # Safety
+    /// The Slot must actually contain a ptr to T
+    pub unsafe fn read_ptr<T>(&self) -> *mut T {
         unsafe {
-            (&raw mut self.0 as *mut T).write(primitive);
+            self.0.ptr.cast()
         }
     }
 
-    pub fn read<T>(&self) -> *const T {
-        &raw const self.0 as *const T
+    /// # Safety
+    /// The Slot must actually contain a usize
+    pub unsafe fn read_usize(&self) -> usize {
+        unsafe { self.0.usize }
+    }
+
+    /// # Safety
+    /// The Slot must actually contain an i64
+    pub unsafe fn read_int(&self) -> i64 {
+        unsafe { self.0.int }
+    }
+
+    /// # Safety
+    /// The Slot must actually contain an f64
+    pub unsafe fn read_float(&self) -> f64 {
+        unsafe { self.0.float }
     }
 
     pub fn kind(&self) -> SlotType {
@@ -76,7 +120,6 @@ impl Slot {
     }
 }
 
-#[derive(Debug)]
 pub struct VM {
     stack: LanternStack,
     frames: Vec<Frame>,
@@ -178,37 +221,41 @@ impl VM {
         match fun.kind {
             FunctionKind::Instructions(ref instructions, _) => {
                 match instructions[frame.inst_ptr].clone() {
-                    Instruction::Pushu64(u64) => self.stack.push_primitive(u64)?,
-                    Instruction::Pushi64(i64) => self.stack.push_primitive(i64)?,
-                    Instruction::Pushf64(f64) => self.stack.push_primitive(f64)?,
+                    Instruction::Pushusize(u64) => self.stack.push_usize(u64)?,
+                    Instruction::Pushi64(i64) => self.stack.push_int(i64)?,
+                    Instruction::Pushf64(f64) => self.stack.push_float(f64)?,
                     Instruction::Pop => { self.stack.pop()?; },
-                    Instruction::Addf => args!((f64, f64) in self.stack, (rhs, lhs) => lhs + rhs),
-                    Instruction::Addi => args!((i64, i64) in self.stack, (rhs, lhs) => lhs + rhs),
-                    Instruction::Subf => args!((f64, f64) in self.stack, (rhs, lhs) => lhs - rhs),
-                    Instruction::Subi => args!((i64, i64) in self.stack, (rhs, lhs) => lhs - rhs),
-                    Instruction::Multf => args!((f64, f64) in self.stack, (rhs, lhs) => lhs * rhs),
-                    Instruction::Multi => args!((i64, i64) in self.stack, (rhs, lhs) => lhs * rhs),
-                    Instruction::Divf => args!((f64, f64) in self.stack, (rhs, lhs) => lhs / rhs),
-                    Instruction::Divi => args!((i64, i64) in self.stack, (rhs, lhs) => lhs / rhs),
-                    Instruction::Modf => args!((f64, f64) in self.stack, (rhs, lhs) => lhs % rhs),
-                    Instruction::Modi => args!((i64, i64) in self.stack, (rhs, lhs) => lhs % rhs),
-                    Instruction::Negf => args!((f64) in self.stack, rhs => -rhs),
-                    Instruction::Negi => args!((i64) in self.stack, rhs => -rhs),
-                    Instruction::FCompareLt => args!((f64, f64) in self.stack, (rhs, lhs) => bool_to_slot(lhs < rhs)),
-                    Instruction::ICompareLt => args!((i64, i64) in self.stack, (rhs, lhs) => bool_to_slot(lhs < rhs)),
-                    Instruction::FCompareLe => args!((f64, f64) in self.stack, (rhs, lhs) => bool_to_slot(lhs <= rhs)),
-                    Instruction::ICompareLe => args!((i64, i64) in self.stack, (rhs, lhs) => bool_to_slot(lhs <= rhs)),
-                    Instruction::FCompareGt => args!((f64, f64) in self.stack, (rhs, lhs) => bool_to_slot(lhs > rhs)),
-                    Instruction::ICompareGt => args!((i64, i64) in self.stack, (rhs, lhs) => bool_to_slot(lhs > rhs)),
-                    Instruction::FCompareGe => args!((f64, f64) in self.stack, (rhs, lhs) => bool_to_slot(lhs >= rhs)),
-                    Instruction::ICompareGe => args!((i64, i64) in self.stack, (rhs, lhs) => bool_to_slot(lhs >= rhs)),
-                    Instruction::FCompareEq => args!((f64, f64) in self.stack, (rhs, lhs) => bool_to_slot(lhs == rhs)),
-                    Instruction::ICompareEq => args!((i64, i64) in self.stack, (rhs, lhs) => bool_to_slot(lhs == rhs)),
-                    Instruction::Not => args!((bool) in self.stack, bool => bool_to_slot(!bool)),
+                    Instruction::Addf => args!((f64, f64) -> f64 in self.stack, (rhs, lhs) => lhs + rhs),
+                    Instruction::Addi => args!((i64, i64) -> i64 in self.stack, (rhs, lhs) => lhs + rhs),
+                    Instruction::Subf => args!((f64, f64) -> f64 in self.stack, (rhs, lhs) => lhs - rhs),
+                    Instruction::Subi => args!((i64, i64) -> i64 in self.stack, (rhs, lhs) => lhs - rhs),
+                    Instruction::Multf => args!((f64, f64) -> f64 in self.stack, (rhs, lhs) => lhs * rhs),
+                    Instruction::Multi => args!((i64, i64) -> i64 in self.stack, (rhs, lhs) => lhs * rhs),
+                    Instruction::Divf => args!((f64, f64) -> f64 in self.stack, (rhs, lhs) => lhs / rhs),
+                    Instruction::Divi => args!((i64, i64) -> i64 in self.stack, (rhs, lhs) => lhs / rhs),
+                    Instruction::Modf => args!((f64, f64) -> f64 in self.stack, (rhs, lhs) => lhs % rhs),
+                    Instruction::Modi => args!((i64, i64) -> i64 in self.stack, (rhs, lhs) => lhs % rhs),
+                    Instruction::Negf => args!((f64) -> f64 in self.stack, rhs => -rhs),
+                    Instruction::Negi => args!((i64) -> i64 in self.stack, rhs => -rhs),
+                    Instruction::FCompareLt => args!((f64, f64) -> usize in self.stack, (rhs, lhs) => bool_to_slot(lhs < rhs)),
+                    Instruction::ICompareLt => args!((i64, i64) -> usize in self.stack, (rhs, lhs) => bool_to_slot(lhs < rhs)),
+                    Instruction::FCompareLe => args!((f64, f64) -> usize in self.stack, (rhs, lhs) => bool_to_slot(lhs <= rhs)),
+                    Instruction::ICompareLe => args!((i64, i64) -> usize in self.stack, (rhs, lhs) => bool_to_slot(lhs <= rhs)),
+                    Instruction::FCompareGt => args!((f64, f64) -> usize in self.stack, (rhs, lhs) => bool_to_slot(lhs > rhs)),
+                    Instruction::ICompareGt => args!((i64, i64) -> usize in self.stack, (rhs, lhs) => bool_to_slot(lhs > rhs)),
+                    Instruction::FCompareGe => args!((f64, f64) -> usize in self.stack, (rhs, lhs) => bool_to_slot(lhs >= rhs)),
+                    Instruction::ICompareGe => args!((i64, i64) -> usize in self.stack, (rhs, lhs) => bool_to_slot(lhs >= rhs)),
+                    Instruction::FCompareEq => args!((f64, f64) -> usize in self.stack, (rhs, lhs) => bool_to_slot(lhs == rhs)),
+                    Instruction::ICompareEq => args!((i64, i64) -> usize in self.stack, (rhs, lhs) => bool_to_slot(lhs == rhs)),
+                    Instruction::Not => args!((usize) -> usize in self.stack, bool => match bool {
+                        0 => bool_to_slot(false),
+                        1 => bool_to_slot(true),
+                        _ => unreachable!(),
+                    }),
                     Instruction::AllocObj(index) => {
                         // TODO: gc
-                        let obj = self.heap.alloc_obj(&self.types[index]).unwrap();
-                        self.stack.push_ref(obj.as_ptr())?;
+                        let mut obj = self.heap.alloc_obj(&self.types[index]).unwrap();
+                        self.stack.push_ref(obj.as_mut_ptr())?;
                     },
                     Instruction::AllocString(str) => {
                         // TODO: figure out when to GC
@@ -216,7 +263,7 @@ impl VM {
                         for (i, byte) in str.bytes().enumerate() {
                             unsafe { array.set(i, &byte as *const u8); }
                         }
-                        self.stack.push_ref(array.as_ptr())?;
+                        self.stack.push_ref(array.as_mut_ptr())?;
                     },
                     Instruction::AllocArray(index, len) => {
                         // TODO: figure out when to GC
@@ -225,7 +272,7 @@ impl VM {
                             let element = &self.stack.pop()?.0 as *const _ as *const u8;
                             unsafe { array.set(len - i, element); }
                         }
-                        self.stack.push_ref(array.as_ptr())?;
+                        self.stack.push_ref(array.as_mut_ptr())?;
                     },
                     Instruction::LoadLocal(index) => self.stack.push_slot(self.stack[frame.bottom + index])?,
                     Instruction::StoreLocal(index) => {
@@ -241,7 +288,7 @@ impl VM {
                         return Ok(());
                     },
                     Instruction::Throw => {
-                        let ptr = unsafe { HeapArray::from_raw(*self.stack.pop()?.read::<*mut u8>()) };
+                        let ptr = unsafe { HeapArray::from_raw(*self.stack.pop()?.read_ptr()) };
                         let message = unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr.element_ptr(), ptr.len())) };
                         return Err(Box::new(UserError(message.to_string())))
                     },
@@ -252,7 +299,7 @@ impl VM {
                         // FUN_IDX
                         frame.inst_ptr += 1;
                         let bottom = self.stack.top() - num_args;
-                        let index = unsafe { *self.stack[bottom - 1].read::<usize>() };
+                        let index = unsafe { self.stack[bottom - 1].read_usize() };
                         // TODO: find a better way to do this
                         if let FunctionKind::Instructions(_, locals) = self.funs[index].kind {
                             self.stack.reserve(locals - num_args)?;
@@ -269,7 +316,7 @@ impl VM {
                         frame.inst_ptr += 1;
                         let bottom = self.stack.top() - num_args - 1;
                         let index_slot = &mut self.stack[bottom];
-                        let index = unsafe { *index_slot.read::<usize>() };
+                        let index = unsafe { index_slot.read_usize() };
                         // unsafe is needed here since Rust won't allow two mutable references to
                         // self.stack
                         unsafe { std::ptr::write(index_slot, self.stack[bottom - 1]); };
@@ -282,27 +329,30 @@ impl VM {
                         return Ok(());
                     },
                     Instruction::Read(len) => {
-                        let offset = unsafe { *self.stack.pop()?.read::<usize>() };
-                        let head = unsafe { *self.stack.pop()?.read::<*const u8>() };
+                        let offset = unsafe { self.stack.pop()?.read_usize() };
+                        let head = unsafe { self.stack.pop()?.read_ptr::<u8>() };
                         let ptr = unsafe { head.add(offset) };
 
                         if len == 0 {
                             // reference
-                            self.stack.push_ref(unsafe { *(ptr as *const *const u8) })?;
+                            self.stack.push_ref(unsafe { *ptr.cast::<*mut u8>() })?;
                         } else {
                             // primitive
                             let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
                             let mut field_bytes = [0; 8];
                             let (data, _) = field_bytes.split_at_mut(slice.len());
                             data.copy_from_slice(slice);
-                            let element = u64::from_ne_bytes(field_bytes);
-                            self.stack.push_primitive(element)?;
+                            // since exact type cannot be determined statically, use the largest
+                            // type instead
+                            let element = i64::from_ne_bytes(field_bytes);
+                            self.stack.push_int(element)?;
                         }
                     },
                     Instruction::Write(len) => {
-                        let src = self.stack.pop()?.read::<u8>();
-                        let offset = unsafe { *self.stack.pop()?.read::<usize>() };
-                        let ptr = unsafe { *self.stack.pop()?.read::<*mut u8>() };
+                        let src = self.stack.pop()?;
+                        let src = &raw const src.0 as *const _;
+                        let offset = unsafe { self.stack.pop()?.read_usize() };
+                        let ptr = unsafe { self.stack.pop()?.read_ptr::<u8>() };
 
                         unsafe { ptr.add(offset).copy_from(src, len); };
 
@@ -313,25 +363,25 @@ impl VM {
                         return Ok(());
                     },
                     Instruction::GotoIfTrue(ptr) => {
-                        if bool_from_slot(self.stack.peek()?) {
+                        if unsafe { bool_from_slot(self.stack.peek()?) } {
                             frame.inst_ptr = ptr;
                             return Ok(());
                         }
                     },
                     Instruction::GotoIfFalse(ptr) => {
-                        if !bool_from_slot(self.stack.peek()?) {
+                        if unsafe { !bool_from_slot(self.stack.peek()?) } {
                             frame.inst_ptr = ptr;
                             return Ok(());
                         }
                     },
                     Instruction::PopGotoIfTrue(ptr) => {
-                        if bool_from_slot(self.stack.pop()?) {
+                        if unsafe { bool_from_slot(self.stack.pop()?) } {
                             frame.inst_ptr = ptr;
                             return Ok(());
                         }
                     },
                     Instruction::PopGotoIfFalse(ptr) => {
-                        if !bool_from_slot(self.stack.pop()?) {
+                        if unsafe { !bool_from_slot(self.stack.pop()?) } {
                             frame.inst_ptr = ptr;
                             return Ok(());
                         }
@@ -371,7 +421,7 @@ impl Frame {
     }
 }
 
-const fn bool_to_slot(bool: bool) -> u64 {
+const fn bool_to_slot(bool: bool) -> usize {
     if bool {
         1
     } else {
@@ -379,11 +429,13 @@ const fn bool_to_slot(bool: bool) -> u64 {
     }
 }
 
-fn bool_from_slot(slot: Slot) -> bool {
-    match slot.0 {
-        1 => true,
-        0 => false,
-        _ => panic!("invalid bool {slot:?}"),
+unsafe fn bool_from_slot(slot: Slot) -> bool {
+    unsafe {
+        match slot.read_usize() {
+            1 => true,
+            0 => false,
+            _ => unreachable!(),
+        }
     }
 }
 
