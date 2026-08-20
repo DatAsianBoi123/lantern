@@ -1,4 +1,4 @@
-use std::ops::ControlFlow;
+use std::{fmt::Formatter, ops::ControlFlow};
 
 use diagnostic::{Diagnostic, DiagnosticSink, error};
 use instruction::InstructionSet;
@@ -859,9 +859,11 @@ impl LanternStruct {
         let mut struct_fields = Vec::with_capacity(fields.len());
         let mut size = 0;
         for (name, r#type) in fields {
-            let padding = size % r#type.alignment();
-            size += padding + r#type.size();
-            struct_fields.push(LanternStructField { name, offset: size + padding, size: r#type.size(), r#type });
+            let (field_size, field_alignment) = (r#type.size(), r#type.alignment());
+
+            size += size % field_alignment;
+            struct_fields.push(LanternStructField { name, offset: size, size: field_size, r#type });
+            size += field_size;
         }
         size += size % alignment;
 
