@@ -99,15 +99,11 @@ impl Expr {
                 continue;
             }
 
-            if BinaryOperator::is_token(stream.peek()?) {
-                let op = BinaryOperator::parse(&mut stream.clone())?;
-                let (left_bp, right_bp) = op.binding_power();
-
+            if let Some((left_bp, right_bp)) = BinaryOperator::try_get_binding_power(stream.peek()?) {
                 if left_bp < min_bp {
                     break;
                 }
-                // operators are all only 1 token
-                stream.next_token()?;
+                let op = BinaryOperator::parse(stream)?;
 
                 let rhs = Self::parse_all(stream, right_bp)?;
                 lhs = Self::Binary(ExprBinary { lhs: Box::new(lhs), op, rhs: Box::new(rhs) });
@@ -261,6 +257,24 @@ pub enum BinaryOperator {
 }
 
 impl BinaryOperator {
+    pub fn try_get_binding_power(peek: &Token) -> Option<(u8, u8)> {
+        macro_rules! Punct {
+            ($id:ident $(| $id2:ident)*) => {
+                Token::Punct(Punct::$id(_) $(| Punct::$id2(_))*)
+            };
+        }
+
+        match peek {
+            Punct!(Asterisk | Slash | Percent) => Some((11, 12)),
+            Punct!(Plus | Hyphen) => Some((9, 10)),
+            Punct!(Less | LessEq | Greater | GreaterEq | EqualsEquals | NotEquals) => Some((7, 8)),
+            Punct!(And) => Some((5, 6)),
+            Punct!(Or) => Some((3, 4)),
+            Punct!(Equals | PlusEq | HyphenEq | AsteriskEq | SlashEq | PercentEq) => Some((2, 1)),
+            _ => None,
+        }
+    }
+
     pub fn span(&self) -> Span {
         match self {
             Self::Assign(punct) => punct.span(),
