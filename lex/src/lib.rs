@@ -599,9 +599,9 @@ impl<'a> Lexer<'a> {
                 let span = self.span();
                 if let Some(num) = next.to_digit(10) {
                     let (num, _) = self.next_int(num as i64);
-                    if self.peek_is('.') && self.peek2_char().is_some_and(|char| char.is_ascii_digit()) {
-                        self.next_char();
-                        let decimal = self.next_char().expect("decimal exists").to_digit(10).expect("is ascii digit");
+                    if self.peek_is('.') && let Some(decimal) = self.peek2_char().and_then(|char| char.to_digit(10)) {
+                        self.next_char(); // .
+                        self.next_char(); // [0-9]
                         let (decimal, places) = self.next_int(decimal as i64);
                         Ok(Token::Literal(Literal::Float(num as f64 + decimal as f64 / 10f64.powi(places), span)))
                     } else {
