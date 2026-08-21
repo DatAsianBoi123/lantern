@@ -506,11 +506,8 @@ impl<'a, 's> Lexer<'a, 's> {
             }
             '*' => Ok(punct!(Asterisk)),
             '/' if self.peek_is('/') => {
-                // comment, ignore characters until newline
                 self.next_char();
-                let mut comment = String::new();
                 while let Some(next) = self.peek_char() && next != '\n' {
-                    comment.push(next);
                     self.next_char();
                 }
                 // don't output comment tokens
