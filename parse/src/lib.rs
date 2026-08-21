@@ -1,6 +1,4 @@
-use std::fmt::{Display, Formatter};
-
-use diagnostic::{Diagnostic, error};
+use diagnostic::{Diagnostic, error, symbol::{SymbolDisplay, SymbolTable}};
 use lex::{ArrowRight, Break, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Continue, Else, Equals, Fun, Ident, If, Keyword, Native, OpenBrace, OpenBracket, OpenParen, Period, Primitive, Return, Semi, Struct, Throw, Token, TokenKind, Using, Val, While};
 use macros::Parse;
 
@@ -25,8 +23,8 @@ impl<T: TokenKind> ParseTokens for T {
     }
 }
 
-pub fn parse(content: &str) -> Result<LanternFile> {
-    LanternFile::parse(&mut TokenStream::from_input(content))
+pub fn parse<'a>(content: &'a str, symbol_table: &mut SymbolTable<'a>) -> Result<LanternFile> {
+    LanternFile::parse(&mut TokenStream::from_input(content, symbol_table))
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -227,18 +225,18 @@ pub enum Type {
     Path(Path),
 }
 
-impl Display for Type {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl SymbolDisplay for Type {
+    fn display(&self, symbol_table: &SymbolTable) -> String {
         match self {
-            Self::Array(_, inner, _) => write!(f, "[{inner}]"),
+            Self::Array(_, inner, _) => format!("[{}]", inner.display(symbol_table)),
             Self::Fun(FunType { args, ret, .. }) => {
-                write!(f, "fun({})", args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>().join(", "))?;
+                let mut string = format!("fun({})", args.iter().map(|arg| arg.display(symbol_table)).collect::<Vec<_>>().join(", "));
                 if let Some((_, ret)) = ret {
-                    write!(f, " -> {ret}")?;
+                    string += &format!(" -> {}", ret.display(symbol_table));
                 }
-                Ok(())
+                string
             },
-            Self::Path(path) => path.fmt(f),
+            Self::Path(path) => path.display(symbol_table),
         }
     }
 }
@@ -259,13 +257,12 @@ pub struct Path {
     pub items: Vec<Ident>,
 }
 
-impl Display for Path {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl SymbolDisplay for Path {
+    fn display(&self, symbol_table: &SymbolTable) -> String {
         self.items.iter()
-            .take(self.items.len() - 1)
-            .try_for_each(|item| write!(f, "{}.", item.0))?;
-        write!(f, "{}", self.items.last().expect("path has at least 1 item").0)?;
-        Ok(())
+            .map(|item| symbol_table.resolve(item.0))
+            .collect::<Vec<_>>()
+            .join(".")
     }
 }
 

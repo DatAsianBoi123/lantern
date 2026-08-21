@@ -1,6 +1,6 @@
 use std::{fmt::Formatter, ops::ControlFlow};
 
-use diagnostic::{Diagnostic, DiagnosticSink, error};
+use diagnostic::{Diagnostic, DiagnosticSink, error, symbol::{Symbol, SymbolDisplay, SymbolTable}};
 use instruction::InstructionSet;
 use parse::{FunArg, IfBranch, IfStmt, Item, ItemFun, ItemNativeFun, ItemPrimitive, ItemStruct, LanternFile, ReturnStmt, Stmt, StructField, ValDeclaration, WhileStmt, expr::{BinaryOperator, Expr, ExprArray, ExprBinary, ExprBlock, ExprField, ExprFunCall, ExprIndex, ExprParen, ExprStruct, ExprUnary, UnaryOperator}, lex::{Break, Ident, Literal, TokenKind}};
 
@@ -13,8 +13,8 @@ pub mod r#type;
 pub mod scope;
 pub mod native;
 
-pub fn ignite(file: LanternFile, globals: &mut Globals, sink: &mut DiagnosticSink) -> GeneratedFunction {
-    let mut r#gen = FlameGen::new(globals, sink);
+pub fn ignite(file: LanternFile, globals: &mut Globals, sink: &mut DiagnosticSink, symbol_table: &SymbolTable) -> GeneratedFunction {
+    let mut r#gen = FlameGen::new(globals, sink, symbol_table);
     let _ = r#gen.compile_stmts(file.stmts, Scope::new());
     r#gen.frame.into_gen()
 }
@@ -24,15 +24,17 @@ pub struct FlameGen<'a> {
     pub frame: StackFrame,
     pub globals: &'a mut Globals,
     pub sink: &'a mut DiagnosticSink,
+    pub symbol_table: &'a SymbolTable<'a>,
     loop_context: LoopContext,
 }
 
 impl<'a> FlameGen<'a> {
-    pub fn new(globals: &'a mut Globals, sink: &'a mut DiagnosticSink) -> Self {
+    pub fn new(globals: &'a mut Globals, sink: &'a mut DiagnosticSink, symbol_table: &'a SymbolTable) -> Self {
         Self {
             frame: StackFrame::new_module(),
             globals,
             sink,
+            symbol_table,
             loop_context: LoopContext::new(),
         }
     }
@@ -67,7 +69,7 @@ impl<'a> FlameGen<'a> {
                         .map(|(_, r#type)| self.sink.emit_or(LanternType::from_type(r#type, &scope), LanternType::Null))
                         .unwrap_or(LanternType::Null);
 
-                    let name = path.last().0.clone();
+                    let name = path.last().0;
                     let fun = LanternFunction::new(self.globals.funs.len(), args, ret);
                     if path.items.len() == 1 {
                         if scope.insert_function(name, fun).is_none() {
@@ -75,16 +77,16 @@ impl<'a> FlameGen<'a> {
                         }
                     } else {
                         let ident = &path.items[0];
-                        if let Some(item) = scope.item(&ident.0) {
+                        if let Some(item) = scope.item(ident.0) {
                             if scope.insert_associated(item.identifier(), name, fun).is_none() {
                                 error!(in self.sink; ident.span() => "associated function already declared");
                             }
                         } else {
-                            error!(in self.sink; ident.span() => "item {ident} not found");
+                            error!(in self.sink; ident.span() => "item {} not found", self.display(ident));
                         }
                     }
                     // this gets overridden when the function is generated
-                    self.globals.funs.push(GeneratedFunction::new(String::new(), FunctionKind::Native(native::dummy_native)));
+                    self.globals.funs.push(GeneratedFunction::new("".into(), FunctionKind::Native(native::dummy_native)));
                 },
                 Item::NativeFun(ItemNativeFun { ident, args, ret, .. }) => {
                     let args = args.iter()
@@ -95,28 +97,28 @@ impl<'a> FlameGen<'a> {
                         .map(|(_, r#type)| self.sink.emit_or(LanternType::from_type(r#type, &scope), LanternType::Null))
                         .unwrap_or(LanternType::Null);
 
-                    scope.insert_function(ident.0.clone(), LanternFunction::new(self.globals.funs.len(), args, ret));
+                    scope.insert_function(ident.0, LanternFunction::new(self.globals.funs.len(), args, ret));
 
-                    let ptr = native::get_native_fn(&ident.0).unwrap_or_else(|| {
-                        error!(in self.sink; ident.span() => "unknown native `{}`", ident.0);
+                    let ptr = native::get_native_fn(self.symbol_table.resolve(ident.0)).unwrap_or_else(|| {
+                        error!(in self.sink; ident.span() => "unknown native `{}`", self.display(ident));
                         native::dummy_native
                     });
 
-                    self.globals.funs.push(GeneratedFunction::new(ident.0.clone(), FunctionKind::Native(ptr)));
+                    self.globals.funs.push(GeneratedFunction::new(self.symbol_table.resolve(ident.0).into(), FunctionKind::Native(ptr)));
                 },
                 Item::Struct(ItemStruct { ident, fields, .. }) => {
                     let fields = fields.iter()
                         .map(|StructField { ident, r#type, .. }| {
                             // type may not have fields initialized, but all structs have the same
                             // size/alignment no matter its fields and primitives are hardcoded
-                            (ident.0.clone(), self.sink.emit_or(LanternType::from_type(r#type, &scope), LanternType::Null))
+                            (ident.0, self.sink.emit_or(LanternType::from_type(r#type, &scope), LanternType::Null))
                         })
                         .collect();
 
-                    let item = scope.item(&ident.0).expect("types were resolved");
+                    let item = scope.item(ident.0).expect("types were resolved");
                     let ItemIdentifier::Struct(id) = item.identifier() else { return; };
                     let r#struct = scope.find_struct_mut_in_scope(id).expect("struct exists in scope");
-                    *r#struct = LanternStruct::new(id, fields);
+                    *r#struct = LanternStruct::new(ident.0, id, fields);
                     self.globals.types[id] = r#struct.to_type_info();
                 },
                 Item::Primitive(_) => {},
@@ -212,8 +214,8 @@ impl<'a> FlameGen<'a> {
                     let r#type = r#type
                         .ok_or(error!(val.span() => "explicit type required on an initialized variable"))
                         .and_then(|(_, r#type)| LanternType::from_type(&r#type, &scope));
-                    if scope.insert_variable(ident.0.clone(), local_index, self.sink.emit_or(r#type, LanternType::Null)).is_none() {
-                        error!(in self.sink; ident.span() => "variable `{}` already declared", ident.0);
+                    if scope.insert_variable(ident.0, local_index, self.sink.emit_or(r#type, LanternType::Null)).is_none() {
+                        error!(in self.sink; ident.span() => "variable `{}` already declared", self.display(&ident));
                     }
                     inst! { with self.frame => val.span();
                         [PUSHU 0]
@@ -236,8 +238,8 @@ impl<'a> FlameGen<'a> {
                         None => init_type,
                     };
                     let local_index = self.frame.declare_local();
-                    if scope.insert_variable(ident.0.clone(), local_index, var_type).is_none() {
-                        error!(in self.sink; ident.span() => "variable `{}` already declared", ident.0);
+                    if scope.insert_variable(ident.0, local_index, var_type).is_none() {
+                        error!(in self.sink; ident.span() => "variable `{}` already declared", self.display(&ident));
                     }
                     inst! { self.frame.instructions;
                         [STORE_LOCAL local_index]
@@ -298,18 +300,18 @@ impl<'a> FlameGen<'a> {
                         .unwrap_or(LanternType::Null);
 
                     let fun = if path.items.len() == 1 {
-                        scope.function(&path.last().0).expect("function in scope")
+                        scope.function(path.last().0).expect("function in scope")
                     } else {
-                        scope.associated(scope.item(&path.items[0].0).expect("item in scope").identifier(), &path.last().0).expect("assosiated in scope")
+                        scope.associated(scope.item(path.items[0].0).expect("item in scope").identifier(), path.last().0).expect("assosiated in scope")
                     };
 
                     let mut fun_scope = scope.child_function(block.closed_brace.span());
-                    let mut fun_frame = StackFrame::new_fun(path.to_string(), ret);
+                    let mut fun_frame = StackFrame::new_fun(self.display(&path), ret);
 
                     for (ident, r#type) in &fun.args {
                         let local_index = fun_frame.declare_local();
-                        if fun_scope.insert_variable(ident.0.clone(), local_index, r#type.clone()).is_none() {
-                            error!(in self.sink; ident.span() => "argument `{}` already declared", ident.0);
+                        if fun_scope.insert_variable(ident.0, local_index, r#type.clone()).is_none() {
+                            error!(in self.sink; ident.span() => "argument `{}` already declared", self.display(ident));
                         }
                     }
 
@@ -504,7 +506,7 @@ impl<'a> FlameGen<'a> {
                 }
             },
             Expr::Struct(ExprStruct { ident, mut fields, .. }) => {
-                let Some(LanternItem::Struct(r#struct)) = scope.item(&ident.0) else {
+                let Some(LanternItem::Struct(r#struct)) = scope.item(ident.0) else {
                     error!(in self.sink; ident.span() => "unknown struct");
                     return ControlFlow::Continue(LanternType::Null);
                 };
@@ -521,7 +523,7 @@ impl<'a> FlameGen<'a> {
                             }
                             inst!(self.frame.instructions; WRITE field.size);
                         },
-                        None => error!(in self.sink; ident.span() => "missing field `{}`", field.name),
+                        None => error!(in self.sink; ident.span() => "missing field `{}`", self.symbol_table.resolve(field.name)),
                     }
                 }
 
@@ -591,16 +593,16 @@ impl<'a> FlameGen<'a> {
             },
             Expr::Identifier(ident) => {
                 let span = ident.span();
-                if let Some(var) = scope.variable(&ident.0) {
+                if let Some(var) = scope.variable(ident.0) {
                     inst!(with self.frame => span; LOAD_LOCAL var.index);
                     ControlFlow::Continue(var.r#type.clone())
-                } else if let Some(fun) = scope.function(&ident.0) {
+                } else if let Some(fun) = scope.function(ident.0) {
                     inst!(with self.frame => span; PUSHU fun.index);
                     ControlFlow::Continue(fun.to_assoc_type())
-                } else if let Some(item) = scope.item(&ident.0) {
+                } else if let Some(item) = scope.item(ident.0) {
                     ControlFlow::Continue(LanternType::ItemStatic(item.identifier()))
                 } else {
-                    error!(in self.sink; span => "unknown identifier `{}`", ident.0);
+                    error!(in self.sink; span => "unknown identifier `{}`", self.display(&ident));
                     ControlFlow::Continue(LanternType::Null)
                 }
             },
@@ -616,7 +618,7 @@ impl<'a> FlameGen<'a> {
                                 [READ size]
                             }
                             ControlFlow::Continue(field.r#type.clone())
-                        } else if let Some(associated) = scope.associated(ItemIdentifier::Struct(type_id), &ident.0) {
+                        } else if let Some(associated) = scope.associated(ItemIdentifier::Struct(type_id), ident.0) {
                             if associated.args.first().is_some_and(|(_, receiver)| *receiver == ty) {
                                 inst!(with self.frame => ident.span(); PUSHU associated.index);
                             } else {
@@ -624,12 +626,12 @@ impl<'a> FlameGen<'a> {
                             }
                             ControlFlow::Continue(associated.to_method_type())
                         } else {
-                            error!(in self.sink; ident.1 => "field {} does not exist in {ty}", ident.0);
+                            error!(in self.sink; ident.1 => "field {} does not exist in {ty}", self.display(&ident));
                             ControlFlow::Continue(LanternType::Null)
                         }
                     },
                     LanternType::Array(inner) => {
-                        if ident.0 == "len" {
+                        if self.symbol_table.get("len").is_some_and(|symbol| symbol == ident.0) {
                             let size = if inner.is_primitive() { inner.size() } else { 0 };
                             inst! { with self.frame => ident.span();
                                 [PUSHU size_of::<ObjectHeader>()]
@@ -637,12 +639,12 @@ impl<'a> FlameGen<'a> {
                             }
                             ControlFlow::Continue(LanternType::Primitive(&native::INT_PRIMITIVE))
                         } else {
-                            error!(in self.sink; ident.1 => "field {} does not exist on array", ident.0);
+                            error!(in self.sink; ident.1 => "field {} does not exist on array", self.display(&ident));
                             ControlFlow::Continue(LanternType::Null)
                         }
                     },
                     LanternType::Primitive(primitive) => {
-                        if let Some(associated) = scope.associated(ItemIdentifier::Primitive(primitive.id), &ident.0) {
+                        if let Some(associated) = scope.associated(ItemIdentifier::Primitive(primitive.id), ident.0) {
                             if associated.args.first().is_some_and(|(_, receiver)| *receiver == ty) {
                                 inst!(with self.frame => ident.span(); PUSHU associated.index);
                             } else {
@@ -650,21 +652,21 @@ impl<'a> FlameGen<'a> {
                             }
                             ControlFlow::Continue(associated.to_method_type())
                         } else {
-                            error!(in self.sink; ident.1 => "method {} does not exist in {}", ident.0, primitive.name);
+                            error!(in self.sink; ident.1 => "method {} does not exist in {}", self.display(&ident), primitive.name);
                             ControlFlow::Continue(LanternType::Null)
                         }
                     },
                     LanternType::ItemStatic(type_id) => {
-                        let Some(fun) = scope.associated(type_id, &ident.0) else {
+                        let Some(fun) = scope.associated(type_id, ident.0) else {
                             // TODO: type name
-                            error!(in self.sink; ident.span() => "static item {} does not exist", ident.0);
+                            error!(in self.sink; ident.span() => "static item {} does not exist", self.display(&ident));
                             return ControlFlow::Continue(LanternType::Null)
                         };
                         inst!(with self.frame => ident.span(); PUSHU fun.index);
                         ControlFlow::Continue(fun.to_assoc_type())
                     },
                     _ => {
-                        error!(in self.sink; ident.1 => "field {} does not exist on {ty}", ident.0);
+                        error!(in self.sink; ident.1 => "field {} does not exist on {ty}", self.display(&ident));
                         ControlFlow::Continue(LanternType::Null)
                     },
                 }
@@ -685,15 +687,15 @@ impl<'a> FlameGen<'a> {
                 Item::Using(_) => todo!(),
                 Item::Struct(ItemStruct { ident, .. }) => {
                     // this gets overridden during the 2nd pass
-                    let r#struct = LanternStruct::new(self.globals.types.len(), Box::new([]));
+                    let r#struct = LanternStruct::new(ident.0, self.globals.types.len(), Box::new([]));
                     self.globals.types.push(r#struct.to_type_info());
-                    if scope.insert_item(ident.0.clone(), LanternItem::Struct(r#struct)).is_none() {
+                    if scope.insert_item(ident.0, LanternItem::Struct(r#struct)).is_none() {
                         error!(in self.sink; ident.span() => "struct already declared");
                     }
                 },
                 Item::Primitive(ItemPrimitive { ident, .. }) => {
-                    let Some(primitive) = native::get_primitive(&ident.0) else { panic!("unknown primitive `{}`", ident.0) };
-                    if scope.insert_item(ident.0.clone(), LanternItem::Primitive(primitive)).is_none() {
+                    let Some(primitive) = native::get_primitive(self.symbol_table.resolve(ident.0)) else { panic!("unknown primitive `{}`", self.display(ident)) };
+                    if scope.insert_item(ident.0, LanternItem::Primitive(primitive)).is_none() {
                         error!(in self.sink; ident.span() => "primitive already declared");
                     }
                 },
@@ -704,9 +706,9 @@ impl<'a> FlameGen<'a> {
     fn compile_lvalue<'s>(&mut self, scope: &'s Scope, lhs: Expr) -> ControlFlow<(), Result<LValue<'s>, Diagnostic>> {
         match lhs {
             Expr::Identifier(ident) => {
-                ControlFlow::Continue(scope.variable(&ident.0)
+                ControlFlow::Continue(scope.variable(ident.0)
                     .map(LValue::Local)
-                    .ok_or(error!(ident.span() => "unknown variable `{ident}`")))
+                    .ok_or(error!(ident.span() => "unknown variable `{}`", self.display(&ident))))
             },
             Expr::Index(ExprIndex { expr, index, closed_bracket, .. }) => {
                 let expr_span = expr.span();
@@ -741,14 +743,13 @@ impl<'a> FlameGen<'a> {
                             inst!(with self.frame => ident.span(); PUSHU (HeapObject::field_offset() + field.offset));
                             &field.r#type
                         } else {
-                            // TODO: type name
-                            error!(in self.sink; ident.span() => "unknown field {ident}");
+                            error!(in self.sink; ident.span() => "field {} does not exist on {}", self.display(&ident), self.symbol_table.resolve(r#struct.name));
                             &LanternType::Null
                         };
                         ControlFlow::Continue(Ok(LValue::StructField(field_type)))
                     },
                     r#type => {
-                        error!(in self.sink; expr_span => "field {ident} does not exist on {type}");
+                        error!(in self.sink; expr_span => "field {} does not exist on {type}", self.display(&ident));
                         ControlFlow::Continue(Ok(LValue::StructField(&LanternType::Null)))
                     },
                 }
@@ -760,8 +761,8 @@ impl<'a> FlameGen<'a> {
     fn compile_op_assign(&mut self, scope: &Scope, lhs: Expr, op: BinaryOperator, rhs: Expr) -> ControlFlow<(), LanternType> {
         match lhs {
             Expr::Identifier(ident) => {
-                let Some(var) = scope.variable(&ident.0) else {
-                    error!(in self.sink; ident.span() => "unknown variable `{}`", ident.0);
+                let Some(var) = scope.variable(ident.0) else {
+                    error!(in self.sink; ident.span() => "unknown variable `{}`", self.display(&ident));
                     return ControlFlow::Continue(LanternType::Null);
                 };
 
@@ -785,6 +786,10 @@ impl<'a> FlameGen<'a> {
             _ => error!(in self.sink; op.span() => "bad left-hand-side of assignment"),
         }
         ControlFlow::Continue(LanternType::Null)
+    }
+
+    fn display<T: SymbolDisplay>(&self, dis: &T) -> String {
+        dis.display(self.symbol_table)
     }
 }
 
@@ -844,13 +849,14 @@ impl LanternItem {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LanternStruct {
+    pub name: Symbol,
     pub id: usize,
     pub fields: Box<[LanternStructField]>,
     pub size: usize,
 }
 
 impl LanternStruct {
-    pub fn new(index: usize, fields: Box<[(String, LanternType)]>) -> Self {
+    pub fn new(name: Symbol, index: usize, fields: Box<[(Symbol, LanternType)]>) -> Self {
         let alignment = fields.iter()
             .map(|(_, r#type)| r#type.alignment())
             .max()
@@ -868,6 +874,7 @@ impl LanternStruct {
         size += size % alignment;
 
         Self {
+            name,
             id: index,
             fields: struct_fields.into(),
             size,
@@ -960,7 +967,7 @@ impl Eq for LanternPrimitive { }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LanternStructField {
-    pub name: String,
+    pub name: Symbol,
     pub offset: usize,
     pub size: usize,
     pub r#type: LanternType,
@@ -981,12 +988,12 @@ impl LanternVariable {
 #[derive(Debug, Clone)]
 pub struct GeneratedFunction {
     pub line_table: Vec<LineMap>,
-    pub name: String,
+    pub name: Box<str>,
     pub kind: FunctionKind,
 }
 
 impl GeneratedFunction {
-    pub fn new(name: String, kind: FunctionKind) -> Self {
+    pub fn new(name: Box<str>, kind: FunctionKind) -> Self {
         Self { line_table: Vec::new(), name, kind }
     }
 

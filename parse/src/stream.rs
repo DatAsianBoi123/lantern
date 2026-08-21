@@ -1,20 +1,21 @@
+use diagnostic::symbol::SymbolTable;
 use lex::{Lexer, Token, TokenKind};
 
 use crate::{ParseTokens, Result};
 
-#[derive(Debug, Clone)]
-pub struct TokenStream<'a> {
-    lexer: Lexer<'a>,
+#[derive(Debug)]
+pub struct TokenStream<'a, 's> {
+    lexer: Lexer<'a, 's>,
     peek: Option<Result<Token>>,
 }
 
-impl<'a> TokenStream<'a> {
-    pub fn new(lexer: Lexer<'a>) -> Self {
+impl<'a, 's> TokenStream<'a, 's> {
+    pub fn new(lexer: Lexer<'a, 's>) -> Self {
         Self { lexer, peek: None }
     }
 
-    pub fn from_input(str: &'a str) -> Self {
-        Self::new(Lexer::new(str))
+    pub fn from_input(str: &'a str, symbol_table: &'s mut SymbolTable<'a>) -> Self {
+        Self::new(Lexer::new(str, symbol_table))
     }
 
     pub fn is_eof(&mut self) -> Result<bool> {
@@ -64,14 +65,16 @@ pub fn parse_punctuated_untrailed<T: ParseTokens, P: ParseTokens, E: TokenKind>(
 
 #[cfg(test)]
 mod tests {
+    use diagnostic::symbol::SymbolTable;
     use lex::{Eof, Literal};
 
     use crate::{stream::parse_punctuated_untrailed, *};
 
     #[test]
     fn test_punctuated() {
+        let mut symbol_table = SymbolTable::new();
         let input = "1,23,4";
-        let mut stream = TokenStream::from_input(input);
+        let mut stream = TokenStream::from_input(input, &mut symbol_table);
 
         let parsed = parse_punctuated_untrailed::<Literal, Comma, Eof>(&mut stream);
         assert!(parsed.is_ok());
@@ -80,11 +83,11 @@ mod tests {
 
     #[test]
     fn test_stream() {
+        let mut symbol_table = SymbolTable::new();
         let input = "val a: std.int = 10;";
-        let mut stream = TokenStream::from_input(input);
+        let mut stream = TokenStream::from_input(input, &mut symbol_table);
 
         let val = ValDeclaration::parse(&mut stream);
-        dbg!(&val);
         assert!(matches!(val, Ok(ValDeclaration { .. })));
     }
 }

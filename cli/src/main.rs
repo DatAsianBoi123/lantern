@@ -1,7 +1,7 @@
 use std::{fs::File, io::Read, time::Instant};
 
 use clap::Parser;
-use diagnostic::DiagnosticSink;
+use diagnostic::{DiagnosticSink, symbol::SymbolTable};
 use runtime::{VM, flame::FunctionKind};
 
 #[derive(Parser, Debug)]
@@ -28,8 +28,9 @@ fn main() {
         eprintln!("file contains invalid UTF-8");
         return;
     };
+    let mut symbol_table = SymbolTable::new();
     let before_compile = Instant::now();
-    let lantern_file = match parse::parse(content.trim()) {
+    let lantern_file = match parse::parse(content.trim(), &mut symbol_table) {
         Ok(tokens) => tokens,
         Err(err) => {
             eprintln!("{err}");
@@ -45,7 +46,7 @@ fn main() {
 
     let mut sink = DiagnosticSink::new();
     let before = Instant::now();
-    let vm = VM::new(lantern_file, &mut sink);
+    let vm = VM::new(lantern_file, &mut sink, &symbol_table);
 
     for err in sink.into_emitted() {
         eprintln!("{err}");

@@ -48,10 +48,10 @@ impl LanternType {
             },
             Type::Path(path) => {
                 let span = path.items[0].span();
-                match scope.item(&path.last().0) {
+                match scope.item(path.last().0) {
                     Some(LanternItem::Struct(LanternStruct { id, .. })) => Ok(Self::Struct(*id)),
                     Some(LanternItem::Primitive(primitive)) => Ok(Self::Primitive(primitive)),
-                    None => Err(error!(span => "unknown type `{type}`")),
+                    None => Err(error!(span => "unknown type")),
                 }
             },
         }

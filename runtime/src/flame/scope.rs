@@ -1,15 +1,15 @@
 use std::collections::HashMap;
 
-use diagnostic::Span;
+use diagnostic::{Span, symbol::Symbol};
 
 use crate::{flame::{FunctionKind, GeneratedFunction, LanternFunction, LanternItem, LanternStruct, LanternVariable, instruction::InstructionSet, r#type::LanternType}, heap::TypeInfo};
 
 #[derive(Debug, Clone)]
 pub struct Scope<'a> {
-    items: HashMap<String, LanternItem>,
-    functions: HashMap<String, LanternFunction>,
-    variables: HashMap<String, LanternVariable>,
-    associated: HashMap<ItemIdentifier, HashMap<String, LanternFunction>>,
+    items: HashMap<Symbol, LanternItem>,
+    functions: HashMap<Symbol, LanternFunction>,
+    variables: HashMap<Symbol, LanternVariable>,
+    associated: HashMap<ItemIdentifier, HashMap<Symbol, LanternFunction>>,
     kind: ScopeKind<'a>,
 }
 
@@ -68,65 +68,65 @@ impl<'a> Scope<'a> {
         })
     }
 
-    pub fn item(&self, name: &str) -> Option<&LanternItem> {
+    pub fn item(&self, name: Symbol) -> Option<&LanternItem> {
         match self.kind {
-            ScopeKind::Module => self.items.get(name),
+            ScopeKind::Module => self.items.get(&name),
             ScopeKind::Block(parent) | ScopeKind::Function(parent, _) => {
-                self.items.get(name)
+                self.items.get(&name)
                     .or_else(|| parent.item(name))
             }
         }
     }
 
-    pub fn insert_item(&mut self, name: String, item: LanternItem) -> Option<()> {
+    pub fn insert_item(&mut self, name: Symbol, item: LanternItem) -> Option<()> {
         if self.items.contains_key(&name) { return None; };
         self.items.insert(name, item);
         Some(())
     }
 
-    pub fn function(&self, name: &str) -> Option<&LanternFunction> {
+    pub fn function(&self, name: Symbol) -> Option<&LanternFunction> {
         match self.kind {
-            ScopeKind::Module => self.functions.get(name),
+            ScopeKind::Module => self.functions.get(&name),
             ScopeKind::Block(parent) | ScopeKind::Function(parent, _) => {
-                self.functions.get(name)
+                self.functions.get(&name)
                     .or_else(|| parent.function(name))
             }
         }
     }
 
-    pub fn insert_function(&mut self, name: String, fun: LanternFunction) -> Option<()> {
+    pub fn insert_function(&mut self, name: Symbol, fun: LanternFunction) -> Option<()> {
         if self.functions.contains_key(&name) { return None; };
         self.functions.insert(name, fun);
         Some(())
     }
 
-    pub fn variable(&self, name: &str) -> Option<&LanternVariable> {
+    pub fn variable(&self, name: Symbol) -> Option<&LanternVariable> {
         match self.kind {
-            ScopeKind::Module | ScopeKind::Function(..) => self.variables.get(name),
+            ScopeKind::Module | ScopeKind::Function(..) => self.variables.get(&name),
             ScopeKind::Block(parent) => {
-                self.variables.get(name)
+                self.variables.get(&name)
                     .or_else(|| parent.variable(name))
             }
         }
     }
 
-    pub fn insert_variable(&mut self, name: String, index: usize, r#type: LanternType) -> Option<()> {
+    pub fn insert_variable(&mut self, name: Symbol, index: usize, r#type: LanternType) -> Option<()> {
         if self.variables.contains_key(&name) { return None; };
         self.variables.insert(name, LanternVariable::new(index, r#type));
         Some(())
     }
 
-    pub fn associated(&self, id: ItemIdentifier, name: &str) -> Option<&LanternFunction> {
+    pub fn associated(&self, id: ItemIdentifier, name: Symbol) -> Option<&LanternFunction> {
         match self.kind {
-            ScopeKind::Module => self.associated.get(&id).and_then(|associated| associated.get(name)),
+            ScopeKind::Module => self.associated.get(&id).and_then(|associated| associated.get(&name)),
             ScopeKind::Block(parent) | ScopeKind::Function(parent, _) => {
-                self.associated.get(&id).and_then(|type_associated| type_associated.get(name))
+                self.associated.get(&id).and_then(|type_associated| type_associated.get(&name))
                     .or_else(|| parent.associated(id, name))
             }
         }
     }
 
-    pub fn insert_associated(&mut self, id: ItemIdentifier, name: String, fun: LanternFunction) -> Option<()> {
+    pub fn insert_associated(&mut self, id: ItemIdentifier, name: Symbol, fun: LanternFunction) -> Option<()> {
         let type_associated = self.associated.entry(id)
             .or_default();
         if type_associated.contains_key(&name) { return None; };
@@ -242,7 +242,7 @@ impl StackFrame {
     }
 
     pub fn into_gen(self) -> GeneratedFunction {
-        let mut fun = GeneratedFunction::new(self.name, FunctionKind::Instructions(self.instructions, self.locals));
+        let mut fun = GeneratedFunction::new(self.name.into_boxed_str(), FunctionKind::Instructions(self.instructions, self.locals));
         fun.line_table = self.line_table;
         fun
     }

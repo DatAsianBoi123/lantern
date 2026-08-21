@@ -1,6 +1,6 @@
 use std::{error::Error, fmt::{Display, Formatter}};
 
-use diagnostic::DiagnosticSink;
+use diagnostic::{DiagnosticSink, symbol::SymbolTable};
 use error::RuntimeError;
 use flame::{GeneratedFunction, instruction::Instruction};
 use parse::LanternFile;
@@ -133,13 +133,13 @@ impl VM {
     pub const PRIMITIVE_ARR_TYPE_INDEX: usize = 1;
     pub const REF_ARR_TYPE_INDEX: usize = 2;
 
-    pub fn new(file: LanternFile, sink: &mut DiagnosticSink) -> Option<Self> {
+    pub fn new(file: LanternFile, sink: &mut DiagnosticSink, symbol_table: &SymbolTable) -> Option<Self> {
         let mut globals = Globals {
             funs: Vec::new(),
             // TODO: better way of array type info
             types: vec![TypeInfo::Array { element_size: 1, is_ref: false }, TypeInfo::Array { element_size: 8, is_ref: false }, TypeInfo::Array { element_size: size_of::<usize>(), is_ref: true }],
         };
-        let root = flame::ignite(file, &mut globals, sink);
+        let root = flame::ignite(file, &mut globals, sink, symbol_table);
         if sink.fatal() {
             return None;
         }
@@ -192,7 +192,7 @@ impl VM {
         let mut stacktrace = Vec::with_capacity(self.frames.len());
         while let Some(frame) = self.frames.pop() {
             let fun = &self.funs[frame.fun_index];
-            stacktrace.push((fun.name.clone(), fun.line_for(frame.inst_ptr)));
+            stacktrace.push((fun.name.to_string(), fun.line_for(frame.inst_ptr)));
         }
         RuntimeError {
             message: message.to_string(),

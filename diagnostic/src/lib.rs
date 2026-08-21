@@ -1,5 +1,7 @@
 use std::fmt::{Display, Formatter};
 
+pub mod symbol;
+
 #[macro_export]
 macro_rules! error {
     (in $sink:expr; $span:expr => $($tt:tt)*) => {
@@ -47,6 +49,7 @@ impl DiagnosticSink {
     }
 }
 
+// TODO: DiagnosticMessage enum
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
 #[error("{level}: {message} ({}:{})", span.line(), span.col())]
 pub struct Diagnostic {

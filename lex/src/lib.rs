@@ -1,6 +1,6 @@
-use std::{fmt::{Display, Formatter}, str::Chars};
+use std::{fmt::{Display, Formatter}, slice, str::Chars};
 
-use diagnostic::{Diagnostic, Span, error};
+use diagnostic::{Diagnostic, Span, error, symbol::{Symbol, SymbolDisplay, SymbolTable}};
 
 macro_rules! define_keywords {
     ($(#[$meta:meta])* $vis:vis enum $ident:ident { $($keyword:ident = $lit:literal),* $(,)? }) => {
@@ -170,14 +170,14 @@ pub enum Token {
     Eof(Eof),
 }
 
-impl Display for Token {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl SymbolDisplay for Token {
+    fn display(&self, symbol_table: &SymbolTable) -> String {
         match self {
-            Self::Literal(literal) => write!(f, "{literal}"),
-            Self::Keyword(keyword) => write!(f, "{keyword}"),
-            Self::Ident(ident) => write!(f, "{ident}"),
-            Self::Punct(punct) => write!(f, "{punct}"),
-            Self::Eof(eof) => write!(f, "{eof}"),
+            Self::Literal(literal) => literal.to_string(),
+            Self::Keyword(keyword) => keyword.to_string(),
+            Self::Ident(ident) => ident.display(symbol_table),
+            Self::Punct(punct) => punct.to_string(),
+            Self::Eof(eof) => eof.to_string(),
         }
     }
 }
@@ -255,13 +255,7 @@ impl TokenKind for Literal {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Ident(pub String, pub Span);
-
-impl Display for Ident {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "`{}`", self.0)
-    }
-}
+pub struct Ident(pub Symbol, pub Span);
 
 impl TokenKind for Ident {
     fn name() -> String {
@@ -281,6 +275,12 @@ impl TokenKind for Ident {
 
     fn span(&self) -> Span {
         self.1.clone()
+    }
+}
+
+impl SymbolDisplay for Ident {
+    fn display(&self, symbol_table: &SymbolTable) -> String {
+        symbol_table.resolve(self.0).to_string()
     }
 }
 
@@ -382,16 +382,18 @@ define_puncts! {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Lexer<'a> {
+#[derive(Debug)]
+pub struct Lexer<'a, 's> {
+    symbol_table: &'s mut SymbolTable<'a>,
     chars: Chars<'a>,
     line: u32,
     col: u32,
 }
 
-impl<'a> Lexer<'a> {
-    pub fn new(input: &'a str) -> Self {
+impl<'a, 's> Lexer<'a, 's> {
+    pub fn new(input: &'a str, symbol_table: &'s mut SymbolTable<'a>) -> Self {
         Self {
+            symbol_table,
             chars: input.chars(),
             line: 1,
             col: 0,
@@ -595,40 +597,44 @@ impl<'a> Lexer<'a> {
                 }
             }
 
-            next => {
+            next if let Some(num) = next.to_digit(10) => {
                 let span = self.span();
-                if let Some(num) = next.to_digit(10) {
-                    let (num, _) = self.next_int(num as i64);
-                    if self.peek_is('.') && let Some(decimal) = self.peek2_char().and_then(|char| char.to_digit(10)) {
-                        self.next_char(); // .
-                        self.next_char(); // [0-9]
-                        let (decimal, places) = self.next_int(decimal as i64);
-                        Ok(Token::Literal(Literal::Float(num as f64 + decimal as f64 / 10f64.powi(places), span)))
-                    } else {
-                        Ok(Token::Literal(Literal::Integer(num, span)))
-                    }
-                } else if Ident::is_valid_char(next) {
-                    let mut word = next.to_string();
 
-                    while let Some(next) = self.peek_char() && Ident::is_valid_char(next) {
-                        word.push(next);
-                        self.next_char();
-                    }
-
-                    match word.as_ref() {
-                        "true" => Ok(Token::Literal(Literal::True(span))),
-                        "false" => Ok(Token::Literal(Literal::True(span))),
-                        _ => {
-                            if let Some(keyword) = Keyword::from_str(&word, span.clone()) {
-                                Ok(Token::Keyword(keyword))
-                            } else {
-                                Ok(Token::Ident(Ident(word, span)))
-                            }
-                        }
-                    }
+                let (num, _) = self.next_int(num as i64);
+                if self.peek_is('.') && let Some(decimal) = self.peek2_char().and_then(|char| char.to_digit(10)) {
+                    self.next_char(); // .
+                    self.next_char(); // [0-9]
+                    let (decimal, places) = self.next_int(decimal as i64);
+                    Ok(Token::Literal(Literal::Float(num as f64 + decimal as f64 / 10f64.powi(places), span)))
                 } else {
-                    Err(error!(span => "invalid character `{next}`"))
+                    Ok(Token::Literal(Literal::Integer(num, span)))
                 }
+            }
+            next if Ident::is_valid_char(next) => {
+                let span = self.span();
+
+                let start = self.chars.as_str().as_ptr();
+                let mut len = next.len_utf8();
+
+                while let Some(next) = self.peek_char() && Ident::is_valid_char(next) {
+                    len += next.len_utf8();
+                    self.next_char();
+                }
+
+                // move `start` to include `next`
+                // SAFETY: `start` was derived from a &'a str, and it is guaranteed to contain a
+                // `len` length character to its left
+                let word = unsafe { str::from_utf8_unchecked(slice::from_raw_parts::<'a>(start.sub(next.len_utf8()), len)) };
+
+                match word {
+                    "true" => Ok(Token::Literal(Literal::True(span))),
+                    "false" => Ok(Token::Literal(Literal::True(span))),
+                    _ if let Some(keyword) = Keyword::from_str(word, span.clone()) => Ok(Token::Keyword(keyword)),
+                    _ => Ok(Token::Ident(Ident(self.symbol_table.store(word), span))),
+                }
+            }
+            next => {
+                Err(error!(self.span() => "invalid character `{next}`"))
             }
         }
     }
@@ -640,18 +646,23 @@ mod tests {
 
     #[test]
     fn test_str() {
-        let mut lexer = Lexer::new(r#""hello there""#);
+        let mut symbol_table = SymbolTable::new();
+        let mut lexer = Lexer::new(r#""hello there""#, &mut symbol_table);
 
         assert_eq!(lexer.next_token(), Ok(Token::Literal(Literal::String("hello there".to_string(), Span::new(1, 1)))));
     }
 
     #[test]
     fn test_lexer() {
-        let mut lexer = Lexer::new("val abc: std.int = 10");
+        let mut symbol_table = SymbolTable::new();
+        let mut lexer = Lexer::new("val abc: std.int = 10", &mut symbol_table);
 
-        assert_eq!(lexer.next_token(), Ok(Token::Keyword(Keyword::Val(Val(Span::new(1, 1))))));
-        assert_eq!(lexer.next_token(), Ok(Token::Ident(Ident("abc".to_string(), Span::new(1, 5)))));
-        assert_eq!(lexer.next_token(), Ok(Token::Punct(Punct::Colon(Colon(Span::new(1, 8))))));
+        let val = lexer.next_token();
+        let ident = lexer.next_token();
+        let colon = lexer.next_token();
+        assert_eq!(val, Ok(Token::Keyword(Keyword::Val(Val(Span::new(1, 1))))));
+        assert_eq!(ident, Ok(Token::Ident(Ident(symbol_table.get("abc").unwrap(), Span::new(1, 5)))));
+        assert_eq!(colon, Ok(Token::Punct(Punct::Colon(Colon(Span::new(1, 8))))));
     }
 }
 
