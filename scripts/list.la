@@ -1,0 +1,91 @@
+primitive int;
+primitive byte;
+primitive bool;
+
+native fun int_to_str(int: int) -> [byte];
+native fun write(bytes: [byte]);
+native fun flush();
+
+fun println(str: [byte]) {
+  write(str);
+  write("\n");
+  flush();
+}
+
+struct Node {
+  value: int,
+  next: Node,
+}
+fun Node.new(value: int) -> Node {
+  // an uninitialized val is technically "null"
+  // this will not work in future releases
+  val none: Node;
+  return Node {
+    value: value,
+    next: none,
+  };
+}
+
+struct LinkedList {
+  root: Node,
+  len: int,
+}
+fun LinkedList.new() -> LinkedList {
+  val none: Node;
+  return LinkedList {
+    root: none,
+    len: 0,
+  };
+}
+fun LinkedList.push(self: LinkedList, int: int) {
+  if (self.len == 0) {
+    self.root = Node.new(int);
+  } else {
+    self.last().next = Node.new(int);
+  }
+  self.len = self.len + 1;
+}
+fun LinkedList.last(self: LinkedList) -> Node {
+  if (self.len == 0) {
+    throw "linked list is empty";
+  }
+  val i = 1;
+  val node = self.root;
+  while (i < self.len) {
+    node = node.next;
+    i = i + 1;
+  }
+  return node;
+}
+fun LinkedList.for_each(self: LinkedList, fn: fun(LinkedList, int, int)) {
+  if (self.len == 0) {
+    return;
+  }
+  val i = 0;
+  val node = self.root;
+  while (i < self.len) {
+    fn(self, i, node.value);
+    node = node.next;
+    i = i + 1;
+  }
+}
+fun LinkedList.display(self: LinkedList) {
+  fun fmt(list: LinkedList, i: int, int: int) {
+    write(int_to_str(int));
+    if (i != list.len - 1) {
+      write(", ");
+    }
+  }
+
+  write("[");
+  self.for_each(fmt);
+  write("]\n");
+  flush();
+}
+
+val mylist = LinkedList.new();
+mylist.push(10);
+mylist.push(20);
+mylist.push(30);
+mylist.display();
+
