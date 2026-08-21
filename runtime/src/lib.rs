@@ -123,8 +123,8 @@ impl Slot {
 pub struct VM {
     stack: LanternStack,
     frames: Vec<Frame>,
-    funs: Vec<GeneratedFunction>,
-    types: Vec<TypeInfo>,
+    funs: Box<[GeneratedFunction]>,
+    types: Box<[TypeInfo]>,
     pub heap: Heap,
 }
 
@@ -153,8 +153,8 @@ impl VM {
         Some(Self {
             stack,
             frames,
-            funs: globals.funs,
-            types: globals.types,
+            funs: globals.funs.into_boxed_slice(),
+            types: globals.types.into_boxed_slice(),
             // 4 MiB
             heap: Heap::new(4 * 2usize.pow(20)),
         })
