@@ -288,7 +288,7 @@ impl VM {
                         return Ok(());
                     },
                     Instruction::Throw => {
-                        let ptr = unsafe { HeapArray::from_raw(*self.stack.pop()?.read_ptr()) };
+                        let ptr = unsafe { HeapArray::from_raw(self.stack.pop()?.read_ptr()) };
                         let message = unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr.element_ptr(), ptr.len())) };
                         return Err(Box::new(UserError(message.to_string())))
                     },
