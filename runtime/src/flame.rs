@@ -1,10 +1,11 @@
-use std::{fmt::Formatter, ops::ControlFlow};
+use std::{cell::OnceCell, fmt::Formatter, hash, ops::ControlFlow};
 
+use arena::Arena;
 use diagnostic::{Diagnostic, DiagnosticSink, error, symbol::{Symbol, SymbolDisplay, SymbolTable}};
 use instruction::InstructionSet;
 use parse::{FunArg, IfBranch, IfStmt, Item, ItemFun, ItemNativeFun, ItemPrimitive, ItemStruct, LanternFile, ReturnStmt, Stmt, StructField, ValDeclaration, WhileStmt, expr::{BinaryOperator, Expr, ExprArray, ExprBinary, ExprBlock, ExprField, ExprFunCall, ExprIndex, ExprParen, ExprStruct, ExprUnary, UnaryOperator}, lex::{Break, Ident, Literal, TokenKind}};
 
-use crate::{Slot, VM, error::RuntimeError, flame::{instruction::Instruction, scope::{Globals, ItemIdentifier, LineMap, LoopContext, LoopScope, Scope, ScopeKind, StackFrame}, r#type::LanternType}, heap::{HeapArray, HeapObject, ObjectHeader, TypeInfo}, inst};
+use crate::{Slot, VM, error::RuntimeError, flame::{instruction::Instruction, scope::{Globals, LineMap, LoopContext, LoopScope, Scope, ScopeKind, StackFrame}, r#type::{LanternType, TypeContext, TypeId}}, heap::{HeapArray, HeapObject, ObjectHeader, TypeInfo}, inst};
 
 pub type NativeFn = fn(&mut VM) -> Result<Slot, RuntimeError>;
 
@@ -15,20 +16,22 @@ pub mod native;
 
 pub fn ignite(file: LanternFile, globals: &mut Globals, sink: &mut DiagnosticSink, symbol_table: &SymbolTable) -> GeneratedFunction {
     let mut r#gen = FlameGen::new(globals, sink, symbol_table);
-    let _ = r#gen.compile_stmts(file.stmts, Scope::new());
+    let arena = Arena::new(25);
+    let tcx = TypeContext::new(&arena);
+    let _ = r#gen.compile_stmts(file.stmts, Scope::new(), &tcx);
     r#gen.frame.into_gen()
 }
 
 #[derive(Debug)]
-pub struct FlameGen<'a> {
-    pub frame: StackFrame,
+pub struct FlameGen<'a, 't> {
+    pub frame: StackFrame<'t>,
     pub globals: &'a mut Globals,
     pub sink: &'a mut DiagnosticSink,
     pub symbol_table: &'a SymbolTable<'a>,
     loop_context: LoopContext,
 }
 
-impl<'a> FlameGen<'a> {
+impl<'a, 't> FlameGen<'a, 't> {
     pub fn new(globals: &'a mut Globals, sink: &'a mut DiagnosticSink, symbol_table: &'a SymbolTable) -> Self {
         Self {
             frame: StackFrame::new_module(),
@@ -39,15 +42,17 @@ impl<'a> FlameGen<'a> {
         }
     }
 
-    pub fn using_frame<F: FnOnce(&mut Self)>(&mut self, mut frame: StackFrame, fun: F) -> GeneratedFunction {
+    pub fn using_frame<F: FnOnce(&mut Self)>(&mut self, mut frame: StackFrame<'t>, fun: F) -> GeneratedFunction {
         std::mem::swap(&mut self.frame, &mut frame);
         fun(self);
         std::mem::swap(&mut self.frame, &mut frame);
         frame.into_gen()
     }
 
-    pub fn compile_stmts(&mut self, statements: Vec<Stmt>, mut scope: Scope) -> ControlFlow<()> {
-        self.resolve_types(&statements, &mut scope);
+    // use a &TypeContext to tell the compiler that tcx is not borrowed mutably until partial
+    // borrows of `self` are allowed
+    pub fn compile_stmts(&mut self, statements: Vec<Stmt>, mut scope: Scope<'_, 't>, tcx: &TypeContext<'t>) -> ControlFlow<()> {
+        self.resolve_types(&statements, &mut scope, tcx);
 
         statements.iter()
             .filter_map(|statement| {
@@ -57,73 +62,72 @@ impl<'a> FlameGen<'a> {
                     None
                 }
             })
-        .for_each(|item| {
-            match item {
-                Item::Using(_) => {},
-                Item::Fun(ItemFun { path, args, ret, .. }) => {
-                    let args = args.iter()
-                        .map(|FunArg { ident, r#type, .. }| (ident.clone(), self.sink.emit_or(LanternType::from_type(r#type, &scope), LanternType::Null)))
-                        .collect();
+            .for_each(|item| {
+                match item {
+                    Item::Using(_) => {},
+                    Item::Fun(ItemFun { path, args, ret, .. }) => {
+                        let args = args.iter()
+                            .map(|FunArg { ident, r#type, .. }| (ident.clone(), self.sink.emit_or(LanternType::resolve(r#type, &scope, tcx), tcx.null())))
+                            .collect();
 
-                    let ret = ret.as_ref()
-                        .map(|(_, r#type)| self.sink.emit_or(LanternType::from_type(r#type, &scope), LanternType::Null))
-                        .unwrap_or(LanternType::Null);
+                        let ret = ret.as_ref()
+                            .map(|(_, r#type)| self.sink.emit_or(LanternType::resolve(r#type, &scope, tcx), tcx.null()))
+                            .unwrap_or(tcx.null());
 
-                    let name = path.last().0;
-                    let fun = LanternFunction::new(self.globals.funs.len(), args, ret);
-                    if path.items.len() == 1 {
-                        if scope.insert_function(name, fun).is_none() {
-                            error!(in self.sink; path.last().span() => "function already declared");
-                        }
-                    } else {
-                        let ident = &path.items[0];
-                        if let Some(item) = scope.item(ident.0) {
-                            if scope.insert_associated(item.identifier(), name, fun).is_none() {
-                                error!(in self.sink; ident.span() => "associated function already declared");
+                        let name = path.last().0;
+                        let fun = LanternFunction::new(self.globals.funs.len(), args, ret, tcx);
+                        if path.items.len() == 1 {
+                            if scope.insert_function(name, fun).is_none() {
+                                error!(in self.sink; path.last().span() => "function already declared");
                             }
                         } else {
-                            error!(in self.sink; ident.span() => "item {} not found", self.display(ident));
+                            let ident = &path.items[0];
+                            if let Some(item) = scope.item(ident.0) {
+                                if scope.insert_associated(item, name, fun).is_none() {
+                                    error!(in self.sink; ident.span() => "associated function already declared");
+                                }
+                            } else {
+                                error!(in self.sink; ident.span() => "item {} not found", self.display(ident));
+                            }
                         }
-                    }
-                    // this gets overridden when the function is generated
-                    self.globals.funs.push(GeneratedFunction::new("".into(), FunctionKind::Native(native::dummy_native)));
-                },
-                Item::NativeFun(ItemNativeFun { ident, args, ret, .. }) => {
-                    let args = args.iter()
-                        .map(|FunArg { ident, r#type, .. }| (ident.clone(), self.sink.emit_or(LanternType::from_type(r#type, &scope), LanternType::Null)))
-                        .collect();
+                        // this gets overridden when the function is generated
+                        self.globals.funs.push(GeneratedFunction::new("".into(), FunctionKind::Native(native::dummy_native)));
+                    },
+                    Item::NativeFun(ItemNativeFun { ident, args, ret, .. }) => {
+                        let args = args.iter()
+                            .map(|FunArg { ident, r#type, .. }| (ident.clone(), self.sink.emit_or(LanternType::resolve(r#type, &scope, tcx), tcx.null())))
+                            .collect();
 
-                    let ret = ret.as_ref()
-                        .map(|(_, r#type)| self.sink.emit_or(LanternType::from_type(r#type, &scope), LanternType::Null))
-                        .unwrap_or(LanternType::Null);
+                        let ret = ret.as_ref()
+                            .map(|(_, r#type)| self.sink.emit_or(LanternType::resolve(r#type, &scope, tcx), tcx.null()))
+                            .unwrap_or(tcx.null());
 
-                    scope.insert_function(ident.0, LanternFunction::new(self.globals.funs.len(), args, ret));
+                        scope.insert_function(ident.0, LanternFunction::new(self.globals.funs.len(), args, ret, tcx));
 
-                    let ptr = native::get_native_fn(self.symbol_table.resolve(ident.0)).unwrap_or_else(|| {
-                        error!(in self.sink; ident.span() => "unknown native `{}`", self.display(ident));
-                        native::dummy_native
-                    });
+                        let ptr = native::get_native_fn(self.symbol_table.resolve(ident.0)).unwrap_or_else(|| {
+                            error!(in self.sink; ident.span() => "unknown native `{}`", self.display(ident));
+                            native::dummy_native
+                        });
 
-                    self.globals.funs.push(GeneratedFunction::new(self.symbol_table.resolve(ident.0).into(), FunctionKind::Native(ptr)));
-                },
-                Item::Struct(ItemStruct { ident, fields, .. }) => {
-                    let fields = fields.iter()
-                        .map(|StructField { ident, r#type, .. }| {
-                            // type may not have fields initialized, but all structs have the same
-                            // size/alignment no matter its fields and primitives are hardcoded
-                            (ident.0, self.sink.emit_or(LanternType::from_type(r#type, &scope), LanternType::Null))
-                        })
-                        .collect();
+                        self.globals.funs.push(GeneratedFunction::new(self.symbol_table.resolve(ident.0).into(), FunctionKind::Native(ptr)));
+                    },
+                    Item::Struct(ItemStruct { ident, fields, .. }) => {
+                        let fields = fields.iter()
+                            .map(|StructField { ident, r#type, .. }| {
+                                // type may not have fields initialized, but structs have static
+                                // size/alignment and primitives are hardcoded
+                                (ident.0, self.sink.emit_or(LanternType::resolve(r#type, &scope, tcx), tcx.null()))
+                            })
+                            .collect();
 
-                    let item = scope.item(ident.0).expect("types were resolved");
-                    let ItemIdentifier::Struct(id) = item.identifier() else { return; };
-                    let r#struct = scope.find_struct_mut_in_scope(id).expect("struct exists in scope");
-                    *r#struct = LanternStruct::new(ident.0, id, fields);
-                    self.globals.types[id] = r#struct.to_type_info();
-                },
-                Item::Primitive(_) => {},
-            }
-        });
+                        let item = scope.item(ident.0).expect("types were resolved");
+                        let LanternType::Struct(ref r#struct) = *item else { panic!("resolved type not a struct") };
+                        r#struct.init(fields);
+                        self.globals.types[r#struct.id] = r#struct.to_type_info();
+                    },
+                    Item::Primitive(_) => {},
+                }
+            });
 
         for statement in statements {
             match statement {
@@ -137,16 +141,16 @@ impl<'a> FlameGen<'a> {
                         match current_branch {
                             IfBranch::ElseIf(IfStmt { condition, block, branch, .. }) => {
                                 let condition_span = condition.span();
-                                let r#type = self.compile_expr(condition, &scope)?;
-                                if !r#type.is_bool() {
-                                    error!(in self.sink; condition_span => "expected `bool`, but got {type} instead");
+                                let ty = self.compile_expr(condition, &scope, tcx)?;
+                                if ty != tcx.primitive(&native::BOOL_PRIMITIVE) {
+                                    error!(in self.sink; condition_span => "expected `bool`, but got {} instead", self.display(&ty));
                                 }
 
                                 let false_index = self.frame.instructions.len();
                                 inst!(with self.frame => block.open_brace.span(); GOTO_IF_FALSE 0);
 
                                 let block_scope = scope.child_block();
-                                let branch_return = self.compile_stmts(block.stmts, block_scope);
+                                let branch_return = self.compile_stmts(block.stmts, block_scope, tcx);
                                 match (overall_return, branch_return) {
                                     (Some(ControlFlow::Break(_)), ControlFlow::Break(_)) => {},
                                     (Some(ControlFlow::Break(_)), ControlFlow::Continue(_)) => overall_return = Some(branch_return),
@@ -164,7 +168,7 @@ impl<'a> FlameGen<'a> {
                             },
                             IfBranch::Else(block) => {
                                 let block_scope = scope.child_block();
-                                let branch_return = self.compile_stmts(block.stmts, block_scope);
+                                let branch_return = self.compile_stmts(block.stmts, block_scope, tcx);
                                 match (overall_return, branch_return) {
                                     (Some(ControlFlow::Break(_)), ControlFlow::Break(_)) => {},
                                     (Some(ControlFlow::Break(_)), ControlFlow::Continue(_)) => overall_return = Some(branch_return),
@@ -189,9 +193,9 @@ impl<'a> FlameGen<'a> {
                     let condition_span = condition.span();
                     let head = self.frame.instructions.len();
 
-                    let r#type = self.compile_expr(condition, &scope)?;
-                    if !r#type.is_bool() {
-                        error!(in self.sink; condition_span => "expected `bool`, but got {type} instead");
+                    let ty = self.compile_expr(condition, &scope, tcx)?;
+                    if ty != tcx.primitive(&native::BOOL_PRIMITIVE) {
+                        error!(in self.sink; condition_span => "expected `bool`, but got {} instead", self.display(&ty));
                     }
                     let condition_index = self.frame.instructions.len();
                     inst!(with self.frame => block.open_brace.span(); POP_GOTO_IF_FALSE 0);
@@ -199,7 +203,7 @@ impl<'a> FlameGen<'a> {
                     self.loop_context.scopes.push(LoopScope::new(head));
                     let block_scope = scope.child_block();
                     // we can't assume the initial condition is met so these may not even be ran
-                    let _ = self.compile_stmts(block.stmts, block_scope);
+                    let _ = self.compile_stmts(block.stmts, block_scope, tcx);
                     inst!(with self.frame => block.closed_brace.span(); GOTO head);
 
                     self.frame.instructions[condition_index] = Instruction::PopGotoIfFalse(self.frame.instructions.len());
@@ -211,10 +215,10 @@ impl<'a> FlameGen<'a> {
                 Stmt::ValDeclaration(ValDeclaration { val, ident, r#type, init: None, .. }) => {
                     // TODO: unitialized vars
                     let local_index = self.frame.declare_local();
-                    let r#type = r#type
+                    let ty = r#type
                         .ok_or(error!(val.span() => "explicit type required on an initialized variable"))
-                        .and_then(|(_, r#type)| LanternType::from_type(&r#type, &scope));
-                    if scope.insert_variable(ident.0, local_index, self.sink.emit_or(r#type, LanternType::Null)).is_none() {
+                        .and_then(|(_, r#type)| LanternType::resolve(&r#type, &scope, tcx));
+                    if scope.insert_variable(ident.0, local_index, self.sink.emit_or(ty, tcx.null())).is_none() {
                         error!(in self.sink; ident.span() => "variable `{}` already declared", self.display(&ident));
                     }
                     inst! { with self.frame => val.span();
@@ -225,13 +229,13 @@ impl<'a> FlameGen<'a> {
                 },
                 Stmt::ValDeclaration(ValDeclaration { ident, r#type, init: Some((_, init)), .. }) => {
                     let init_span = init.span();
-                    let init_type = self.compile_expr(init, &scope)?;
+                    let init_type = self.compile_expr(init, &scope, tcx)?;
 
                     let var_type = match r#type {
                         Some((_, r#type)) => {
-                            let var_type = self.sink.emit_or(LanternType::from_type(&r#type, &scope), LanternType::Null);
+                            let var_type = self.sink.emit_or(LanternType::resolve(&r#type, &scope, tcx), tcx.null());
                             if var_type != init_type {
-                                error!(in self.sink; init_span => "expected {var_type}, but got {init_type} instead");
+                                error!(in self.sink; init_span => "expected {}, but got {} instead", self.display(&var_type), self.display(&init_type));
                             }
                             var_type
                         },
@@ -247,21 +251,18 @@ impl<'a> FlameGen<'a> {
                     };
                 },
                 Stmt::Return(ReturnStmt { ret: ret_keyword, expr, .. }) => {
-                    let expected_ret = match &self.frame.ret_type {
-                        Some(ret) => ret.clone(),
-                        _ => {
-                            error!(in self.sink; ret_keyword.span() => "{ret_keyword} not allowed here");
-                            return ControlFlow::Break(());
-                        },
+                    let Some(expected_ret) = self.frame.ret_type else {
+                        error!(in self.sink; ret_keyword.span() => "{ret_keyword} not allowed here");
+                        return ControlFlow::Break(());
                     };
                     let ret = if let Some(expr) = expr {
-                        self.compile_expr(expr, &scope)?
+                        self.compile_expr(expr, &scope, tcx)?
                     } else {
                         inst!(with self.frame => ret_keyword.span(); PUSHU 0);
-                        LanternType::Null
+                        tcx.null()
                     };
                     if expected_ret != ret {
-                        error!(in self.sink; ret_keyword.span() => "expected {expected_ret}, but got {ret} instead");
+                        error!(in self.sink; ret_keyword.span() => "expected {}, but got {} instead", self.display(&expected_ret), self.display(&ret));
                     }
                     inst!(self.frame.instructions; RET);
                     return ControlFlow::Break(());
@@ -283,40 +284,41 @@ impl<'a> FlameGen<'a> {
                 },
                 Stmt::Throw(_, expr, semi) => {
                     let span = expr.span();
-                    let ty = self.compile_expr(expr, &scope)?;
+                    let ty = self.compile_expr(expr, &scope, tcx)?;
                     // TODO: string type
-                    if ty != LanternType::Array(Box::new(LanternType::Primitive(&native::BYTE_PRIMITIVE))) {
-                        error!(in self.sink; span => "expected `[u8]`, but got {ty} instead");
+                    let byte = tcx.primitive(&native::BYTE_PRIMITIVE);
+                    if ty != tcx.intern(LanternType::Array(byte)) {
+                        error!(in self.sink; span => "expected `[u8]`, but got {} instead", self.display(&ty));
                     }
                     inst!(with self.frame => semi.span(); THRW);
                 },
                 Stmt::Expr(expr, _) => {
-                    self.compile_expr(expr, &scope)?;
+                    self.compile_expr(expr, &scope, tcx)?;
                     inst!(self.frame.instructions; POP);
                 },
                 Stmt::Item(Item::Fun(ItemFun { path, block, ret, .. })) => {
                     let ret = ret
-                        .map(|(_, r#type)| self.sink.emit_or(LanternType::from_type(&r#type, &scope), LanternType::Null))
-                        .unwrap_or(LanternType::Null);
+                        .map(|(_, r#type)| self.sink.emit_or(LanternType::resolve(&r#type, &scope, tcx), tcx.null()))
+                        .unwrap_or(tcx.null());
 
                     let fun = if path.items.len() == 1 {
                         scope.function(path.last().0).expect("function in scope")
                     } else {
-                        scope.associated(scope.item(path.items[0].0).expect("item in scope").identifier(), path.last().0).expect("assosiated in scope")
+                        scope.associated(scope.item(path.items[0].0).expect("item in scope"), path.last().0).expect("assosiated in scope")
                     };
 
                     let mut fun_scope = scope.child_function(block.closed_brace.span());
                     let mut fun_frame = StackFrame::new_fun(self.display(&path), ret);
 
-                    for (ident, r#type) in &fun.args {
+                    for (ident, ty) in &fun.args {
                         let local_index = fun_frame.declare_local();
-                        if fun_scope.insert_variable(ident.0, local_index, r#type.clone()).is_none() {
+                        if fun_scope.insert_variable(ident.0, local_index, *ty).is_none() {
                             error!(in self.sink; ident.span() => "argument `{}` already declared", self.display(ident));
                         }
                     }
 
                     let generated = self.using_frame(fun_frame, |nested| {
-                        let _ = nested.compile_stmts(block.stmts, fun_scope);
+                        let _ = nested.compile_stmts(block.stmts, fun_scope, tcx);
                     });
 
                     self.globals.funs[fun.index] = generated;
@@ -331,9 +333,9 @@ impl<'a> FlameGen<'a> {
         match scope.into_kind() {
             // implicit return
             ScopeKind::Function(_, span) => {
-                let ret_type = self.frame.ret_type.clone().expect("function scope has return type");
-                if ret_type != LanternType::Null {
-                    error!(in self.sink; span.clone() => "expected function to return {}", LanternType::Null);
+                let ret_type = self.frame.ret_type.expect("function scope has return type");
+                if ret_type != tcx.null() {
+                    error!(in self.sink; span.clone() => "expected function to return null");
                 };
                 inst! { with self.frame => span;
                     [PUSHU 0]
@@ -353,44 +355,45 @@ impl<'a> FlameGen<'a> {
         }
     }
 
-    pub fn compile_expr(&mut self, expression: Expr, scope: &Scope) -> ControlFlow<(), LanternType> {
+    pub fn compile_expr(&mut self, expression: Expr, scope: &Scope<'_, 't>, tcx: &TypeContext<'t>) -> ControlFlow<(), TypeId<'t>> {
         match expression {
             Expr::Literal(Literal::Integer(int, span)) => {
                 inst!(with self.frame => span; PUSHI int);
-                ControlFlow::Continue(LanternType::Primitive(&native::INT_PRIMITIVE))
+                ControlFlow::Continue(tcx.primitive(&native::INT_PRIMITIVE))
             },
             Expr::Literal(Literal::Float(float, span)) => {
                 inst!(with self.frame => span; PUSHF float);
-                ControlFlow::Continue(LanternType::Primitive(&native::FLOAT_PRIMITIVE))
+                ControlFlow::Continue(tcx.primitive(&native::FLOAT_PRIMITIVE))
             },
             Expr::Literal(Literal::True(span)) => {
                 inst!(with self.frame => span; PUSHU crate::bool_to_slot(true));
-                ControlFlow::Continue(LanternType::Primitive(&native::BOOL_PRIMITIVE))
+                ControlFlow::Continue(tcx.primitive(&native::BOOL_PRIMITIVE))
             },
             Expr::Literal(Literal::False(span)) => {
                 inst!(with self.frame => span; PUSHU crate::bool_to_slot(false));
-                ControlFlow::Continue(LanternType::Primitive(&native::BOOL_PRIMITIVE))
+                ControlFlow::Continue(tcx.primitive(&native::BOOL_PRIMITIVE))
             },
             Expr::Literal(Literal::String(string, span)) => {
                 // TODO: better string alloc
                 inst!(with self.frame => span; ALLOC_STR string.clone());
                 // TODO: make string a struct instead of array
-                ControlFlow::Continue(LanternType::Array(Box::new(LanternType::Primitive(&native::BYTE_PRIMITIVE))))
+                let byte = tcx.primitive(&native::BYTE_PRIMITIVE);
+                ControlFlow::Continue(tcx.intern(LanternType::Array(byte)))
             },
             Expr::FunCall(ExprFunCall { expr, args, closed_paren, .. }) => {
                 let span = expr.span();
-                let r#type = self.compile_expr(*expr, scope)?;
-                if let LanternType::Function { is_method, args: fun_args, ret } = r#type {
+                let ty = self.compile_expr(*expr, scope, tcx)?;
+                if let LanternType::Function { is_method, args: ref fun_args, ret } = *ty {
                     let fun_args_len = fun_args.len();
-                    if args.len() != fun_args_len {
+                    if args.len() != fun_args.len() {
                         error!(in self.sink; span => "expected function to have {} args, got {} args instead", fun_args_len, args.len());
                     }
 
-                    for (expr, r#type) in args.into_iter().zip(fun_args) {
+                    for (expr, ty) in args.into_iter().zip(fun_args) {
                         let expr_span = expr.span();
-                        let expr_type = self.compile_expr(expr, scope)?;
-                        if expr_type != r#type {
-                            error!(in self.sink; expr_span => "expected {type}, got {expr_type} instead");
+                        let expr_type = self.compile_expr(expr, scope, tcx)?;
+                        if expr_type != *ty {
+                            error!(in self.sink; expr_span => "expected {}, got {} instead", self.display(ty), self.display(&expr_type));
                         }
                     }
 
@@ -400,17 +403,17 @@ impl<'a> FlameGen<'a> {
                         inst!(with self.frame => closed_paren.span(); INV fun_args_len);
                     }
 
-                    ControlFlow::Continue(*ret)
+                    ControlFlow::Continue(ret)
                 } else {
                     error!(in self.sink; span => "expected function");
-                    ControlFlow::Continue(LanternType::Null)
+                    ControlFlow::Continue(tcx.null())
                 }
             },
             Expr::Binary(ExprBinary { lhs, op, rhs }) => {
                 // special cases
                 match op {
                     BinaryOperator::And(_) | BinaryOperator::Or(_) => {
-                        let lhs_type = self.compile_expr(*lhs, scope)?;
+                        let lhs = self.compile_expr(*lhs, scope, tcx)?;
                         let goto_index = self.frame.instructions.len();
 
                         match &op {
@@ -420,7 +423,7 @@ impl<'a> FlameGen<'a> {
                         };
                         inst!(self.frame.instructions; POP);
 
-                        let rhs_type = self.compile_expr(*rhs, scope)?;
+                        let rhs = self.compile_expr(*rhs, scope, tcx)?;
 
                         let goto_inst = match op {
                             BinaryOperator::And(_) => Instruction::GotoIfFalse(self.frame.instructions.len()),
@@ -429,20 +432,20 @@ impl<'a> FlameGen<'a> {
                         };
                         self.frame.instructions[goto_index] = goto_inst;
 
-                        if !lhs_type.is_bool() || !rhs_type.is_bool() {
-                            error!(in self.sink; op.span() => "{op} cannot be applied to {lhs_type} and {rhs_type}");
+                        if !lhs.is_primitive_type(&native::BOOL_PRIMITIVE) || !rhs.is_primitive_type(&native::BOOL_PRIMITIVE) {
+                            error!(in self.sink; op.span() => "{op} cannot be applied to {} and {}", self.display(&lhs), self.display(&rhs));
                         }
 
-                        return ControlFlow::Continue(LanternType::Primitive(&native::BOOL_PRIMITIVE));
+                        return ControlFlow::Continue(tcx.primitive(&native::BOOL_PRIMITIVE));
                     },
                     BinaryOperator::Assign(_) => {
-                        match self.compile_lvalue(scope, *lhs)? {
+                        match self.compile_lvalue(scope, tcx, *lhs)? {
                             Ok(lvalue) => {
                                 let lhs = lvalue.write_type();
                                 let rhs_span = rhs.span();
-                                let rhs = self.compile_expr(*rhs, scope)?;
-                                if *lhs != rhs {
-                                    error!(in self.sink; rhs_span => "expected {lhs}, but got {rhs} instead");
+                                let rhs = self.compile_expr(*rhs, scope, tcx)?;
+                                if lhs != rhs {
+                                    error!(in self.sink; rhs_span => "expected {}, but got {} instead", self.display(&lhs), self.display(&rhs));
                                 }
 
                                 match lvalue {
@@ -454,91 +457,99 @@ impl<'a> FlameGen<'a> {
                             },
                             Err(err) => self.sink.emit(err),
                         }
-                        return ControlFlow::Continue(LanternType::Null);
+                        return ControlFlow::Continue(tcx.null());
                     },
                     BinaryOperator::AddAssign(_)
                     | BinaryOperator::SubAssign(_)
                     | BinaryOperator::MultAssign(_)
                     | BinaryOperator::DivAssign(_)
-                    | BinaryOperator::ModAssign(_) => return self.compile_op_assign(scope, *lhs, op, *rhs),
+                    | BinaryOperator::ModAssign(_) => return self.compile_op_assign(scope, tcx, *lhs, op, *rhs),
                     _ => {},
                 }
 
-                let lhs = self.compile_expr(*lhs, scope)?;
-                let rhs = self.compile_expr(*rhs, scope)?;
+                let lhs = self.compile_expr(*lhs, scope, tcx)?;
+                let rhs = self.compile_expr(*rhs, scope, tcx)?;
 
                 if lhs != rhs {
-                    error!(in self.sink; op.span() => "{op} cannot be applied to {lhs} and {rhs}");
-                    return ControlFlow::Continue(LanternType::Null);
+                    error!(in self.sink; op.span() => "{op} cannot be applied to {} and {}", self.display(&lhs), self.display(&rhs));
+                    return ControlFlow::Continue(tcx.null());
                 }
-                match (lhs, op, rhs) {
+                match (&*lhs, op, &*rhs) {
                     (LanternType::Primitive(lhs), op @ BinaryOperator::Neq(_), LanternType::Primitive(_)) if lhs.ops.get_bin_op(&op).is_some() => {
                         self.frame.instructions.push(lhs.ops.get_bin_op(&op).unwrap());
                         inst!(self.frame.instructions; NOT);
-                        ControlFlow::Continue(LanternType::Primitive(&native::BOOL_PRIMITIVE))
+                        ControlFlow::Continue(tcx.primitive(&native::BOOL_PRIMITIVE))
                     },
                     (LanternType::Primitive(lhs), op, LanternType::Primitive(_)) if op.is_comparison() && lhs.ops.get_bin_op(&op).is_some() => {
                         self.frame.instructions.push(lhs.ops.get_bin_op(&op).unwrap());
-                        ControlFlow::Continue(LanternType::Primitive(&native::BOOL_PRIMITIVE))
+                        ControlFlow::Continue(tcx.primitive(&native::BOOL_PRIMITIVE))
                     },
                     (LanternType::Primitive(lhs), op, LanternType::Primitive(_)) if lhs.ops.get_bin_op(&op).is_some() => {
                         self.frame.instructions.push(lhs.ops.get_bin_op(&op).unwrap());
-                        ControlFlow::Continue(LanternType::Primitive(lhs))
+                        ControlFlow::Continue(tcx.primitive(lhs))
                     },
                     (_, BinaryOperator::Assign(_) | BinaryOperator::And(_) | BinaryOperator::Or(_), _) => unreachable!(),
                     (lhs, op, rhs) => {
-                        error!(in self.sink; op.span() => "{op} cannot be applied to {lhs} and {rhs}");
-                        ControlFlow::Continue(LanternType::Null)
+                        error!(in self.sink; op.span() => "{op} cannot be applied to {} and {}", self.display(lhs), self.display(rhs));
+                        ControlFlow::Continue(tcx.null())
                     },
                 }
             },
             Expr::Unary(ExprUnary { op, expr }) => {
-                let r#type = self.compile_expr(*expr, scope)?;
-                match (op, r#type) {
+                let ty = self.compile_expr(*expr, scope, tcx)?;
+                match (op, &*ty) {
                     (op, LanternType::Primitive(primitive)) if primitive.ops.get_un_op(&op).is_some() => {
                         self.frame.instructions.push(primitive.ops.get_un_op(&op).unwrap());
-                        ControlFlow::Continue(LanternType::Primitive(primitive))
+                        ControlFlow::Continue(tcx.primitive(primitive))
                     },
                     (op, got) => {
-                        error!(in self.sink; op.span() => "{op} cannot be applied to {got}");
-                        ControlFlow::Continue(LanternType::Null)
+                        error!(in self.sink; op.span() => "{op} cannot be applied to {}", self.display(got));
+                        ControlFlow::Continue(tcx.null())
                     },
                 }
             },
-            Expr::Struct(ExprStruct { ident, mut fields, .. }) => {
-                let Some(LanternItem::Struct(r#struct)) = scope.item(ident.0) else {
-                    error!(in self.sink; ident.span() => "unknown struct");
-                    return ControlFlow::Continue(LanternType::Null);
+            Expr::Struct(ExprStruct { ident, fields, .. }) => {
+                let Some(ty) = scope.item(ident.0) else {
+                    error!(in self.sink; ident.span() => "unknown type");
+                    return ControlFlow::Continue(tcx.null());
+                };
+                let LanternType::Struct(ref r#struct) = *ty else {
+                    error!(in self.sink; ident.span() => "not a struct");
+                    return ControlFlow::Continue(tcx.null());
                 };
                 inst!(with self.frame => ident.span(); ALLOC_OBJ r#struct.id);
-                for field in &r#struct.fields {
-                    match fields.iter().position(|expr_field| expr_field.ident.0 == field.name) {
-                        Some(index) => {
-                            let expr_field = fields.swap_remove(index);
-                            let expr_span = expr_field.expr.span();
-                            inst!(with self.frame => expr_field.ident.span(); PUSHU HeapObject::field_offset() + field.offset);
-                            let field_ty = self.compile_expr(expr_field.expr, scope)?;
-                            if field_ty != field.r#type {
-                                error!(in self.sink; expr_span => "expected {}, but got {field_ty} instead", field.r#type);
+
+                let mut init_fields = Vec::new();
+                for field in fields {
+                    match r#struct.find_field(field.ident.0) {
+                        Some(struct_field) => {
+                            let expr_span = field.expr.span();
+                            inst!(with self.frame => field.ident.span(); PUSHU HeapObject::field_offset() + struct_field.offset);
+                            let field_ty = self.compile_expr(field.expr, scope, tcx)?;
+                            if field_ty != struct_field.ty {
+                                error!(in self.sink; expr_span => "expected {}, but got {} instead", self.display(&struct_field.ty), self.display(&field_ty));
                             }
-                            inst!(self.frame.instructions; WRITE field.size);
+                            inst!(self.frame.instructions; WRITE struct_field.ty.size());
+                            init_fields.push(field.ident);
                         },
-                        None => error!(in self.sink; ident.span() => "missing field `{}`", self.symbol_table.resolve(field.name)),
+                        None => error!(in self.sink; field.ident.span() => "unknown field `{}`", field.ident.display(self.symbol_table)),
                     }
                 }
 
-                for extraneous_field in fields {
-                    error!(in self.sink; extraneous_field.ident.span() => "unknown field");
+                if init_fields.len() != r#struct.data().fields.len() {
+                    r#struct.data().fields.iter()
+                        .filter(|field| !init_fields.iter().any(|ident| ident.0 == field.name))
+                        .for_each(|field| error!(in self.sink; ident.span() => "missing field `{}`", self.symbol_table.resolve(field.name)));
                 }
 
-                ControlFlow::Continue(LanternType::Struct(r#struct.id))
+                ControlFlow::Continue(ty)
             },
-            Expr::Paren(ExprParen { expr, .. }) => self.compile_expr(*expr, scope),
+            Expr::Paren(ExprParen { expr, .. }) => self.compile_expr(*expr, scope, tcx),
             Expr::Block(ExprBlock { stmts, closed_brace, .. }) => {
                 let block_scope = scope.child_block();
-                self.compile_stmts(stmts, block_scope)?;
+                self.compile_stmts(stmts, block_scope, tcx)?;
                 inst!(with self.frame => closed_brace.span(); PUSHU 0);
-                ControlFlow::Continue(LanternType::Null)
+                ControlFlow::Continue(tcx.null())
             },
             Expr::Array(ExprArray { elements, closed_bracket, .. }) => {
                 let len = elements.len();
@@ -546,42 +557,42 @@ impl<'a> FlameGen<'a> {
 
                 for expr in elements {
                     let span = expr.span();
-                    inner = match (inner, self.compile_expr(expr, scope)?) {
-                        (None, r#type) => Some(r#type),
-                        (Some(r#type), expr_type) if r#type == expr_type => Some(r#type),
-                        (Some(r#type), expr_type) => {
-                            error!(in self.sink; span => "expected {type}, but got {expr_type} instead");
-                            Some(r#type)
+                    inner = match (inner, self.compile_expr(expr, scope, tcx)?) {
+                        (None, ty) => Some(ty),
+                        (Some(ty), expr_type) if ty == expr_type => Some(ty),
+                        (Some(ty), expr_type) => {
+                            error!(in self.sink; span => "expected {}, but got {} instead", self.display(&ty), self.display(&expr_type));
+                            Some(ty)
                         },
                     }
                 }
                 // TODO: type hint
-                let inner = inner.unwrap_or(LanternType::Null);
-
+                let inner = inner.unwrap_or(tcx.null());
                 if inner.is_ref() {
                     inst!(with self.frame => closed_bracket.span(); ALLOC_ARR VM::REF_ARR_TYPE_INDEX, len);
                 } else {
                     inst!(with self.frame => closed_bracket.span(); ALLOC_ARR VM::PRIMITIVE_ARR_TYPE_INDEX, len);
                 }
-                ControlFlow::Continue(LanternType::Array(Box::new(inner)))
+                ControlFlow::Continue(tcx.intern(LanternType::Array(inner)))
             },
             Expr::Index(ExprIndex { expr, index, closed_bracket, .. }) => {
                 let expr_span = expr.span();
-                let r#type = self.compile_expr(*expr, scope)?;
-                let inner = match r#type {
-                    LanternType::Array(inner) => *inner,
+                let ty = self.compile_expr(*expr, scope, tcx)?;
+                let inner = match *ty {
+                    LanternType::Array(inner) => inner,
                     _ => {
                         error!(in self.sink; expr_span => "expected array or string");
-                        LanternType::Null
+                        tcx.null()
                     },
                 };
                 let index_span = index.span();
-                let index_type = self.compile_expr(*index, scope)?;
-                if index_type != LanternType::Primitive(&native::INT_PRIMITIVE) {
+                let index_type = self.compile_expr(*index, scope, tcx)?;
+                if index_type != tcx.primitive(&native::INT_PRIMITIVE) {
                     error!(in self.sink; index_span => "expected index to be an `int`");
                 }
 
                 // TODO: bounds checking
+                // BUG: multiplying an i64 and usize
                 inst! { with self.frame => closed_bracket.span();
                     [PUSHU inner.size()]
                     [MULTI]
@@ -595,86 +606,84 @@ impl<'a> FlameGen<'a> {
                 let span = ident.span();
                 if let Some(var) = scope.variable(ident.0) {
                     inst!(with self.frame => span; LOAD_LOCAL var.index);
-                    ControlFlow::Continue(var.r#type.clone())
+                    ControlFlow::Continue(var.ty)
                 } else if let Some(fun) = scope.function(ident.0) {
                     inst!(with self.frame => span; PUSHU fun.index);
-                    ControlFlow::Continue(fun.to_assoc_type())
-                } else if let Some(item) = scope.item(ident.0) {
-                    ControlFlow::Continue(LanternType::ItemStatic(item.identifier()))
+                    ControlFlow::Continue(fun.assoc_type)
                 } else {
                     error!(in self.sink; span => "unknown identifier `{}`", self.display(&ident));
-                    ControlFlow::Continue(LanternType::Null)
+                    ControlFlow::Continue(tcx.null())
                 }
             },
             Expr::Field(ExprField { expr, ident }) => {
-                let ty = self.compile_expr(*expr, scope)?;
-                match ty {
-                    LanternType::Struct(type_id) => {
-                        let r#struct = scope.find_struct(type_id);
-                        if let Some(field) = r#struct.fields.iter().find(|field| field.name == ident.0) {
-                            let size = if field.r#type.is_primitive() { field.size } else { 0 };
+                // ex. Struct.static_fun
+                if let Expr::Identifier(ref static_ident) = *expr && let Some(ty) = scope.item(static_ident.0) {
+                    let Some(associated) = scope.associated(ty, ident.0) else {
+                        error!(in self.sink; ident.span() => "unknown associated item `{}`", self.display(&ident));
+                        return ControlFlow::Continue(tcx.null());
+                    };
+                    inst!(with self.frame => ident.span(); PUSHU associated.index);
+                    return ControlFlow::Continue(associated.assoc_type);
+                }
+
+                let ty = self.compile_expr(*expr, scope, tcx)?;
+                match *ty {
+                    LanternType::Struct(ref r#struct) => {
+                        if let Some(field) = r#struct.find_field(ident.0) {
+                            let size = if field.ty.is_primitive() { field.ty.size() } else { 0 };
                             inst! { with self.frame => ident.span();
                                 [PUSHU (HeapObject::field_offset() + field.offset)]
                                 [READ size]
                             }
-                            ControlFlow::Continue(field.r#type.clone())
-                        } else if let Some(associated) = scope.associated(ItemIdentifier::Struct(type_id), ident.0) {
+                            ControlFlow::Continue(field.ty)
+                        } else if let Some(associated) = scope.associated(ty, ident.0) {
                             if associated.args.first().is_some_and(|(_, receiver)| *receiver == ty) {
                                 inst!(with self.frame => ident.span(); PUSHU associated.index);
                             } else {
-                                error!(in self.sink; ident.1 => "method must have a receiver");
+                                error!(in self.sink; ident.span() => "method must have a receiver");
                             }
-                            ControlFlow::Continue(associated.to_method_type())
+                            ControlFlow::Continue(associated.method_type)
                         } else {
-                            error!(in self.sink; ident.1 => "field {} does not exist in {ty}", self.display(&ident));
-                            ControlFlow::Continue(LanternType::Null)
+                            error!(in self.sink; ident.1 => "field {} does not exist in {}", self.display(&ident), self.display(&ty));
+                            ControlFlow::Continue(tcx.null())
                         }
                     },
                     LanternType::Array(inner) => {
-                        if self.symbol_table.get("len").is_some_and(|symbol| symbol == ident.0) {
+                        if self.symbol_table.resolve(ident.0) == "len" {
                             let size = if inner.is_primitive() { inner.size() } else { 0 };
                             inst! { with self.frame => ident.span();
                                 [PUSHU size_of::<ObjectHeader>()]
                                 [READ size]
                             }
-                            ControlFlow::Continue(LanternType::Primitive(&native::INT_PRIMITIVE))
+                            ControlFlow::Continue(tcx.primitive(&native::INT_PRIMITIVE))
                         } else {
                             error!(in self.sink; ident.1 => "field {} does not exist on array", self.display(&ident));
-                            ControlFlow::Continue(LanternType::Null)
+                            ControlFlow::Continue(tcx.null())
                         }
                     },
                     LanternType::Primitive(primitive) => {
-                        if let Some(associated) = scope.associated(ItemIdentifier::Primitive(primitive.id), ident.0) {
+                        if let Some(associated) = scope.associated(ty, ident.0) {
                             if associated.args.first().is_some_and(|(_, receiver)| *receiver == ty) {
                                 inst!(with self.frame => ident.span(); PUSHU associated.index);
                             } else {
                                 error!(in self.sink; ident.1 => "method must have a receiver");
                             }
-                            ControlFlow::Continue(associated.to_method_type())
+                            ControlFlow::Continue(associated.method_type)
                         } else {
                             error!(in self.sink; ident.1 => "method {} does not exist in {}", self.display(&ident), primitive.name);
-                            ControlFlow::Continue(LanternType::Null)
+                            ControlFlow::Continue(tcx.null())
                         }
                     },
-                    LanternType::ItemStatic(type_id) => {
-                        let Some(fun) = scope.associated(type_id, ident.0) else {
-                            // TODO: type name
-                            error!(in self.sink; ident.span() => "static item {} does not exist", self.display(&ident));
-                            return ControlFlow::Continue(LanternType::Null)
-                        };
-                        inst!(with self.frame => ident.span(); PUSHU fun.index);
-                        ControlFlow::Continue(fun.to_assoc_type())
-                    },
                     _ => {
-                        error!(in self.sink; ident.1 => "field {} does not exist on {ty}", self.display(&ident));
-                        ControlFlow::Continue(LanternType::Null)
-                    },
+                        error!(in self.sink; ident.1 => "field {} does not exist on {}", self.display(&ident), self.display(&ty));
+                        ControlFlow::Continue(tcx.null())
+                    }
                 }
             },
         }
     }
 
-    pub fn resolve_types(&mut self, statements: &[Stmt], scope: &mut Scope) {
+    pub fn resolve_types(&mut self, statements: &[Stmt], scope: &mut Scope<'_, 't>, tcx: &TypeContext<'t>) {
         statements.iter()
             .filter_map(|statement| {
                 if let Stmt::Item(item) = statement {
@@ -686,16 +695,16 @@ impl<'a> FlameGen<'a> {
             .for_each(|item| match item {
                 Item::Using(_) => todo!(),
                 Item::Struct(ItemStruct { ident, .. }) => {
-                    // this gets overridden during the 2nd pass
-                    let r#struct = LanternStruct::new(ident.0, self.globals.types.len(), Box::new([]));
-                    self.globals.types.push(r#struct.to_type_info());
-                    if scope.insert_item(ident.0, LanternItem::Struct(r#struct)).is_none() {
+                    let r#struct = LanternStruct::new(ident.0, self.globals.types.len());
+                    // "dummy" typeinfo
+                    self.globals.types.push(TypeInfo::Object { size: 0, ref_offets: Box::new([]) });
+                    if scope.insert_item(ident.0, tcx.intern(LanternType::Struct(r#struct))).is_none() {
                         error!(in self.sink; ident.span() => "struct already declared");
                     }
                 },
                 Item::Primitive(ItemPrimitive { ident, .. }) => {
                     let Some(primitive) = native::get_primitive(self.symbol_table.resolve(ident.0)) else { panic!("unknown primitive `{}`", self.display(ident)) };
-                    if scope.insert_item(ident.0, LanternItem::Primitive(primitive)).is_none() {
+                    if scope.insert_item(ident.0, tcx.primitive(primitive)).is_none() {
                         error!(in self.sink; ident.span() => "primitive already declared");
                     }
                 },
@@ -703,7 +712,7 @@ impl<'a> FlameGen<'a> {
             });
     }
 
-    fn compile_lvalue<'s>(&mut self, scope: &'s Scope, lhs: Expr) -> ControlFlow<(), Result<LValue<'s>, Diagnostic>> {
+    fn compile_lvalue(&mut self, scope: &Scope<'_, 't>, tcx: &TypeContext<'t>, lhs: Expr) -> ControlFlow<(), Result<LValue<'t>, Diagnostic>> {
         match lhs {
             Expr::Identifier(ident) => {
                 ControlFlow::Continue(scope.variable(ident.0)
@@ -712,17 +721,18 @@ impl<'a> FlameGen<'a> {
             },
             Expr::Index(ExprIndex { expr, index, closed_bracket, .. }) => {
                 let expr_span = expr.span();
-                let inner = match self.compile_expr(*expr, scope)? {
-                    LanternType::Array(inner) => *inner,
-                    r#type => {
-                        error!(in self.sink; expr_span => "cannot index a {type}");
-                        LanternType::Null
+                let ty = self.compile_expr(*expr, scope, tcx)?;
+                let inner = match *ty {
+                    LanternType::Array(inner) => inner,
+                    ref ty => {
+                        error!(in self.sink; expr_span => "cannot index a {}", self.display(ty));
+                        tcx.null()
                     },
                 };
 
                 let index_span = index.span();
-                let index = self.compile_expr(*index, scope)?;
-                if index != LanternType::Primitive(&native::INT_PRIMITIVE) {
+                let index = self.compile_expr(*index, scope, tcx)?;
+                if index != tcx.primitive(&native::INT_PRIMITIVE) {
                     error!(in self.sink; index_span => "expected index to be an int");
                 }
 
@@ -736,21 +746,20 @@ impl<'a> FlameGen<'a> {
             },
             Expr::Field(ExprField { expr, ident }) => {
                 let expr_span = expr.span();
-                match self.compile_expr(*expr, scope)? {
-                    LanternType::Struct(type_id) => {
-                        let r#struct = scope.find_struct(type_id);
-                        let field_type = if let Some(field) = r#struct.fields.iter().find(|field| field.name == ident.0) {
+                match &*self.compile_expr(*expr, scope, tcx)? {
+                    LanternType::Struct(r#struct) => {
+                        let field_type = if let Some(field) = r#struct.find_field(ident.0) {
                             inst!(with self.frame => ident.span(); PUSHU (HeapObject::field_offset() + field.offset));
-                            &field.r#type
+                            field.ty
                         } else {
                             error!(in self.sink; ident.span() => "field {} does not exist on {}", self.display(&ident), self.symbol_table.resolve(r#struct.name));
-                            &LanternType::Null
+                            tcx.null()
                         };
                         ControlFlow::Continue(Ok(LValue::StructField(field_type)))
                     },
-                    r#type => {
-                        error!(in self.sink; expr_span => "field {} does not exist on {type}", self.display(&ident));
-                        ControlFlow::Continue(Ok(LValue::StructField(&LanternType::Null)))
+                    ty => {
+                        error!(in self.sink; expr_span => "field {} does not exist on {}", self.display(&ident), self.display(ty));
+                        ControlFlow::Continue(Ok(LValue::StructField(tcx.null())))
                     },
                 }
             },
@@ -758,26 +767,26 @@ impl<'a> FlameGen<'a> {
         }
     }
 
-    fn compile_op_assign(&mut self, scope: &Scope, lhs: Expr, op: BinaryOperator, rhs: Expr) -> ControlFlow<(), LanternType> {
+    fn compile_op_assign(&mut self, scope: &Scope<'_, 't>, tcx: &TypeContext<'t>, lhs: Expr, op: BinaryOperator, rhs: Expr) -> ControlFlow<(), TypeId<'t>> {
         match lhs {
             Expr::Identifier(ident) => {
                 let Some(var) = scope.variable(ident.0) else {
                     error!(in self.sink; ident.span() => "unknown variable `{}`", self.display(&ident));
-                    return ControlFlow::Continue(LanternType::Null);
+                    return ControlFlow::Continue(tcx.null());
                 };
 
                 inst!(with self.frame => op.span(); LOAD_LOCAL var.index);
 
-                let rhs = self.compile_expr(rhs, scope)?;
-                if var.r#type != rhs {
-                    error!(in self.sink; op.span() => "{op} cannot be applied to {} and {rhs}", var.r#type);
-                    return ControlFlow::Continue(LanternType::Null);
+                let rhs = self.compile_expr(rhs, scope, tcx)?;
+                if var.ty != rhs {
+                    error!(in self.sink; op.span() => "{op} cannot be applied to {} and {}", self.display(&var.ty), self.display(&rhs));
+                    return ControlFlow::Continue(tcx.null());
                 }
-                match (&var.r#type, rhs) {
+                match (&*var.ty, &*rhs) {
                     (LanternType::Primitive(lhs), LanternType::Primitive(_)) if lhs.ops.get_bin_op(&op).is_some() => {
                         self.frame.instructions.push(lhs.ops.get_bin_op(&op).unwrap());
                     },
-                    (lhs, rhs) => error!(in self.sink; op.span() => "{op} cannot be applied to {lhs} and {rhs}"),
+                    (lhs, rhs) => error!(in self.sink; op.span() => "{op} cannot be applied to {} and {}", self.display(lhs), self.display(rhs)),
                 }
                 inst!(self.frame.instructions; STORE_LOCAL var.index);
             },
@@ -785,7 +794,7 @@ impl<'a> FlameGen<'a> {
             Expr::Field(_) => todo!("operator assignment is currently only supported on locals"),
             _ => error!(in self.sink; op.span() => "bad left-hand-side of assignment"),
         }
-        ControlFlow::Continue(LanternType::Null)
+        ControlFlow::Continue(tcx.null())
     }
 
     fn display<T: SymbolDisplay>(&self, dis: &T) -> String {
@@ -793,17 +802,17 @@ impl<'a> FlameGen<'a> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LValue<'a> {
-    Local(&'a LanternVariable),
-    ArrayElement(LanternType),
-    StructField(&'a LanternType),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LValue<'t> {
+    Local(LanternVariable<'t>),
+    ArrayElement(TypeId<'t>),
+    StructField(TypeId<'t>),
 }
 
-impl<'a> LValue<'a> {
-    pub fn write_type(&'a self) -> &'a LanternType {
+impl<'t> LValue<'t> {
+    pub fn write_type(self) -> TypeId<'t> {
         match self {
-            Self::Local(var) => &var.r#type,
+            Self::Local(var) => var.ty,
             Self::ArrayElement(ty) => ty,
             Self::StructField(ty) => ty,
         }
@@ -811,85 +820,129 @@ impl<'a> LValue<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LanternFunction {
+pub struct LanternFunction<'t> {
     pub index: usize,
-    pub args: Vec<(Ident, LanternType)>,
-    pub ret: LanternType,
+    pub args: Vec<(Ident, TypeId<'t>)>,
+    pub ret: TypeId<'t>,
+    pub assoc_type: TypeId<'t>,
+    pub method_type: TypeId<'t>,
 }
 
-impl LanternFunction {
-    pub fn new(index: usize, args: Vec<(Ident, LanternType)>, ret: LanternType) -> Self {
-        Self { index, args, ret }
-    }
-
-    pub fn to_assoc_type(&self) -> LanternType {
-        LanternType::Function { is_method: false, args: self.args.iter().map(|(_, r#type)| r#type.clone()).collect(), ret: Box::new(self.ret.clone()) }
-    }
-
-    pub fn to_method_type(&self) -> LanternType {
-        // first arg is assumed to be the receiver
-        LanternType::Function { is_method: true, args: self.args.iter().skip(1).map(|(_, r#type)| r#type.clone()).collect(), ret: Box::new(self.ret.clone()) }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LanternItem {
-    Struct(LanternStruct),
-    Primitive(&'static LanternPrimitive),
-}
-
-impl LanternItem {
-    pub fn identifier(&self) -> ItemIdentifier {
-        match self {
-            Self::Struct(r#struct) => ItemIdentifier::Struct(r#struct.id),
-            Self::Primitive(primitive) => ItemIdentifier::Primitive(primitive.id),
+impl<'t> LanternFunction<'t> {
+    pub fn new(index: usize, args: Vec<(Ident, TypeId<'t>)>, ret: TypeId<'t>, tcx: &TypeContext<'t>) -> Self {
+        Self {
+            assoc_type: tcx.intern(Self::to_assoc_type(&args, ret)),
+            method_type: tcx.intern(Self::to_method_type(&args, ret)),
+            index,
+            args,
+            ret,
         }
     }
+
+    fn to_assoc_type(args: &[(Ident, TypeId<'t>)], ret: TypeId<'t>) -> LanternType<'t> {
+        LanternType::Function { is_method: false, args: args.iter().map(|(_, ty)| *ty).collect(), ret }
+    }
+
+    fn to_method_type(args: &[(Ident, TypeId<'t>)], ret: TypeId<'t>) -> LanternType<'t> {
+        // first arg is assumed to be the receiver
+        LanternType::Function { is_method: true, args: args.iter().skip(1).map(|(_, ty)| *ty).collect(), ret }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LanternStruct {
+pub struct LanternStruct<'t> {
     pub name: Symbol,
     pub id: usize,
-    pub fields: Box<[LanternStructField]>,
-    pub size: usize,
+    pub data: OnceCell<LanternStructData<'t>>,
 }
 
-impl LanternStruct {
-    pub fn new(name: Symbol, index: usize, fields: Box<[(Symbol, LanternType)]>) -> Self {
-        let alignment = fields.iter()
-            .map(|(_, r#type)| r#type.alignment())
-            .max()
-            .unwrap_or(1);
+impl hash::Hash for LanternStruct<'_> {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        state.write_usize(self.id);
+    }
+}
 
-        let mut struct_fields = Vec::with_capacity(fields.len());
-        let mut size = 0;
-        for (name, r#type) in fields {
-            let (field_size, field_alignment) = (r#type.size(), r#type.alignment());
-
-            size += size % field_alignment;
-            struct_fields.push(LanternStructField { name, offset: size, size: field_size, r#type });
-            size += field_size;
-        }
-        size += size % alignment;
-
+impl<'t> LanternStruct<'t> {
+    pub fn new(name: Symbol, index: usize) -> Self {
         Self {
             name,
             id: index,
-            fields: struct_fields.into(),
+            data: OnceCell::new(),
+        }
+    }
+
+    pub fn init(&self, fields: Box<[(Symbol, TypeId<'t>)]>) {
+        if self.data.set(LanternStructData::new(fields)).is_err() {
+            panic!("double-init on lantern struct")
+        }
+    }
+
+    pub fn data(&self) -> &LanternStructData<'t> {
+        match self.data.get() {
+            Some(data) => data,
+            None => panic!("struct data not initialized"),
+        }
+    }
+
+    pub fn find_field(&self, name: Symbol) -> Option<&LanternStructField<'t>> {
+        self.data().find_field(name)
+    }
+
+    pub fn to_type_info(&self) -> TypeInfo {
+        self.data().to_type_info()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LanternStructData<'t> {
+    fields: Box<[LanternStructField<'t>]>,
+    size: usize,
+}
+
+impl<'t> LanternStructData<'t> {
+    pub fn new(fields: Box<[(Symbol, TypeId<'t>)]>) -> Self {
+        let alignment = fields.iter()
+            .map(|(_, ty)| ty.alignment())
+            .max()
+            .unwrap_or(1);
+
+        let mut size = 0;
+        let fields = fields.into_iter()
+            .map(|(name, ty)| {
+                size += size % ty.alignment();
+                let field = LanternStructField { name, offset: size, ty };
+                size += ty.size();
+                field
+            })
+            .collect();
+        size += size % alignment;
+
+        Self {
+            fields,
             size,
         }
+    }
+
+    pub fn find_field(&self, name: Symbol) -> Option<&LanternStructField<'t>> {
+        self.fields.iter().find(|field| field.name == name)
     }
 
     pub fn to_type_info(&self) -> TypeInfo {
         TypeInfo::Object {
             size: self.size,
             ref_offets: self.fields.iter()
-                .filter(|field| field.r#type.is_ref())
+                .filter(|field| field.ty.is_ref())
                 .map(|field| field.offset)
                 .collect(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LanternStructField<'t> {
+    pub name: Symbol,
+    pub offset: usize,
+    pub ty: TypeId<'t>,
 }
 
 #[derive(Clone)]
@@ -899,6 +952,12 @@ pub struct LanternPrimitive {
     pub size: usize,
     pub align: usize,
     pub ops: PrimitiveOps,
+}
+
+impl hash::Hash for LanternPrimitive {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        state.write_usize(self.id);
+    }
 }
 
 impl std::fmt::Debug for LanternPrimitive {
@@ -951,8 +1010,8 @@ impl PrimitiveOps {
 
     pub fn get_un_op(&self, op: &UnaryOperator) -> Option<Instruction> {
         match op {
+            UnaryOperator::Not(_) => self.not_inst.clone(),
             UnaryOperator::Negate(_) => self.negate_inst.clone(),
-            _ => None,
         }
     }
 }
@@ -965,23 +1024,15 @@ impl PartialEq for LanternPrimitive {
 
 impl Eq for LanternPrimitive { }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LanternStructField {
-    pub name: Symbol,
-    pub offset: usize,
-    pub size: usize,
-    pub r#type: LanternType,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LanternVariable {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LanternVariable<'t> {
     pub index: usize,
-    pub r#type: LanternType,
+    pub ty: TypeId<'t>,
 }
 
-impl LanternVariable {
-    pub fn new(index: usize, r#type: LanternType) -> Self {
-        Self { index, r#type }
+impl<'t> LanternVariable<'t> {
+    pub fn new(index: usize, ty: TypeId<'t>) -> Self {
+        Self { index, ty }
     }
 }
 

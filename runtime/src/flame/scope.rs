@@ -2,24 +2,24 @@ use std::collections::HashMap;
 
 use diagnostic::{Span, symbol::Symbol};
 
-use crate::{flame::{FunctionKind, GeneratedFunction, LanternFunction, LanternItem, LanternStruct, LanternVariable, instruction::InstructionSet, r#type::LanternType}, heap::TypeInfo};
+use crate::{flame::{FunctionKind, GeneratedFunction, LanternFunction, LanternVariable, instruction::InstructionSet, r#type::TypeId}, heap::TypeInfo};
 
 #[derive(Debug, Clone)]
-pub struct Scope<'a> {
-    items: HashMap<Symbol, LanternItem>,
-    functions: HashMap<Symbol, LanternFunction>,
-    variables: HashMap<Symbol, LanternVariable>,
-    associated: HashMap<ItemIdentifier, HashMap<Symbol, LanternFunction>>,
-    kind: ScopeKind<'a>,
+pub struct Scope<'a, 't> {
+    items: HashMap<Symbol, TypeId<'t>>,
+    functions: HashMap<Symbol, LanternFunction<'t>>,
+    variables: HashMap<Symbol, LanternVariable<'t>>,
+    associated: HashMap<TypeId<'t>, HashMap<Symbol, LanternFunction<'t>>>,
+    kind: ScopeKind<'a, 't>,
 }
 
-impl<'a> Default for Scope<'a> {
+impl Default for Scope<'_, '_> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<'a> Scope<'a> {
+impl<'a, 't> Scope<'a, 't> {
     pub fn new() -> Self {
         Self {
             items: HashMap::new(),
@@ -30,61 +30,32 @@ impl<'a> Scope<'a> {
         }
     }
 
-    pub fn kind(&self) -> &ScopeKind<'a> {
+    pub fn kind(&self) -> &ScopeKind<'a, 't> {
         &self.kind
     }
 
-    pub fn into_kind(self) -> ScopeKind<'a> {
+    pub fn into_kind(self) -> ScopeKind<'a, 't> {
         self.kind
     }
 
-    pub fn find_struct(&self, type_id: usize) -> &LanternStruct {
+    pub fn item(&self, name: Symbol) -> Option<TypeId<'t>> {
         match self.kind {
-            ScopeKind::Module => {
-                for item in self.items.values() {
-                    if let LanternItem::Struct(r#struct @ LanternStruct { id, .. }) = item && *id == type_id {
-                        return r#struct
-                    }
-                }
-                panic!("struct with type id {type_id} not found");
-            },
-            ScopeKind::Block(parent) | ScopeKind::Function(parent, _) => {
-                for item in self.items.values() {
-                    if let LanternItem::Struct(r#struct @ LanternStruct { id, .. }) = item && *id == type_id {
-                        return r#struct
-                    }
-                }
-                parent.find_struct(type_id)
-            }
-        }
-    }
-
-    pub fn find_struct_mut_in_scope(&mut self, type_id: usize) -> Option<&mut LanternStruct> {
-        self.items.values_mut().find_map(|item| match item {
-            LanternItem::Struct(r#struct) if r#struct.id == type_id => {
-                Some(r#struct)
-            },
-            _ => None,
-        })
-    }
-
-    pub fn item(&self, name: Symbol) -> Option<&LanternItem> {
-        match self.kind {
-            ScopeKind::Module => self.items.get(&name),
+            ScopeKind::Module => self.items.get(&name).copied(),
             ScopeKind::Block(parent) | ScopeKind::Function(parent, _) => {
                 self.items.get(&name)
+                    .copied()
                     .or_else(|| parent.item(name))
             }
         }
     }
 
-    pub fn insert_item(&mut self, name: Symbol, item: LanternItem) -> Option<()> {
+    pub fn insert_item(&mut self, name: Symbol, item: TypeId<'t>) -> Option<()> {
         if self.items.contains_key(&name) { return None; };
         self.items.insert(name, item);
         Some(())
     }
 
-    pub fn function(&self, name: Symbol) -> Option<&LanternFunction> {
+    pub fn function(&self, name: Symbol) -> Option<&LanternFunction<'t>> {
         match self.kind {
             ScopeKind::Module => self.functions.get(&name),
             ScopeKind::Block(parent) | ScopeKind::Function(parent, _) => {
@@ -94,49 +65,49 @@ impl<'a> Scope<'a> {
         }
     }
 
-    pub fn insert_function(&mut self, name: Symbol, fun: LanternFunction) -> Option<()> {
+    pub fn insert_function(&mut self, name: Symbol, fun: LanternFunction<'t>) -> Option<()> {
         if self.functions.contains_key(&name) { return None; };
         self.functions.insert(name, fun);
         Some(())
     }
 
-    pub fn variable(&self, name: Symbol) -> Option<&LanternVariable> {
+    pub fn variable(&self, name: Symbol) -> Option<LanternVariable<'t>> {
         match self.kind {
-            ScopeKind::Module | ScopeKind::Function(..) => self.variables.get(&name),
+            ScopeKind::Module | ScopeKind::Function(..) => self.variables.get(&name).copied(),
             ScopeKind::Block(parent) => {
                 self.variables.get(&name)
+                    .copied()
                     .or_else(|| parent.variable(name))
             }
         }
     }
 
-    pub fn insert_variable(&mut self, name: Symbol, index: usize, r#type: LanternType) -> Option<()> {
+    pub fn insert_variable(&mut self, name: Symbol, index: usize, ty: TypeId<'t>) -> Option<()> {
         if self.variables.contains_key(&name) { return None; };
-        self.variables.insert(name, LanternVariable::new(index, r#type));
+        self.variables.insert(name, LanternVariable::new(index, ty));
         Some(())
     }
 
-    pub fn associated(&self, id: ItemIdentifier, name: Symbol) -> Option<&LanternFunction> {
+    pub fn associated(&self, ty: TypeId<'t>, name: Symbol) -> Option<&LanternFunction<'t>> {
         match self.kind {
-            ScopeKind::Module => self.associated.get(&id).and_then(|associated| associated.get(&name)),
+            ScopeKind::Module => self.associated.get(&ty).and_then(|associated| associated.get(&name)),
             ScopeKind::Block(parent) | ScopeKind::Function(parent, _) => {
-                self.associated.get(&id).and_then(|type_associated| type_associated.get(&name))
-                    .or_else(|| parent.associated(id, name))
+                self.associated.get(&ty).and_then(|type_associated| type_associated.get(&name))
+                    .or_else(|| parent.associated(ty, name))
             }
         }
     }
 
-    pub fn insert_associated(&mut self, id: ItemIdentifier, name: Symbol, fun: LanternFunction) -> Option<()> {
-        let type_associated = self.associated.entry(id)
-            .or_default();
+    pub fn insert_associated(&mut self, ty: TypeId<'t>, name: Symbol, fun: LanternFunction<'t>) -> Option<()> {
+        let type_associated = self.associated.entry(ty).or_default();
         if type_associated.contains_key(&name) { return None; };
         type_associated.insert(name, fun);
         Some(())
     }
 }
 
-impl<'a: 'b, 'b> Scope<'a> {
-    pub fn child_block(&'a self) -> Scope<'b> {
+impl<'a: 'b, 'b, 't> Scope<'a, 't> {
+    pub fn child_block(&'a self) -> Scope<'b, 't> {
         Self {
             items: HashMap::new(),
             functions: HashMap::new(),
@@ -146,7 +117,7 @@ impl<'a: 'b, 'b> Scope<'a> {
         }
     }
 
-    pub fn child_function(&'a self, span: Span) -> Scope<'b> {
+    pub fn child_function(&'a self, span: Span) -> Scope<'b, 't> {
         Self {
             items: HashMap::new(),
             functions: HashMap::new(),
@@ -157,17 +128,11 @@ impl<'a: 'b, 'b> Scope<'a> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ItemIdentifier {
-    Struct(usize),
-    Primitive(usize),
-}
-
 #[derive(Debug, Clone)]
-pub enum ScopeKind<'a> {
+pub enum ScopeKind<'a, 't> {
     Module,
-    Function(&'a Scope<'a>, Span),
-    Block(&'a Scope<'a>),
+    Function(&'a Scope<'a, 't>, Span),
+    Block(&'a Scope<'a, 't>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -207,15 +172,15 @@ impl LoopScope {
 }
 
 #[derive(Debug, Clone)]
-pub struct StackFrame {
+pub struct StackFrame<'t> {
     pub name: String,
     pub instructions: InstructionSet,
     pub locals: usize,
     pub line_table: Vec<LineMap>,
-    pub ret_type: Option<LanternType>,
+    pub ret_type: Option<TypeId<'t>>,
 }
 
-impl StackFrame {
+impl<'t> StackFrame<'t> {
     pub fn new_module() -> Self {
         Self {
             name: "<module>".to_string(),
@@ -226,7 +191,7 @@ impl StackFrame {
         }
     }
 
-    pub fn new_fun(name: String, ret_type: LanternType) -> Self {
+    pub fn new_fun(name: String, ret_type: TypeId<'t>) -> Self {
         Self {
             name,
             instructions: InstructionSet::new(),
