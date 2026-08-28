@@ -5,6 +5,7 @@ members = [
   "lex",
   "diagnostic",
   "macros",
+  "arena",
 
   "cli",
 ]

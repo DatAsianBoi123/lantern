@@ -59,6 +59,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f0e0fee31ef5ed1ba1316088939cea399010ed7731dba877ed44aeb407a75ea"
 
 [[package]]
+name = "arena"
+version = "0.1.0"
+
+[[package]]
 name = "clap"
 version = "4.5.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -188,6 +192,7 @@ name = "runtime"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arena",
  "diagnostic",
  "parse",
  "thiserror",
