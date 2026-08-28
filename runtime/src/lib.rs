@@ -248,8 +248,8 @@ impl VM {
                     Instruction::FCompareEq => args!((f64, f64) -> usize in self.stack, (rhs, lhs) => bool_to_slot(lhs == rhs)),
                     Instruction::ICompareEq => args!((i64, i64) -> usize in self.stack, (rhs, lhs) => bool_to_slot(lhs == rhs)),
                     Instruction::Not => args!((usize) -> usize in self.stack, bool => match bool {
-                        0 => bool_to_slot(false),
-                        1 => bool_to_slot(true),
+                        0 => bool_to_slot(true),
+                        1 => bool_to_slot(false),
                         _ => unreachable!(),
                     }),
                     Instruction::AllocObj(index) => {
