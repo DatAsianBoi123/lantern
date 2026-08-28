@@ -1,4 +1,4 @@
-use std::{fs::File, io::Read, time::Instant};
+use std::{fs::File, io::Read, process::ExitCode, time::Instant};
 
 use clap::Parser;
 use diagnostic::{DiagnosticSink, symbol::SymbolTable};
@@ -15,18 +15,18 @@ struct Args {
     no_run: bool,
 }
 
-fn main() {
+fn main() -> ExitCode {
     let Args { file: file_name, verbose, no_run } = Args::parse();
 
     let Ok(mut file) = File::open(&file_name) else {
         eprintln!("file not found: `{file_name}`");
-        return;
+        return ExitCode::from(3);
     };
 
     let mut content = String::new();
     if file.read_to_string(&mut content).is_err() {
         eprintln!("file contains invalid UTF-8");
-        return;
+        return ExitCode::from(3);
     };
     let mut symbol_table = SymbolTable::new();
     let before_compile = Instant::now();
@@ -34,7 +34,7 @@ fn main() {
         Ok(tokens) => tokens,
         Err(err) => {
             eprintln!("{err}");
-            return;
+            return ExitCode::from(80);
         }
     };
 
@@ -45,14 +45,13 @@ fn main() {
     }
 
     let mut sink = DiagnosticSink::new();
-    let before = Instant::now();
     let vm = VM::new(lantern_file, &mut sink, &symbol_table);
 
     for err in sink.into_emitted() {
         eprintln!("{err}");
     }
 
-    let Some(vm) = vm else { return; };
+    let Some(vm) = vm else { return ExitCode::from(101); };
 
     if verbose {
         vm.funs().iter().enumerate().for_each(|(i, fun)| {
@@ -62,17 +61,19 @@ fn main() {
                 FunctionKind::Native(native) => println!("<native function {native:?}>"),
             }
         });
-        println!("Compiled in {:?}", Instant::now().duration_since(before));
     }
 
     println!("finished compiling in {:?}", Instant::now().duration_since(before_compile));
 
-    if no_run { return; }
+    if no_run { return ExitCode::SUCCESS; }
 
     println!("running {file_name}");
     match vm.exec() {
-        Ok(_) => {},
-        Err(err) => eprintln!("{err}"),
+        Ok(_) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("{err}");
+            ExitCode::FAILURE
+        },
     }
 }
 
