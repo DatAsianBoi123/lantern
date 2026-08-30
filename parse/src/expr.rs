@@ -4,7 +4,7 @@ use diagnostic::{Span, error};
 use lex::{And, Asterisk, AsteriskEq, Bang, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Equals, EqualsEquals, Greater, GreaterEq, Hyphen, HyphenEq, Less, LessEq, Literal, NotEquals, OpenBrace, OpenBracket, OpenParen, Or, Percent, PercentEq, Period, Plus, PlusEq, Punct, Slash, SlashEq, Token, TokenKind};
 use macros::Parse;
 
-use crate::{Ident, ParseTokens, Result, Stmt, stream::{TokenStream, parse_punctuated, parse_repetition}};
+use crate::{Ident, ParseTokens, Result, Stmt, Type, stream::{TokenStream, parse_punctuated, parse_repetition}};
 
 #[derive(Debug, Clone, PartialEq)]
 enum PrimaryExpr {
@@ -207,12 +207,37 @@ pub struct ExprBlock {
     pub closed_brace: ClosedBrace,
 }
 
-#[derive(Parse, Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ExprArray {
     pub open_bracket: OpenBracket,
-    #[parse(with(parse_punctuated::<Expr, Comma, ClosedBracket>))]
     pub elements: Vec<Expr>,
     pub closed_bracket: ClosedBracket,
+    pub ty: Option<Type>,
+}
+
+impl ParseTokens for ExprArray {
+    fn parse(stream: &mut TokenStream) -> Result<Self> {
+        let open_bracket = stream.parse()?;
+        let elements = parse_punctuated::<_, Comma, ClosedBracket>(stream)?;
+        let closed_bracket = stream.parse()?;
+
+        let ty = match stream.peek()? {
+            Token::Punct(Punct::OpenBracket(_)) => {
+                let _ = stream.next_token();
+                let ty = stream.parse()?;
+                stream.parse::<ClosedBracket>()?;
+                Some(ty)
+            },
+            _ => None,
+        };
+
+        Ok(Self {
+            open_bracket,
+            elements,
+            closed_bracket,
+            ty,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

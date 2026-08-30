@@ -551,9 +551,9 @@ impl<'a, 't> FlameGen<'a, 't> {
                 inst!(with self.frame => closed_brace.span(); PUSHU 0);
                 ControlFlow::Continue(tcx.null())
             },
-            Expr::Array(ExprArray { elements, closed_bracket, .. }) => {
+            Expr::Array(ExprArray { open_bracket, elements, closed_bracket, ty, .. }) => {
                 let len = elements.len();
-                let mut inner = None;
+                let mut inner = ty.map(|ty| self.sink.emit_or(LanternType::resolve(&ty, scope, tcx), tcx.null()));
 
                 for expr in elements {
                     let span = expr.span();
@@ -566,8 +566,10 @@ impl<'a, 't> FlameGen<'a, 't> {
                         },
                     }
                 }
-                // TODO: type hint
-                let inner = inner.unwrap_or(tcx.null());
+                let inner = inner.unwrap_or_else(|| {
+                    error!(in self.sink; open_bracket.span() => "empty arrays require an explicit element type");
+                    tcx.null()
+                });
                 if inner.is_ref() {
                     inst!(with self.frame => closed_bracket.span(); ALLOC_ARR VM::REF_ARR_TYPE_INDEX, len);
                 } else {
@@ -657,7 +659,7 @@ impl<'a, 't> FlameGen<'a, 't> {
                             }
                             ControlFlow::Continue(tcx.primitive(&native::INT_PRIMITIVE))
                         } else {
-                            error!(in self.sink; ident.1 => "field {} does not exist on array", self.display(&ident));
+                            error!(in self.sink; ident.1 => "field {} does not exist in {}", self.display(&ident), self.display(&ty));
                             ControlFlow::Continue(tcx.null())
                         }
                     },
