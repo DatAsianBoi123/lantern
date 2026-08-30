@@ -24,7 +24,7 @@ impl<T: TokenKind> ParseTokens for T {
 }
 
 pub fn parse<'a>(content: &'a str, symbol_table: &mut SymbolTable<'a>) -> Result<LanternFile> {
-    LanternFile::parse(&mut TokenStream::from_input(content, symbol_table))
+    TokenStream::from_input(content, symbol_table).parse()
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -36,7 +36,7 @@ impl ParseTokens for LanternFile {
     fn parse(stream: &mut TokenStream) -> Result<Self> {
         let mut stmts = Vec::new();
         while !stream.is_eof()? {
-            stmts.push(Stmt::parse(stream)?);
+            stmts.push(stream.parse()?);
         }
         Ok(Self { stmts })
     }
@@ -55,11 +55,11 @@ impl ParseTokens for Item {
     fn parse(stream: &mut TokenStream) -> Result<Self> {
         let peek = stream.peek()?;
         match peek {
-            Token::Keyword(Keyword::Fun(_)) => ItemFun::parse(stream).map(Self::Fun),
-            Token::Keyword(Keyword::Using(_)) => ItemUsing::parse(stream).map(Self::Using),
-            Token::Keyword(Keyword::Struct(_)) => ItemStruct::parse(stream).map(Self::Struct),
-            Token::Keyword(Keyword::Native(_)) => ItemNativeFun::parse(stream).map(Self::NativeFun),
-            Token::Keyword(Keyword::Primitive(_)) => ItemPrimitive::parse(stream).map(Self::Primitive),
+            Token::Keyword(Keyword::Fun(_)) => stream.parse().map(Self::Fun),
+            Token::Keyword(Keyword::Using(_)) => stream.parse().map(Self::Using),
+            Token::Keyword(Keyword::Struct(_)) => stream.parse().map(Self::Struct),
+            Token::Keyword(Keyword::Native(_)) => stream.parse().map(Self::NativeFun),
+            Token::Keyword(Keyword::Primitive(_)) => stream.parse().map(Self::Primitive),
             _ => Err(error!(peek.span() => "expected `item`")),
         }
     }
@@ -192,18 +192,17 @@ pub struct ReturnStmt {
 
 impl ParseTokens for ReturnStmt {
     fn parse(stream: &mut TokenStream) -> Result<Self> {
-        let ret = Return::parse(stream)?;
+        let ret = stream.parse()?;
         let expr = if Semi::is_token(stream.peek()?) {
             None
         } else {
-            Some(Expr::parse(stream)?)
+            Some(stream.parse()?)
         };
-        let semi = Semi::parse(stream)?;
 
         Ok(Self {
             ret,
             expr,
-            semi,
+            semi: stream.parse()?,
         })
     }
 }
@@ -268,10 +267,10 @@ impl SymbolDisplay for Path {
 
 impl ParseTokens for Path {
     fn parse(stream: &mut TokenStream) -> Result<Self> {
-        let mut items = vec![Ident::parse(stream)?];
+        let mut items = vec![stream.parse()?];
         while Period::is_token(stream.peek()?) {
-            Period::parse(stream)?;
-            items.push(Ident::parse(stream)?);
+            stream.parse::<Period>()?;
+            items.push(stream.parse()?);
         }
         Ok(Self { items })
     }

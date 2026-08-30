@@ -19,26 +19,27 @@ enum PrimaryExpr {
 impl ParseTokens for PrimaryExpr {
     fn parse(stream: &mut TokenStream) -> Result<Self> {
         match stream.peek()? {
-            Token::Literal(_) => Ok(Self::Literal(Literal::parse(stream)?)),
+            Token::Literal(_) => Ok(Self::Literal(stream.parse()?)),
             Token::Ident(_) => {
                 // either Ident or Struct
                 let Token::Ident(ident) = stream.next_token()? else { unreachable!() };
-                if matches!(stream.peek()?, Token::Punct(Punct::OpenBrace(_))) {
+                match stream.peek()? {
                     // Struct
-                    Ok(Self::Struct(ExprStruct {
-                        ident,
-                        open_brace: ParseTokens::parse(stream)?,
-                        fields: parse_punctuated::<ExprStructField, Comma, ClosedBrace>(stream)?,
-                        closed_brace: ParseTokens::parse(stream)?,
-                    }))
-                } else {
+                    Token::Punct(Punct::OpenBrace(_)) => {
+                        Ok(Self::Struct(ExprStruct {
+                            ident,
+                            open_brace: stream.parse()?,
+                            fields: parse_punctuated::<ExprStructField, Comma, ClosedBrace>(stream)?,
+                            closed_brace: stream.parse()?,
+                        }))
+                    }
                     // Ident
-                    Ok(Self::Identifier(ident))
+                    _ => Ok(Self::Identifier(ident)),
                 }
             },
-            Token::Punct(Punct::OpenParen(_)) => Ok(Self::Paren(ExprParen::parse(stream)?)),
-            Token::Punct(Punct::OpenBrace(_)) => Ok(Self::Block(ExprBlock::parse(stream)?)),
-            Token::Punct(Punct::OpenBracket(_)) => Ok(Self::Array(ExprArray::parse(stream)?)),
+            Token::Punct(Punct::OpenParen(_)) => Ok(Self::Paren(stream.parse()?)),
+            Token::Punct(Punct::OpenBrace(_)) => Ok(Self::Block(stream.parse()?)),
+            Token::Punct(Punct::OpenBracket(_)) => Ok(Self::Array(stream.parse()?)),
             token => Err(error!(token.span() => "expected `expr`")),
         }
     }
@@ -94,8 +95,8 @@ impl Expr {
         let mut lhs = Self::parse_lhs(stream)?;
         loop {
             if Period::is_token(stream.peek()?) {
-                Period::parse(stream)?;
-                lhs = Self::Field(ExprField { expr: Box::new(lhs), ident: Ident::parse(stream)? });
+                let _ = stream.next_token();
+                lhs = Self::Field(ExprField { expr: Box::new(lhs), ident: stream.parse()? });
                 continue;
             }
 
@@ -103,7 +104,7 @@ impl Expr {
                 if left_bp < min_bp {
                     break;
                 }
-                let op = BinaryOperator::parse(stream)?;
+                let op = stream.parse()?;
 
                 let rhs = Self::parse_all(stream, right_bp)?;
                 lhs = Self::Binary(ExprBinary { lhs: Box::new(lhs), op, rhs: Box::new(rhs) });
@@ -113,18 +114,18 @@ impl Expr {
 
             if OpenParen::is_token(stream.peek()?) {
                 // highest BP
-                let open_paren = OpenParen::parse(stream)?;
+                let open_paren = stream.parse()?;
 
-                lhs = Self::FunCall(ExprFunCall { expr: Box::new(lhs), open_paren, args: parse_punctuated::<Expr, Comma, ClosedParen>(stream)?, closed_paren: ClosedParen::parse(stream)? });
+                lhs = Self::FunCall(ExprFunCall { expr: Box::new(lhs), open_paren, args: parse_punctuated::<Expr, Comma, ClosedParen>(stream)?, closed_paren: stream.parse()? });
 
                 continue;
             }
 
             if OpenBracket::is_token(stream.peek()?) {
                 // highest BP
-                let open_bracket = OpenBracket::parse(stream)?;
+                let open_bracket = stream.parse()?;
 
-                lhs = Self::Index(ExprIndex { expr: Box::new(lhs), open_bracket, index: Box::new(Expr::parse(stream)?), closed_bracket: ClosedBracket::parse(stream)? });
+                lhs = Self::Index(ExprIndex { expr: Box::new(lhs), open_bracket, index: Box::new(stream.parse()?), closed_bracket: stream.parse()? });
 
                 continue;
             }
@@ -136,11 +137,11 @@ impl Expr {
 
     fn parse_lhs(stream: &mut TokenStream) -> Result<Self> {
         if UnaryOperator::is_token(stream.peek()?) {
-            let op = UnaryOperator::parse(stream)?;
+            let op = stream.parse::<UnaryOperator>()?;
             let rhs = Self::parse_all(stream, op.right_binding_power())?;
             Ok(Self::Unary(ExprUnary { op, expr: Box::new(rhs) }))
         } else {
-            PrimaryExpr::parse(stream).map(Into::into)
+            stream.parse::<PrimaryExpr>().map(Into::into)
         }
     }
 }

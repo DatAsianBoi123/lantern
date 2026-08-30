@@ -100,23 +100,23 @@ fn expand_for_fields(fields: &Fields) -> impl Iterator<Item = TokenStream> {
                 },
                 Ok(FieldAttributes { with_try: Some((left, right)), boxed, .. }) => {
                     let right_side = if boxed.is_some() {
-                        quote!(::std::boxed::Box::new(<#right as crate::ParseTokens>::parse(stream)?))
+                        quote!(::std::boxed::Box::new(stream.parse::<#right>()?))
                     } else {
-                        quote!(<#right as crate::ParseTokens>::parse(stream)?)
+                        quote!(stream.parse::<#right>()?)
                     };
                     quote! {
                         #member: if <#left as ::lex::TokenKind>::is_token(stream.peek()?) {
-                            Some((<#left as crate::ParseTokens>::parse(stream)?, #right_side))
+                            Some((stream.parse::<#left>()?, #right_side))
                         } else {
                             None
                         }
                     }
                 }
                 Ok(FieldAttributes { boxed: Some(Some(ty)), .. }) => quote! {
-                    #member: ::std::boxed::Box::new(<#ty as crate::ParseTokens>::parse(stream)?)
+                    #member: ::std::boxed::Box::new(stream.parse::<#ty>()?)
                 },
                 Ok(_) => quote! {
-                    #member: <#ty as crate::ParseTokens>::parse(stream)?
+                    #member: stream.parse::<#ty>()?
                 },
                 Err(err) => err.into_compile_error(),
             }

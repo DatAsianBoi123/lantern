@@ -14,6 +14,10 @@ impl<'a, 's> TokenStream<'a, 's> {
         Self { lexer, peek: None }
     }
 
+    pub fn parse<T: ParseTokens>(&mut self) -> Result<T> {
+        T::parse(self)
+    }
+
     pub fn from_input(str: &'a str, symbol_table: &'s mut SymbolTable<'a>) -> Self {
         Self::new(Lexer::new(str, symbol_table))
     }
@@ -34,7 +38,7 @@ impl<'a, 's> TokenStream<'a, 's> {
 pub fn parse_repetition<T: ParseTokens, E: TokenKind>(stream: &mut TokenStream) -> Result<Vec<T>> {
     let mut items = Vec::new();
     while !E::is_token(stream.peek()?) {
-        items.push(T::parse(stream)?);
+        items.push(stream.parse()?);
     }
     Ok(items)
 }
@@ -42,11 +46,11 @@ pub fn parse_repetition<T: ParseTokens, E: TokenKind>(stream: &mut TokenStream) 
 pub fn parse_punctuated<T: ParseTokens, P: ParseTokens, E: TokenKind>(stream: &mut TokenStream) -> Result<Vec<T>> {
     let mut items = Vec::new();
     while !E::is_token(stream.peek()?) {
-        items.push(T::parse(stream)?);
+        items.push(stream.parse()?);
         if E::is_token(stream.peek()?) {
             break;
         }
-        P::parse(stream)?;
+        stream.parse::<P>()?;
     }
     Ok(items)
 }
@@ -55,10 +59,10 @@ pub fn parse_punctuated_untrailed<T: ParseTokens, P: ParseTokens, E: TokenKind>(
     if E::is_token(stream.peek()?) {
         return Ok(Vec::new());
     }
-    let mut items = vec![T::parse(stream)?];
+    let mut items = vec![stream.parse()?];
     while !E::is_token(stream.peek()?) {
-        P::parse(stream)?;
-        items.push(T::parse(stream)?);
+        stream.parse::<P>()?;
+        items.push(stream.parse()?);
     }
     Ok(items)
 }
@@ -87,7 +91,7 @@ mod tests {
         let input = "val a: std.int = 10;";
         let mut stream = TokenStream::from_input(input, &mut symbol_table);
 
-        let val = ValDeclaration::parse(&mut stream);
+        let val = stream.parse();
         assert!(matches!(val, Ok(ValDeclaration { .. })));
     }
 }
