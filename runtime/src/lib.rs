@@ -5,7 +5,7 @@ use error::RuntimeError;
 use flame::{GeneratedFunction, instruction::Instruction};
 use parse::LanternFile;
 
-use crate::{error::UserError, flame::{FunctionKind, scope::Globals}, heap::{Heap, HeapArray, TypeInfo}, stack::LanternStack};
+use crate::{error::{OutOfBoundsError, UserError}, flame::{FunctionKind, scope::Globals}, heap::{Heap, HeapArray, TypeInfo}, stack::LanternStack};
 
 macro_rules! args {
     (@pop usize, $stack: expr) => {
@@ -335,7 +335,7 @@ impl VM {
 
                         if len == 0 {
                             // reference
-                            self.stack.push_ref(unsafe { *ptr.cast::<*mut u8>() })?;
+                            self.stack.push_ref(unsafe { *ptr.cast() })?;
                         } else {
                             // primitive
                             let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
@@ -357,6 +357,44 @@ impl VM {
                         unsafe { ptr.add(offset).copy_from(src, len); };
 
                         self.stack.push_ref(ptr)?;
+                    },
+                    Instruction::Index => {
+                        let index = unsafe { self.stack.pop()?.read_int() };
+                        let array = unsafe { HeapArray::from_raw(self.stack.pop()?.read_ptr()) };
+
+                        let len = array.len();
+                        let ptr = index.try_into()
+                            .ok()
+                            .and_then(|index| array.get_sized(index))
+                            .ok_or(OutOfBoundsError(index, len))?;
+
+                        if array.is_ref() {
+                            self.stack.push_ref(unsafe { *ptr.cast() })?;
+                        } else {
+                            let slice = unsafe { std::slice::from_raw_parts(ptr, array.element_size()) };
+                            let mut element_bytes = [0; 8];
+                            let (data, _) = element_bytes.split_at_mut(slice.len());
+                            data.copy_from_slice(slice);
+                            // since exact type cannot be determined statically, use the largest
+                            // type instead
+                            let element = i64::from_ne_bytes(element_bytes);
+                            self.stack.push_int(element)?;
+                        }
+                    },
+                    Instruction::WriteIndex => {
+                        let src = self.stack.pop()?;
+                        let src = &raw const src.0 as *const _;
+                        let index = unsafe { self.stack.pop()?.read_int() };
+                        let mut array = unsafe { HeapArray::from_raw(self.stack.pop()?.read_ptr()) };
+
+                        let ptr = index.try_into()
+                            .ok()
+                            .and_then(|index| array.get_sized_mut(index))
+                            .ok_or(OutOfBoundsError(index, array.len()))?;
+
+                        unsafe { ptr.copy_from(src, array.element_size()); }
+
+                        self.stack.push_ref(array.as_mut_ptr())?;
                     },
                     Instruction::Goto(ptr) => {
                         frame.inst_ptr = ptr;

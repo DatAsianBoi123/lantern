@@ -42,7 +42,7 @@ impl Heap {
 
     pub fn gc(&mut self, stack: &mut LanternStack) {
         eprintln!("GC Cycle Start");
-        let alloc_before = self.alloc_ptr as usize - self.from_space as usize;
+        let alloc_before = self.alloc_ptr.addr() - self.from_space.addr();
         self.alloc_ptr = self.to_space;
         std::mem::swap(&mut self.from_space, &mut self.to_space);
 
@@ -54,7 +54,7 @@ impl Heap {
             }
         }
 
-        let moved = self.alloc_ptr as usize - self.from_space as usize;
+        let moved = self.alloc_ptr.addr() - self.from_space.addr();
         eprintln!("GC Cycle End in {:?} (moved {} bytes, {:.2}%)", Instant::now().duration_since(before), moved, (moved as f64 / alloc_before as f64) * 100.0);
     }
 
@@ -368,6 +368,22 @@ impl HeapArray {
         } else {
             unsafe { Some(self.element_ptr().add(self.element_size() * index)) }
         }
+    }
+
+    pub fn get_sized(&self, index: isize) -> Option<*const u8> {
+        if index.is_negative() {
+            self.len().checked_add_signed(index).map(|index| unsafe { self.element_ptr().add(self.element_size() * index) })
+        } else {
+            self.get(index as usize)
+        }
+    }
+
+    pub fn get_mut(&mut self, index: usize) -> Option<*mut u8> {
+        self.get(index).map(|ptr| ptr as *mut _)
+    }
+
+    pub fn get_sized_mut(&mut self, index: isize) -> Option<*mut u8> {
+        self.get_sized(index).map(|ptr| ptr as *mut _)
     }
 
     /// # Safety

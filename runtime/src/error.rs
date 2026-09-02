@@ -16,9 +16,13 @@ impl Display for RuntimeError {
     }
 }
 
-#[derive(thiserror::Error, Default, Debug, Clone, PartialEq, Eq)]
+#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
 #[error("{0}")]
 pub struct UserError(pub String);
+
+#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
+#[error("index {0} is out of bounds for len {1}")]
+pub struct OutOfBoundsError(pub i64, pub usize);
 
 #[derive(thiserror::Error, Default, Debug, Clone, Copy, PartialEq, Eq)]
 #[error("Stack overflow")]

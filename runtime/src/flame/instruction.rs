@@ -113,6 +113,12 @@ macro_rules! inst {
     (WRITE $l: expr) => {
         $crate::flame::instruction::Instruction::Write($l)
     };
+    (INDEX) => {
+        $crate::flame::instruction::Instruction::Index
+    };
+    (WRITE_INDEX) => {
+        $crate::flame::instruction::Instruction::WriteIndex
+    };
     (GOTO $j: expr) => {
         $crate::flame::instruction::Instruction::Goto($j)
     };
@@ -253,6 +259,8 @@ pub enum Instruction {
 
     Read(usize),
     Write(usize),
+    Index,
+    WriteIndex,
 
     Goto(usize),
     GotoIfTrue(usize),
@@ -302,6 +310,8 @@ impl Display for Instruction {
             Self::InvokeMethod(num_args) => write!(f, "{:20}{num_args}", "INV_MET"),
             Self::Read(len) => write!(f, "{:20}{len}", "READ"),
             Self::Write(len) => write!(f, "{:20}{len}", "WRITE"),
+            Self::Index => write!(f, "INDEX"),
+            Self::WriteIndex => write!(f, "WRITE_INDEX"),
             Self::Goto(index) => write!(f, "{:20}{index}", "GOTO"),
             Self::GotoIfTrue(index) => write!(f, "{:20}{index}", "GOTO_IF_TRUE"),
             Self::GotoIfFalse(index) => write!(f, "{:20}{index}", "GOTO_IF_FALSE"),

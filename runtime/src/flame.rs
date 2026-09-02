@@ -5,7 +5,7 @@ use diagnostic::{Diagnostic, DiagnosticSink, error, symbol::{Symbol, SymbolDispl
 use instruction::InstructionSet;
 use parse::{FunArg, IfBranch, IfStmt, Item, ItemFun, ItemNativeFun, ItemPrimitive, ItemStruct, LanternFile, ReturnStmt, Stmt, StructField, ValDeclaration, WhileStmt, expr::{BinaryOperator, Expr, ExprArray, ExprBinary, ExprBlock, ExprField, ExprFunCall, ExprIndex, ExprParen, ExprStruct, ExprUnary, UnaryOperator}, lex::{Break, Ident, Literal, TokenKind}};
 
-use crate::{Slot, VM, error::RuntimeError, flame::{instruction::Instruction, scope::{Globals, LineMap, LoopContext, LoopScope, Scope, ScopeKind, StackFrame}, r#type::{LanternType, TypeContext, TypeId}}, heap::{HeapArray, HeapObject, ObjectHeader, TypeInfo}, inst};
+use crate::{Slot, VM, error::RuntimeError, flame::{instruction::Instruction, scope::{Globals, LineMap, LoopContext, LoopScope, Scope, ScopeKind, StackFrame}, r#type::{LanternType, TypeContext, TypeId}}, heap::{HeapObject, ObjectHeader, TypeInfo}, inst};
 
 pub type NativeFn = fn(&mut VM) -> Result<Slot, RuntimeError>;
 
@@ -450,8 +450,7 @@ impl<'a, 't> FlameGen<'a, 't> {
 
                                 match lvalue {
                                     LValue::Local(var) => inst!(self.frame.instructions; STORE_LOCAL var.index),
-                                    // TODO: bounds checking
-                                    LValue::ArrayElement(ty) => inst!(self.frame.instructions; WRITE ty.size()),
+                                    LValue::ArrayElement(_) => inst!(self.frame.instructions; WRITE_INDEX),
                                     LValue::StructField(ty) => inst!(self.frame.instructions; WRITE ty.size()),
                                 }
                             },
@@ -593,15 +592,7 @@ impl<'a, 't> FlameGen<'a, 't> {
                     error!(in self.sink; index_span => "expected index to be an `int`");
                 }
 
-                // TODO: bounds checking
-                // BUG: multiplying an i64 and usize
-                inst! { with self.frame => closed_bracket.span();
-                    [PUSHU inner.size()]
-                    [MULTI]
-                    [PUSHU HeapArray::element_offset()]
-                    [ADDI]
-                    [READ if inner.is_primitive() { inner.size() } else { 0 }]
-                }
+                inst!(with self.frame => closed_bracket.span(); INDEX);
                 ControlFlow::Continue(inner)
             },
             Expr::Identifier(ident) => {
@@ -721,7 +712,7 @@ impl<'a, 't> FlameGen<'a, 't> {
                     .map(LValue::Local)
                     .ok_or(error!(ident.span() => "unknown variable `{}`", self.display(&ident))))
             },
-            Expr::Index(ExprIndex { expr, index, closed_bracket, .. }) => {
+            Expr::Index(ExprIndex { expr, index, .. }) => {
                 let expr_span = expr.span();
                 let ty = self.compile_expr(*expr, scope, tcx)?;
                 let inner = match *ty {
@@ -737,13 +728,6 @@ impl<'a, 't> FlameGen<'a, 't> {
                 if index != tcx.primitive(&native::INT_PRIMITIVE) {
                     error!(in self.sink; index_span => "expected index to be an int");
                 }
-
-                inst! { with self.frame => closed_bracket.span();
-                    [PUSHU inner.size()]
-                    [MULTI]
-                    [PUSHU HeapArray::element_offset()]
-                    [ADDI]
-                };
                 ControlFlow::Continue(Ok(LValue::ArrayElement(inner)))
             },
             Expr::Field(ExprField { expr, ident }) => {
