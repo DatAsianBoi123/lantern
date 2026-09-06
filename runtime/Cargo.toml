@@ -12,5 +12,4 @@ parse = { path = "../parse" }
 diagnostic = { path = "../diagnostic" }
 arena = { path = "../arena" }
 thiserror = { workspace = true }
-anyhow = { workspace = true }
 
