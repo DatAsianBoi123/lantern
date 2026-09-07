@@ -1,5 +1,5 @@
 use diagnostic::{Diagnostic, error, symbol::{SymbolDisplay, SymbolTable}};
-use lex::{ArrowRight, Break, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Continue, Else, Equals, Fun, Ident, If, Keyword, Native, OpenBrace, OpenBracket, OpenParen, Period, Primitive, Return, Semi, Struct, Throw, Token, TokenKind, Using, Val, While};
+use lex::{ArrowRight, At, Break, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Continue, Else, Equals, Fun, Ident, If, Keyword, Native, OpenBrace, OpenBracket, OpenParen, Period, Primitive, Punct, Return, Semi, Struct, Throw, Token, TokenKind, Using, Val, While};
 use macros::Parse;
 
 use crate::{expr::{Expr, ExprBlock}, stream::{parse_punctuated, TokenStream}};
@@ -42,6 +42,24 @@ impl ParseTokens for LanternFile {
     }
 }
 
+#[derive(Parse, Debug, Clone, PartialEq)]
+pub enum Stmt {
+    #[parse(using(Fun, Using, Struct, Native, Primitive, At))]
+    Item(Item),
+    #[parse(using(If))]
+    IfStmt(IfStmt),
+    #[parse(using(While))]
+    WhileStmt(WhileStmt),
+    #[parse(using(Val))]
+    ValDeclaration(ValDeclaration),
+    #[parse(using(Return))]
+    Return(ReturnStmt),
+    Continue(Continue, Semi),
+    Break(Break, Semi),
+    Throw(Throw, Expr, Semi),
+    Expr(Expr, Semi),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
     Fun(ItemFun),
@@ -57,7 +75,8 @@ impl ParseTokens for Item {
         match peek {
             Token::Keyword(Keyword::Fun(_)) => stream.parse().map(Self::Fun),
             Token::Keyword(Keyword::Using(_)) => stream.parse().map(Self::Using),
-            Token::Keyword(Keyword::Struct(_)) => stream.parse().map(Self::Struct),
+            // TODO: annotations on funs as well
+            Token::Keyword(Keyword::Struct(_)) | Token::Punct(Punct::At(_)) => stream.parse().map(Self::Struct),
             Token::Keyword(Keyword::Native(_)) => stream.parse().map(Self::NativeFun),
             Token::Keyword(Keyword::Primitive(_)) => stream.parse().map(Self::Primitive),
             _ => Err(error!(peek.span() => "expected `item`")),
@@ -119,6 +138,7 @@ pub struct ItemUsing {
 
 #[derive(Parse, Debug, Clone, PartialEq, Eq)]
 pub struct ItemStruct {
+    pub annotations: AnnotationList,
     pub r#struct: Struct,
     pub ident: Ident,
     pub open_brace: OpenBrace,
@@ -132,24 +152,6 @@ pub struct StructField {
     pub ident: Ident,
     pub colon: Colon,
     pub r#type: Type,
-}
-
-#[derive(Parse, Debug, Clone, PartialEq)]
-pub enum Stmt {
-    #[parse(using(Fun, Using, Struct, Native, Primitive))]
-    Item(Item),
-    #[parse(using(If))]
-    IfStmt(IfStmt),
-    #[parse(using(While))]
-    WhileStmt(WhileStmt),
-    #[parse(using(Val))]
-    ValDeclaration(ValDeclaration),
-    #[parse(using(Return))]
-    Return(ReturnStmt),
-    Continue(Continue, Semi),
-    Break(Break, Semi),
-    Throw(Throw, Expr, Semi),
-    Expr(Expr, Semi),
 }
 
 #[derive(Parse, Debug, Clone, PartialEq)]
@@ -213,6 +215,55 @@ pub enum IfBranch {
     ElseIf(IfStmt),
     #[parse(using(OpenBrace))]
     Else(ExprBlock),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnnotationList {
+    pub annotations: Vec<Annotation>,
+}
+
+impl ParseTokens for AnnotationList {
+    fn parse(stream: &mut TokenStream) -> Result<Self> {
+        let mut annotations = Vec::new();
+
+        while At::is_token(stream.peek()?) {
+            annotations.push(stream.parse()?);
+        }
+
+        Ok(Self { annotations })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Annotation {
+    pub at: At,
+    pub ident: Ident,
+    pub args: Option<AnnotationArgs>,
+}
+
+impl ParseTokens for Annotation {
+    fn parse(stream: &mut TokenStream) -> Result<Self> {
+        let at = stream.parse()?;
+        let ident = stream.parse()?;
+        let args = if OpenParen::is_token(stream.peek()?) {
+            Some(stream.parse()?)
+        } else {
+            None
+        };
+        Ok(Self {
+            at,
+            ident,
+            args,
+        })
+    }
+}
+
+#[derive(Parse, Debug, Clone, PartialEq, Eq)]
+pub struct AnnotationArgs {
+    pub open_paren: OpenParen,
+    #[parse(with(parse_punctuated::<Ident, Comma, ClosedParen>))]
+    pub args: Vec<Ident>,
+    pub closed_paren: ClosedParen,
 }
 
 #[derive(Parse, Debug, Clone, PartialEq, Eq)]

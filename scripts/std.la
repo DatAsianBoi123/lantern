@@ -16,6 +16,7 @@ fun float.inverse(self: float) -> float {
 
 primitive bool;
 
+@std(string)
 struct String {
   bytes: [byte],
 }

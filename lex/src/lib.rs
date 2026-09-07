@@ -354,6 +354,7 @@ define_puncts! {
         Slash = '/',
         Percent = '%',
         Equals = '=',
+        At = '@',
 
         PlusEq = "+=",
         HyphenEq = "-=",
@@ -531,6 +532,7 @@ impl<'a, 's> Lexer<'a, 's> {
                 Ok(punct)
             }
             '=' => Ok(punct!(Equals)),
+            '@' => Ok(punct!(At)),
 
             '<' if self.peek_is('=') => {
                 let punct = punct!(LessEq);
