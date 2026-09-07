@@ -12,7 +12,7 @@ pub type NativeFn = fn(&mut VM) -> Result<Slot, RuntimeError>;
 pub mod instruction;
 pub mod r#type;
 pub mod scope;
-pub mod native;
+pub mod builtin;
 
 pub fn ignite(file: LanternFile, globals: &mut Globals, sink: &mut DiagnosticSink, symbol_table: &SymbolTable) -> GeneratedFunction {
     let mut r#gen = FlameGen::new(globals, sink, symbol_table);
@@ -91,7 +91,7 @@ impl<'a, 't> FlameGen<'a, 't> {
                             }
                         }
                         // this gets overridden when the function is generated
-                        self.globals.funs.push(GeneratedFunction::new("".into(), FunctionKind::Native(native::dummy_native)));
+                        self.globals.funs.push(GeneratedFunction::new("".into(), FunctionKind::Native(builtin::dummy_native)));
                     },
                     Item::NativeFun(ItemNativeFun { ident, args, ret, .. }) => {
                         let args = args.iter()
@@ -104,9 +104,9 @@ impl<'a, 't> FlameGen<'a, 't> {
 
                         scope.insert_function(ident.0, LanternFunction::new(self.globals.funs.len(), args, ret, tcx));
 
-                        let ptr = native::get_native_fn(self.symbol_table.resolve(ident.0)).unwrap_or_else(|| {
+                        let ptr = builtin::get_native_fn(self.symbol_table.resolve(ident.0)).unwrap_or_else(|| {
                             error!(in self.sink; ident.span() => "unknown native `{}`", self.display(ident));
-                            native::dummy_native
+                            builtin::dummy_native
                         });
 
                         self.globals.funs.push(GeneratedFunction::new(self.symbol_table.resolve(ident.0).into(), FunctionKind::Native(ptr)));
@@ -142,7 +142,7 @@ impl<'a, 't> FlameGen<'a, 't> {
                             IfBranch::ElseIf(IfStmt { condition, block, branch, .. }) => {
                                 let condition_span = condition.span();
                                 let ty = self.compile_expr(condition, &scope, tcx)?;
-                                if ty != tcx.primitive(&native::BOOL_PRIMITIVE) {
+                                if ty != tcx.primitive(&builtin::BOOL_PRIMITIVE) {
                                     error!(in self.sink; condition_span => "expected `bool`, but got {} instead", self.display(&ty));
                                 }
 
@@ -194,7 +194,7 @@ impl<'a, 't> FlameGen<'a, 't> {
                     let head = self.frame.instructions.len();
 
                     let ty = self.compile_expr(condition, &scope, tcx)?;
-                    if ty != tcx.primitive(&native::BOOL_PRIMITIVE) {
+                    if ty != tcx.primitive(&builtin::BOOL_PRIMITIVE) {
                         error!(in self.sink; condition_span => "expected `bool`, but got {} instead", self.display(&ty));
                     }
                     let condition_index = self.frame.instructions.len();
@@ -286,7 +286,7 @@ impl<'a, 't> FlameGen<'a, 't> {
                     let span = expr.span();
                     let ty = self.compile_expr(expr, &scope, tcx)?;
                     // TODO: string type
-                    let byte = tcx.primitive(&native::BYTE_PRIMITIVE);
+                    let byte = tcx.primitive(&builtin::BYTE_PRIMITIVE);
                     if ty != tcx.intern(LanternType::Array(byte)) {
                         error!(in self.sink; span => "expected `[u8]`, but got {} instead", self.display(&ty));
                     }
@@ -359,25 +359,25 @@ impl<'a, 't> FlameGen<'a, 't> {
         match expression {
             Expr::Literal(Literal::Integer(int, span)) => {
                 inst!(with self.frame => span; PUSHI int);
-                ControlFlow::Continue(tcx.primitive(&native::INT_PRIMITIVE))
+                ControlFlow::Continue(tcx.primitive(&builtin::INT_PRIMITIVE))
             },
             Expr::Literal(Literal::Float(float, span)) => {
                 inst!(with self.frame => span; PUSHF float);
-                ControlFlow::Continue(tcx.primitive(&native::FLOAT_PRIMITIVE))
+                ControlFlow::Continue(tcx.primitive(&builtin::FLOAT_PRIMITIVE))
             },
             Expr::Literal(Literal::True(span)) => {
                 inst!(with self.frame => span; PUSHU crate::bool_to_slot(true));
-                ControlFlow::Continue(tcx.primitive(&native::BOOL_PRIMITIVE))
+                ControlFlow::Continue(tcx.primitive(&builtin::BOOL_PRIMITIVE))
             },
             Expr::Literal(Literal::False(span)) => {
                 inst!(with self.frame => span; PUSHU crate::bool_to_slot(false));
-                ControlFlow::Continue(tcx.primitive(&native::BOOL_PRIMITIVE))
+                ControlFlow::Continue(tcx.primitive(&builtin::BOOL_PRIMITIVE))
             },
             Expr::Literal(Literal::String(string, span)) => {
                 // TODO: better string alloc
                 inst!(with self.frame => span; ALLOC_STR string.clone());
                 // TODO: make string a struct instead of array
-                let byte = tcx.primitive(&native::BYTE_PRIMITIVE);
+                let byte = tcx.primitive(&builtin::BYTE_PRIMITIVE);
                 ControlFlow::Continue(tcx.intern(LanternType::Array(byte)))
             },
             Expr::FunCall(ExprFunCall { expr, args, closed_paren, .. }) => {
@@ -432,11 +432,11 @@ impl<'a, 't> FlameGen<'a, 't> {
                         };
                         self.frame.instructions[goto_index] = goto_inst;
 
-                        if !lhs.is_primitive_type(&native::BOOL_PRIMITIVE) || !rhs.is_primitive_type(&native::BOOL_PRIMITIVE) {
+                        if !lhs.is_primitive_type(&builtin::BOOL_PRIMITIVE) || !rhs.is_primitive_type(&builtin::BOOL_PRIMITIVE) {
                             error!(in self.sink; op.span() => "{op} cannot be applied to {} and {}", self.display(&lhs), self.display(&rhs));
                         }
 
-                        return ControlFlow::Continue(tcx.primitive(&native::BOOL_PRIMITIVE));
+                        return ControlFlow::Continue(tcx.primitive(&builtin::BOOL_PRIMITIVE));
                     },
                     BinaryOperator::Assign(_) => {
                         match self.compile_lvalue(scope, tcx, *lhs)? {
@@ -477,11 +477,11 @@ impl<'a, 't> FlameGen<'a, 't> {
                     (LanternType::Primitive(lhs), op @ BinaryOperator::Neq(_), LanternType::Primitive(_)) if lhs.ops.get_bin_op(&op).is_some() => {
                         self.frame.instructions.push(lhs.ops.get_bin_op(&op).unwrap());
                         inst!(self.frame.instructions; NOT);
-                        ControlFlow::Continue(tcx.primitive(&native::BOOL_PRIMITIVE))
+                        ControlFlow::Continue(tcx.primitive(&builtin::BOOL_PRIMITIVE))
                     },
                     (LanternType::Primitive(lhs), op, LanternType::Primitive(_)) if op.is_comparison() && lhs.ops.get_bin_op(&op).is_some() => {
                         self.frame.instructions.push(lhs.ops.get_bin_op(&op).unwrap());
-                        ControlFlow::Continue(tcx.primitive(&native::BOOL_PRIMITIVE))
+                        ControlFlow::Continue(tcx.primitive(&builtin::BOOL_PRIMITIVE))
                     },
                     (LanternType::Primitive(lhs), op, LanternType::Primitive(_)) if lhs.ops.get_bin_op(&op).is_some() => {
                         self.frame.instructions.push(lhs.ops.get_bin_op(&op).unwrap());
@@ -588,7 +588,7 @@ impl<'a, 't> FlameGen<'a, 't> {
                 };
                 let index_span = index.span();
                 let index_type = self.compile_expr(*index, scope, tcx)?;
-                if index_type != tcx.primitive(&native::INT_PRIMITIVE) {
+                if index_type != tcx.primitive(&builtin::INT_PRIMITIVE) {
                     error!(in self.sink; index_span => "expected index to be an `int`");
                 }
 
@@ -648,7 +648,7 @@ impl<'a, 't> FlameGen<'a, 't> {
                                 [PUSHU size_of::<ObjectHeader>()]
                                 [READ size]
                             }
-                            ControlFlow::Continue(tcx.primitive(&native::INT_PRIMITIVE))
+                            ControlFlow::Continue(tcx.primitive(&builtin::INT_PRIMITIVE))
                         } else {
                             error!(in self.sink; ident.1 => "field {} does not exist in {}", self.display(&ident), self.display(&ty));
                             ControlFlow::Continue(tcx.null())
@@ -696,7 +696,7 @@ impl<'a, 't> FlameGen<'a, 't> {
                     }
                 },
                 Item::Primitive(ItemPrimitive { ident, .. }) => {
-                    let Some(primitive) = native::get_primitive(self.symbol_table.resolve(ident.0)) else { panic!("unknown primitive `{}`", self.display(ident)) };
+                    let Some(primitive) = builtin::get_primitive(self.symbol_table.resolve(ident.0)) else { panic!("unknown primitive `{}`", self.display(ident)) };
                     if scope.insert_item(ident.0, tcx.primitive(primitive)).is_none() {
                         error!(in self.sink; ident.span() => "primitive already declared");
                     }
@@ -725,7 +725,7 @@ impl<'a, 't> FlameGen<'a, 't> {
 
                 let index_span = index.span();
                 let index = self.compile_expr(*index, scope, tcx)?;
-                if index != tcx.primitive(&native::INT_PRIMITIVE) {
+                if index != tcx.primitive(&builtin::INT_PRIMITIVE) {
                     error!(in self.sink; index_span => "expected index to be an int");
                 }
                 ControlFlow::Continue(Ok(LValue::ArrayElement(inner)))
