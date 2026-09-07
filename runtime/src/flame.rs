@@ -1035,6 +1035,7 @@ impl GeneratedFunction {
     }
 
     pub fn line_for(&self, inst_ptr: usize) -> u32 {
+        if self.line_table.is_empty() { return 0; };
         match self.line_table.binary_search_by_key(&inst_ptr, |map| map.ip) {
             Ok(i) => self.line_table[i].line,
             Err(i) => self.line_table[i - 1].line,
