@@ -3,16 +3,31 @@ use std::fmt::{Display, Formatter};
 #[derive(thiserror::Error, Debug)]
 pub struct RuntimeError {
     pub message: String,
-    pub stacktrace: Vec<(String, u32)>,
+    pub stacktrace: Vec<(String, StacktraceLocation)>,
 }
 
 impl Display for RuntimeError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "Error: {}", self.message)?;
         for element in &self.stacktrace {
-            write!(f, "\n  at {} (line {})", element.0, element.1)?;
+            write!(f, "\n  at {} ({})", element.0, element.1)?;
         }
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StacktraceLocation {
+    Line(u32),
+    Native,
+}
+
+impl Display for StacktraceLocation {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Line(line) => write!(f, "line {line}"),
+            Self::Native => write!(f, "<native function>"),
+        }
     }
 }
 

@@ -208,10 +208,14 @@ impl VM {
     }
 
     pub fn exec_one(&mut self) -> Result<(), RuntimeError> {
-        match self.exec_one_inner() {
-            Ok(_) => Ok(()),
-            Err(err) => Err(self.throw(err)),
-        }
+        self.exec_one_inner()
+            .map_err(|err| {
+                // make sure we don't wrap one runtime error in another
+                match err.downcast::<RuntimeError>() {
+                    Ok(runtime_error) => *runtime_error,
+                    Err(err) => self.throw(err),
+                }
+            })
     }
 
     fn exec_one_inner(&mut self) -> Result<(), Box<dyn Error>> {

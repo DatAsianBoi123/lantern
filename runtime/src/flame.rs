@@ -1034,11 +1034,16 @@ impl GeneratedFunction {
         Self { line_table: Vec::new(), name, kind }
     }
 
-    pub fn line_for(&self, inst_ptr: usize) -> u32 {
-        if self.line_table.is_empty() { return 0; };
-        match self.line_table.binary_search_by_key(&inst_ptr, |map| map.ip) {
-            Ok(i) => self.line_table[i].line,
-            Err(i) => self.line_table[i - 1].line,
+    pub fn line_for(&self, inst_ptr: usize) -> StacktraceLocation {
+        if matches!(self.kind, FunctionKind::Native(_)) {
+            StacktraceLocation::Native
+        } else {
+            // TODO: make sure line table has at least one entry
+            if self.line_table.is_empty() { return StacktraceLocation::Line(0); };
+            match self.line_table.binary_search_by_key(&inst_ptr, |map| map.ip) {
+                Ok(i) => StacktraceLocation::Line(self.line_table[i].line),
+                Err(i) => StacktraceLocation::Line(self.line_table[i - 1].line),
+            }
         }
     }
 }
