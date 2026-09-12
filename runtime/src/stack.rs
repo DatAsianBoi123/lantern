@@ -95,7 +95,7 @@ impl LanternStack {
     }
 
     pub fn read(&self, addr: usize) -> Result<&Slot, AccessUndefinedError> {
-        if addr > self.top { return Err(AccessUndefinedError); };
+        if addr >= self.top { return Err(AccessUndefinedError); };
         unsafe { Ok(self.inner.get_unchecked(addr).assume_init_ref()) }
     }
 
