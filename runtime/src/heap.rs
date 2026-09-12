@@ -299,7 +299,7 @@ impl HeapArray {
         unsafe {
             (array.0 as *mut ObjectHeader).write(header);
             (array.0.add(size_of::<ObjectHeader>()) as *mut usize).write(len);
-            array.element_ptr_mut().write_bytes(0, array.len());
+            array.element_ptr_mut().write_bytes(0, array.len() * array.element_size());
         };
         array
     }
