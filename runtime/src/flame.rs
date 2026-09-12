@@ -1,6 +1,5 @@
 use std::{cell::OnceCell, fmt::Formatter, hash, ops::ControlFlow};
 
-use arena::Arena;
 use diagnostic::{Diagnostic, DiagnosticSink, error, symbol::{Symbol, SymbolDisplay, SymbolTable}};
 use instruction::InstructionSet;
 use parse::{FunArg, IfBranch, IfStmt, Item, ItemFun, ItemNativeFun, ItemPrimitive, ItemStruct, LanternFile, ReturnStmt, Stmt, StructField, ValDeclaration, WhileStmt, expr::{BinaryOperator, Expr, ExprArray, ExprBinary, ExprBlock, ExprField, ExprFunCall, ExprIndex, ExprParen, ExprStruct, ExprUnary, UnaryOperator}, lex::{Break, Ident, Literal, TokenKind}};
@@ -14,11 +13,15 @@ pub mod r#type;
 pub mod scope;
 pub mod builtin;
 
-pub fn ignite(file: LanternFile, globals: &mut Globals, sink: &mut DiagnosticSink, symbol_table: &SymbolTable) -> GeneratedFunction {
+pub fn ignite(
+    file: LanternFile,
+    globals: &mut Globals,
+    sink: &mut DiagnosticSink,
+    symbol_table: &SymbolTable,
+    tcx: &TypeContext
+) -> GeneratedFunction {
     let mut r#gen = FlameGen::new(globals, sink, symbol_table);
-    let arena = Arena::new(25);
-    let tcx = TypeContext::new(&arena);
-    let _ = r#gen.compile_stmts(file.stmts, Scope::new(), &tcx);
+    let _ = r#gen.compile_stmts(file.stmts, Scope::new(), tcx);
     r#gen.frame.into_gen()
 }
 
@@ -285,12 +288,11 @@ impl<'a, 't> FlameGen<'a, 't> {
                 Stmt::Throw(_, expr, semi) => {
                     let span = expr.span();
                     let ty = self.compile_expr(expr, &scope, tcx)?;
-                    // TODO: string type
-                    let byte = tcx.primitive(&builtin::BYTE_PRIMITIVE);
-                    if ty != tcx.intern(LanternType::Array(byte)) {
-                        error!(in self.sink; span => "expected `[u8]`, but got {} instead", self.display(&ty));
+                    if ty != tcx.builtin(BuiltinType::String) {
+                        error!(in self.sink; span => "expected String, but got {} instead", self.display(&ty));
                     }
                     inst!(with self.frame => semi.span(); THRW);
+                    return ControlFlow::Break(());
                 },
                 Stmt::Expr(expr, _) => {
                     self.compile_expr(expr, &scope, tcx)?;
@@ -376,9 +378,7 @@ impl<'a, 't> FlameGen<'a, 't> {
             Expr::Literal(Literal::String(string, span)) => {
                 // TODO: better string alloc
                 inst!(with self.frame => span; ALLOC_STR string.clone());
-                // TODO: make string a struct instead of array
-                let byte = tcx.primitive(&builtin::BYTE_PRIMITIVE);
-                ControlFlow::Continue(tcx.intern(LanternType::Array(byte)))
+                ControlFlow::Continue(tcx.builtin(BuiltinType::String))
             },
             Expr::FunCall(ExprFunCall { expr, args, closed_paren, .. }) => {
                 let span = expr.span();
@@ -687,18 +687,42 @@ impl<'a, 't> FlameGen<'a, 't> {
             })
             .for_each(|item| match item {
                 Item::Using(_) => todo!(),
-                Item::Struct(ItemStruct { ident, .. }) => {
+                Item::Struct(ItemStruct { annotations, ident, .. }) => {
                     let r#struct = LanternStruct::new(ident.0, self.globals.types.len());
                     // "dummy" typeinfo
                     self.globals.types.push(TypeInfo::Object { size: 0, ref_offets: Box::new([]) });
-                    if scope.insert_item(ident.0, tcx.intern(LanternType::Struct(r#struct))).is_none() {
+
+                    let id = tcx.intern(LanternType::Struct(r#struct));
+                    for annotation in &annotations.annotations {
+                        if self.symbol_table.resolve(annotation.ident.0) == "std" {
+                            if let Some(args) = &annotation.args {
+                                if args.args.len() != 1 {
+                                    error!(in self.sink; annotation.ident.span() => "expected 1 arg in std annotation");
+                                }
+                                let arg = &args.args[0];
+                                match self.symbol_table.resolve(arg.0) {
+                                    "string" => tcx.link_builtin(BuiltinType::String, id),
+                                    _ => error!(in self.sink; arg.span() => "unknown std type"),
+                                }
+                            } else {
+                                error!(in self.sink; annotation.ident.span() => "expected args");
+                            }
+                        } else {
+                            error!(in self.sink; annotation.ident.span() => "unknown annotation");
+                        }
+                    }
+
+                    if scope.insert_item(ident.0, id).is_none() {
                         error!(in self.sink; ident.span() => "struct already declared");
                     }
                 },
                 Item::Primitive(ItemPrimitive { ident, .. }) => {
-                    let Some(primitive) = builtin::get_primitive(self.symbol_table.resolve(ident.0)) else { panic!("unknown primitive `{}`", self.display(ident)) };
-                    if scope.insert_item(ident.0, tcx.primitive(primitive)).is_none() {
-                        error!(in self.sink; ident.span() => "primitive already declared");
+                    if let Some(primitive) = builtin::get_primitive(self.symbol_table.resolve(ident.0)) {
+                        if scope.insert_item(ident.0, tcx.primitive(primitive)).is_none() {
+                            error!(in self.sink; ident.span() => "primitive already declared");
+                        }
+                    } else {
+                        error!(in self.sink; ident.span() => "unknown primitive `{}`", self.display(ident))
                     }
                 },
                 _ => {},

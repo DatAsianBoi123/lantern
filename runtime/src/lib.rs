@@ -1,11 +1,12 @@
 use std::{error::Error, fmt::{Display, Formatter}};
 
+use arena::Arena;
 use diagnostic::{DiagnosticSink, symbol::SymbolTable};
 use error::RuntimeError;
 use flame::{GeneratedFunction, instruction::Instruction};
 use parse::LanternFile;
 
-use crate::{error::{OutOfBoundsError, UserError}, flame::{FunctionKind, scope::Globals}, heap::{Heap, HeapArray, TypeInfo}, stack::LanternStack};
+use crate::{error::{OutOfBoundsError, UserError}, flame::{FunctionKind, scope::Globals, r#type::{BuiltinType, TypeContext}}, heap::{Heap, HeapArray, HeapObject, TypeInfo}, stack::LanternStack};
 
 macro_rules! args {
     (@pop usize, $stack: expr) => {
@@ -125,11 +126,12 @@ pub struct VM {
     frames: Vec<Frame>,
     funs: Box<[GeneratedFunction]>,
     types: Box<[TypeInfo]>,
+    builtin_type_indexes: [usize; BuiltinType::SIZE],
     pub heap: Heap,
 }
 
 impl VM {
-    pub const STRING_TYPE_INDEX: usize = 0;
+    pub const BYTE_ARR_TYPE_INDEX: usize = 0;
     pub const PRIMITIVE_ARR_TYPE_INDEX: usize = 1;
     pub const REF_ARR_TYPE_INDEX: usize = 2;
 
@@ -137,9 +139,15 @@ impl VM {
         let mut globals = Globals {
             funs: Vec::new(),
             // TODO: better way of array type info
-            types: vec![TypeInfo::Array { element_size: 1, is_ref: false }, TypeInfo::Array { element_size: 8, is_ref: false }, TypeInfo::Array { element_size: size_of::<usize>(), is_ref: true }],
+            types: vec![
+                TypeInfo::Array { element_size: 1, is_ref: false },
+                TypeInfo::Array { element_size: 8, is_ref: false },
+                TypeInfo::Array { element_size: size_of::<usize>(), is_ref: true },
+            ],
         };
-        let root = flame::ignite(file, &mut globals, sink, symbol_table);
+        let arena = Arena::new(25);
+        let tcx = TypeContext::new(&arena);
+        let root = flame::ignite(file, &mut globals, sink, symbol_table, &tcx);
         if sink.fatal() {
             return None;
         }
@@ -155,6 +163,7 @@ impl VM {
             frames,
             funs: globals.funs.into_boxed_slice(),
             types: globals.types.into_boxed_slice(),
+            builtin_type_indexes: tcx.into_builtins(),
             // 4 MiB
             heap: Heap::new(4 * 2usize.pow(20)),
         })
@@ -176,16 +185,23 @@ impl VM {
         &self.stack
     }
 
-    pub fn alloc_string(&mut self, bytes: &[u8]) -> Result<HeapArray, RuntimeError> {
-        let mut array = self.heap.alloc_array(bytes.len(), &self.types[Self::STRING_TYPE_INDEX])
-            .unwrap_or_else(|| {
-                self.heap.gc(&mut self.stack);
-                self.heap.alloc_array(bytes.len(), &self.types[Self::STRING_TYPE_INDEX]).expect("free heap space after gc")
-            });
-        for (i, byte) in bytes.iter().copied().enumerate() {
-            unsafe { array.set(i, &byte as *const u8); }
+    pub fn alloc_string(&mut self, bytes: &[u8]) -> Result<HeapObject, RuntimeError> {
+        let type_info = &self.types[self.builtin_type_indexes[BuiltinType::String as usize]];
+        // TODO: gc
+        let mut string = self.heap.alloc_obj(type_info).unwrap();
+        let field_ptr = string.field_ptr_mut().cast::<*mut u8>();
+
+        // TODO: gc
+        let mut chars = self.heap.alloc_array(bytes.len(), &self.types[Self::BYTE_ARR_TYPE_INDEX]).unwrap();
+        for (i, byte) in bytes.iter().enumerate() {
+            unsafe {
+                chars.set(i, byte);
+            }
         }
-        Ok(array)
+
+        unsafe { field_ptr.write(chars.as_mut_ptr()); };
+
+        Ok(string)
     }
 
     pub fn throw(&mut self, message: impl ToString) -> RuntimeError {
@@ -219,7 +235,7 @@ impl VM {
     }
 
     fn exec_one_inner(&mut self) -> Result<(), Box<dyn Error>> {
-        let Some(frame) = self.frames.last_mut() else { return Ok(()); };
+        let Some(mut frame) = self.frames.last_mut() else { return Ok(()); };
 
         let fun = &self.funs[frame.fun_index];
         match fun.kind {
@@ -268,12 +284,10 @@ impl VM {
                         self.stack.push_ref(obj.as_mut_ptr())?;
                     },
                     Instruction::AllocString(str) => {
-                        // TODO: figure out when to GC
-                        let mut array = self.heap.alloc_array(str.len(), &self.types[Self::STRING_TYPE_INDEX]).unwrap();
-                        for (i, byte) in str.bytes().enumerate() {
-                            unsafe { array.set(i, &byte as *const u8); }
-                        }
-                        self.stack.push_ref(array.as_mut_ptr())?;
+                        let mut string = self.alloc_string(str.as_bytes())?;
+                        self.stack.push_ref(string.as_mut_ptr())?;
+                        // allocating cannot modify number of frames
+                        frame = self.frames.last_mut().unwrap();
                     },
                     Instruction::AllocArray(index, len) => {
                         // TODO: figure out when to GC
@@ -298,8 +312,9 @@ impl VM {
                         return Ok(());
                     },
                     Instruction::Throw => {
-                        let ptr = unsafe { HeapArray::from_raw(self.stack.pop()?.read_ptr()) };
-                        let message = unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr.element_ptr(), ptr.len())) };
+                        let string = unsafe { HeapObject::from_raw(self.stack.pop()?.read_ptr()) };
+                        let bytes = unsafe { HeapArray::from_raw(*string.field_ptr().cast()) };
+                        let message = unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(bytes.element_ptr(), bytes.len())) };
                         return Err(Box::new(UserError(message.to_string())))
                     },
                     Instruction::Invoke(num_args) => {

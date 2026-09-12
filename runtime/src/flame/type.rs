@@ -117,6 +117,7 @@ impl<'t> LanternType<'t> {
 pub struct TypeContext<'t> {
     arena: &'t Arena<LanternType<'t>>,
     lookup: RefCell<HashSet<&'t LanternType<'t>>>,
+    builtins: RefCell<[Option<TypeId<'t>>; BuiltinType::SIZE]>,
 }
 
 impl<'t> TypeContext<'t> {
@@ -124,6 +125,7 @@ impl<'t> TypeContext<'t> {
         Self {
             arena,
             lookup: RefCell::new(HashSet::new()),
+            builtins: RefCell::new([None; BuiltinType::SIZE]),
         }
     }
 
@@ -133,6 +135,35 @@ impl<'t> TypeContext<'t> {
 
     pub fn primitive(&self, primitive: &'static LanternPrimitive) -> TypeId<'t> {
         self.intern(LanternType::Primitive(primitive))
+    }
+
+    pub fn builtin(&self, builtin: BuiltinType) -> TypeId<'t> {
+        let builtins = self.builtins.borrow();
+        match builtins[builtin as usize] {
+            Some(ty) => ty,
+            None => panic!("builtin {builtin:?} has not been interned"),
+        }
+    }
+
+    pub fn into_builtins(self) -> [usize; BuiltinType::SIZE] {
+        let builtins = self.builtins.into_inner();
+        let mut ids = [0; BuiltinType::SIZE];
+        for (i, ty) in builtins.iter().enumerate() {
+            let id = match *ty.expect("builtin has been interned") {
+                LanternType::Struct(LanternStruct { id, .. }) => id,
+                _ => panic!("expected builtin to be a struct"),
+            };
+            ids[i] = id;
+        }
+        ids
+    }
+
+    pub fn link_builtin(&self, builtin: BuiltinType, id: TypeId<'t>) {
+        let mut builtins = self.builtins.borrow_mut();
+        match &mut builtins[builtin as usize] {
+            ty @ None => *ty = Some(id),
+            Some(_) => panic!("builtin {builtin:?} already interned"),
+        }
     }
 
     pub fn intern(&self, ty: LanternType<'t>) -> TypeId<'t> {
@@ -145,5 +176,14 @@ impl<'t> TypeContext<'t> {
             TypeId(ty)
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuiltinType {
+    String = 0,
+}
+
+impl BuiltinType {
+    pub const SIZE: usize = 1;
 }
 

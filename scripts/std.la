@@ -20,20 +20,26 @@ primitive bool;
 struct String {
   bytes: [byte],
 }
-fun String.replace_first(self: String, other: [byte]) {
-  self.bytes[0] = other[0];
+fun String.char_len(self: String) -> int {
+  return self.bytes.len;
+}
+fun String.char_at(self: String, at: int) -> byte {
+  return self.bytes[at];
+}
+fun String.replace_first(self: String, other: String) {
+  self.bytes[0] = other.bytes[0];
 }
 
 fun println(str: String) {
   write(str.bytes);
-  write("\n");
+  write("\n".bytes);
   flush();
 }
 
 native fun write(bytes: [byte]);
 native fun flush();
-native fun int_to_str(int: int) -> [byte];
-native fun float_to_str(float: float) -> [byte];
+native fun int_to_str(int: int) -> String;
+native fun float_to_str(float: float) -> String;
 native fun input_float() -> float;
 native fun input_int() -> int;
 
