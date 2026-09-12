@@ -5,7 +5,7 @@ use diagnostic::{Diagnostic, DiagnosticSink, error, symbol::{Symbol, SymbolDispl
 use instruction::InstructionSet;
 use parse::{FunArg, IfBranch, IfStmt, Item, ItemFun, ItemNativeFun, ItemPrimitive, ItemStruct, LanternFile, ReturnStmt, Stmt, StructField, ValDeclaration, WhileStmt, expr::{BinaryOperator, Expr, ExprArray, ExprBinary, ExprBlock, ExprField, ExprFunCall, ExprIndex, ExprParen, ExprStruct, ExprUnary, UnaryOperator}, lex::{Break, Ident, Literal, TokenKind}};
 
-use crate::{Slot, VM, error::RuntimeError, flame::{instruction::Instruction, scope::{Globals, LineMap, LoopContext, LoopScope, Scope, ScopeKind, StackFrame}, r#type::{LanternType, TypeContext, TypeId}}, heap::{HeapObject, ObjectHeader, TypeInfo}, inst};
+use crate::{Slot, VM, error::{RuntimeError, StacktraceLocation}, flame::{instruction::Instruction, scope::{Globals, LineMap, LoopContext, LoopScope, Scope, ScopeKind, StackFrame}, r#type::{BuiltinType, LanternType, TypeContext, TypeId}}, heap::{HeapObject, ObjectHeader, TypeInfo}, inst};
 
 pub type NativeFn = fn(&mut VM) -> Result<Slot, RuntimeError>;
 

@@ -150,10 +150,6 @@ impl LoopContext {
     pub fn new() -> Self {
         Self { scopes: Vec::new() }
     }
-
-    pub fn in_loop(&self) -> bool {
-        !self.scopes.is_empty()
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -2,7 +2,7 @@ use std::{alloc::Layout, mem::size_of, time::Instant};
 
 use crate::{SlotType, stack::LanternStack};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Heap {
     from_space: *mut u8,
     to_space: *mut u8,

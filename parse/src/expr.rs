@@ -166,15 +166,6 @@ pub struct ExprFunCall {
     pub closed_paren: ClosedParen,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct ExprMethodCall {
-    pub expr: Box<Expr>,
-    pub ident: Ident,
-    pub open_paren: OpenParen,
-    pub args: Vec<Expr>,
-    pub closed_paren: ClosedParen,
-}
-
 #[derive(Parse, Debug, Clone, PartialEq)]
 pub struct ExprStruct {
     pub ident: Ident,
