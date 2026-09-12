@@ -627,7 +627,7 @@ impl<'a, 's> Lexer<'a, 's> {
 
                 match word {
                     "true" => Ok(Token::Literal(Literal::True(span))),
-                    "false" => Ok(Token::Literal(Literal::True(span))),
+                    "false" => Ok(Token::Literal(Literal::False(span))),
                     _ if let Some(keyword) = Keyword::from_str(word, span.clone()) => Ok(Token::Keyword(keyword)),
                     _ => Ok(Token::Ident(Ident(self.symbol_table.store(word), span))),
                 }
