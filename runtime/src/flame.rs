@@ -1066,7 +1066,7 @@ impl GeneratedFunction {
             if self.line_table.is_empty() { return StacktraceLocation::Line(0); };
             match self.line_table.binary_search_by_key(&inst_ptr, |map| map.ip) {
                 Ok(i) => StacktraceLocation::Line(self.line_table[i].line),
-                Err(i) => StacktraceLocation::Line(self.line_table[i - 1].line),
+                Err(i) => StacktraceLocation::Line(self.line_table[i.saturating_sub(1)].line),
             }
         }
     }
