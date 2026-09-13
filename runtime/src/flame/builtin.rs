@@ -53,11 +53,11 @@ native_funs![for vm,
     },
     "float_to_str" = (float) => {
         let float = unsafe { float.read_float() };
-        Ok(Slot::new_ref(vm.alloc_string(float.to_string().as_bytes())?.as_mut_ptr()))
+        Ok(Slot::new_ref(vm.alloc_string(float.to_string().as_bytes()).as_mut_ptr()))
     },
     "int_to_str" = (int) => {
         let int = unsafe { int.read_int() };
-        Ok(Slot::new_ref(vm.alloc_string(int.to_string().as_bytes())?.as_mut_ptr()))
+        Ok(Slot::new_ref(vm.alloc_string(int.to_string().as_bytes()).as_mut_ptr()))
     },
     "input_float" = () => {
         let mut input = String::new();

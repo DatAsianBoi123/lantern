@@ -185,7 +185,7 @@ impl VM {
         &self.stack
     }
 
-    pub fn alloc_string(&mut self, bytes: &[u8]) -> Result<HeapObject, RuntimeError> {
+    pub fn alloc_string(&mut self, bytes: &[u8]) -> HeapObject {
         let type_info = &self.types[self.builtin_type_indexes[BuiltinType::String as usize]];
         // TODO: gc
         let mut string = self.heap.alloc_obj(type_info).unwrap();
@@ -201,7 +201,7 @@ impl VM {
 
         unsafe { field_ptr.write(chars.as_mut_ptr()); };
 
-        Ok(string)
+        string
     }
 
     pub fn throw(&mut self, message: impl ToString) -> RuntimeError {
