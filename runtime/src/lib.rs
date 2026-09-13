@@ -169,6 +169,26 @@ impl VM {
         })
     }
 
+    pub fn alloc_obj(heap: &mut Heap, stack: &mut LanternStack, type_info: &TypeInfo) -> HeapObject {
+        heap.alloc_obj(type_info).unwrap_or_else(|| {
+            heap.gc(stack);
+            while heap.used_space() >= 0.7 {
+                heap.grow(stack);
+            }
+            heap.alloc_obj(type_info).unwrap()
+        })
+    }
+
+    pub fn alloc_array(heap: &mut Heap, stack: &mut LanternStack, len: usize, type_info: &TypeInfo) -> HeapArray {
+        heap.alloc_array(len, type_info).unwrap_or_else(|| {
+            heap.gc(stack);
+            while heap.used_space() >= 0.7 {
+                heap.grow(stack);
+            }
+            heap.alloc_array(len, type_info).unwrap()
+        })
+    }
+
     pub fn funs(&self) -> &[GeneratedFunction] {
         &self.funs
     }
@@ -187,18 +207,15 @@ impl VM {
 
     pub fn alloc_string(&mut self, bytes: &[u8]) -> HeapObject {
         let type_info = &self.types[self.builtin_type_indexes[BuiltinType::String as usize]];
-        // TODO: gc
-        let mut string = self.heap.alloc_obj(type_info).unwrap();
-        let field_ptr = string.field_ptr_mut().cast::<*mut u8>();
-
-        // TODO: gc
-        let mut chars = self.heap.alloc_array(bytes.len(), &self.types[Self::BYTE_ARR_TYPE_INDEX]).unwrap();
+        let mut chars = Self::alloc_array(&mut self.heap, &mut self.stack, bytes.len(), &self.types[Self::BYTE_ARR_TYPE_INDEX]);
         for (i, byte) in bytes.iter().enumerate() {
             unsafe {
                 chars.set(i, byte);
             }
         }
 
+        let mut string = Self::alloc_obj(&mut self.heap, &mut self.stack, type_info);
+        let field_ptr = string.field_ptr_mut().cast::<*mut u8>();
         unsafe { field_ptr.write(chars.as_mut_ptr()); };
 
         string
@@ -279,21 +296,20 @@ impl VM {
                         _ => unreachable!(),
                     }),
                     Instruction::AllocObj(index) => {
-                        // TODO: gc
-                        let mut obj = self.heap.alloc_obj(&self.types[index]).unwrap();
+                        let mut obj = Self::alloc_obj(&mut self.heap, &mut self.stack, &self.types[index]);
                         self.stack.push_ref(obj.as_mut_ptr())?;
                     },
                     Instruction::AllocString(str) => {
-                        let mut string = self.alloc_string(str.as_bytes())?;
+                        let mut string = self.alloc_string(str.as_bytes());
                         self.stack.push_ref(string.as_mut_ptr())?;
                         // allocating cannot modify number of frames
                         frame = self.frames.last_mut().unwrap();
                     },
                     Instruction::AllocArray(index, len) => {
-                        // TODO: figure out when to GC
-                        let mut array = self.heap.alloc_array(len, &self.types[index]).unwrap();
+                        let mut array = Self::alloc_array(&mut self.heap, &mut self.stack, len, &self.types[index]);
                         for i in 1..=len {
-                            let element = &self.stack.pop()?.0 as *const _ as *const u8;
+                            let slot = self.stack.pop()?;
+                            let element = &slot.0 as *const _ as *const u8;
                             unsafe { array.set(len - i, element); }
                         }
                         self.stack.push_ref(array.as_mut_ptr())?;

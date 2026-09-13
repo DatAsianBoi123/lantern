@@ -1,4 +1,4 @@
-use std::{alloc::Layout, mem::size_of, time::Instant};
+use std::{alloc::Layout, time::Instant};
 
 use crate::{SlotType, stack::LanternStack};
 
@@ -13,76 +13,120 @@ pub struct Heap {
 impl Drop for Heap {
     fn drop(&mut self) {
         let layout = Layout::from_size_align(self.size * 2, 8).expect("size overflow");
-        if self.from_space < self.to_space {
-            unsafe { std::alloc::dealloc(self.from_space, layout); };
-        } else {
-            unsafe { std::alloc::dealloc(self.to_space, layout); };
-        }
+        unsafe { std::alloc::dealloc(self.from_space.min(self.to_space), layout); }
     }
 }
 
 impl Heap {
     pub fn new(space_size: usize) -> Self {
         unsafe {
-            let layout = Layout::from_size_align(space_size * 2, 8).expect("size overflow").pad_to_align();
+            let layout = Layout::from_size_align(space_size * 2, 8).expect("size overflow");
             let ptr = std::alloc::alloc(layout);
             if ptr.is_null() {
                 std::alloc::handle_alloc_error(layout);
             }
 
-            let size = layout.size() / 2;
             Self {
                 from_space: ptr,
-                to_space: ptr.add(size),
-                size,
+                to_space: ptr.add(space_size),
+                size: space_size,
                 alloc_ptr: ptr,
             }
         }
     }
 
+    pub fn used_space(&self) -> f64 {
+        (self.alloc_ptr.addr() - self.from_space.addr()) as f64 / self.size as f64
+    }
+
     pub fn gc(&mut self, stack: &mut LanternStack) {
         eprintln!("GC Cycle Start");
         let alloc_before = self.alloc_ptr.addr() - self.from_space.addr();
-        self.alloc_ptr = self.to_space;
-        std::mem::swap(&mut self.from_space, &mut self.to_space);
 
         let before = Instant::now();
+        self.collect(stack);
+        let moved = self.alloc_ptr.addr() - self.from_space.addr();
+        eprintln!("GC Cycle End in {:?} (moved {} bytes, {:.2}%)", Instant::now().duration_since(before), moved, (moved as f64 / alloc_before as f64) * 100.0);
+    }
+
+    fn collect(&mut self, stack: &mut LanternStack) {
+        self.alloc_ptr = self.to_space;
+        std::mem::swap(&mut self.from_space, &mut self.to_space);
+        self.move_roots(stack);
+        self.scan();
+    }
+
+    pub fn grow(&mut self, stack: &mut LanternStack) {
+        self.size = self.size.checked_mul(2).unwrap_or_else(|| panic!("heap grew too large"));
+        eprintln!("Heap grew to {}", self.size);
+        let grow_ptr = unsafe { std::alloc::alloc(Layout::from_size_align(self.size * 2, 8).expect("heap overflow")) };
+        let (new_from, new_to) = (grow_ptr, unsafe { grow_ptr.add(self.size) });
+        let (old_from, old_to) = (self.from_space, self.to_space);
+
+        // collect from the old from space to the new from space
+        self.to_space = new_from;
+        self.collect(stack);
+        // from space and to space gets swapped during collection
+        self.to_space = new_to;
+
+        let old_layout = Layout::from_size_align(self.size, 8).expect("size overflow");
+        unsafe { std::alloc::dealloc(old_from.min(old_to), old_layout); }
+    }
+
+    fn move_roots(&mut self, stack: &mut LanternStack) {
         for slot in stack {
             if slot.kind() == SlotType::Ref {
                 let Some(moved) = self.move_ref(unsafe { slot.read_ptr() }) else { continue; };
                 slot.write_ref(moved);
             }
         }
-
-        let moved = self.alloc_ptr.addr() - self.from_space.addr();
-        eprintln!("GC Cycle End in {:?} (moved {} bytes, {:.2}%)", Instant::now().duration_since(before), moved, (moved as f64 / alloc_before as f64) * 100.0);
     }
 
-    fn move_object_refs(&mut self, obj: *mut u8) {
+    fn scan(&mut self) {
+        let mut scan = self.from_space;
+        if scan == self.alloc_ptr {
+            return;
+        }
+
+        loop {
+            let size_moved = self.move_object_refs(scan);
+            let new_scan = scan.addr() + size_moved;
+            if new_scan != self.alloc_ptr.addr() {
+                scan = scan.with_addr(new_scan);
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn move_object_refs(&mut self, obj: *mut u8) -> usize {
         unsafe {
-            let header = &*(obj as *const ObjectHeader);
-            match &*(header.type_info) {
+            let header = &*obj.cast::<ObjectHeader>();
+            match &*header.type_info {
                 TypeInfo::Object { ref_offets, .. } => {
                     let mut object = HeapObject::from_raw(obj);
                     let fields = object.field_ptr_mut();
                     for offset in ref_offets {
-                        let field = fields.add(*offset) as *mut *mut u8;
+                        let field = fields.add(*offset).cast::<*mut u8>();
                         let obj = *field;
                         let Some(moved) = self.move_ref(obj) else { continue; };
                         field.write(moved);
                     }
+                    object.size()
                 },
                 TypeInfo::Array { element_size, is_ref } => {
-                    if !is_ref { return; };
                     let mut array = HeapArray::from_raw(obj);
-                    let len = array.len();
-                    let elements = array.element_ptr_mut();
-                    for i in 0..len {
-                        let element = elements.add(i * element_size) as *mut *mut u8;
-                        let obj = *element;
-                        let Some(moved) = self.move_ref(obj) else { continue; };
-                        element.write(moved);
+                    if *is_ref {
+                        let len = array.len();
+                        let elements = array.element_ptr_mut();
+                        for i in 0..len {
+                            let element = elements.add(i * element_size).cast::<*mut u8>();
+                            let obj = *element;
+                            let Some(moved) = self.move_ref(obj) else { continue; };
+                            element.write(moved);
+                        }
                     }
+                    array.size()
                 },
             }
         }
@@ -92,10 +136,11 @@ impl Heap {
         if ptr.is_null() { return None; };
 
         unsafe {
-            let header = &mut *(ptr as *mut ObjectHeader);
+            let header = &mut *(ptr.cast::<ObjectHeader>());
 
+            let from_addr = self.from_space.addr();
             // use from_space here because from_space and to_space get swapped during GC
-            if !header.forwarding_ptr.is_null() && (self.from_space..self.from_space.add(self.size)).contains(&header.forwarding_ptr) {
+            if !header.forwarding_ptr.is_null() && (from_addr..from_addr + self.size).contains(&header.forwarding_ptr.addr()) {
                 return Some(header.forwarding_ptr);
             }
 
@@ -103,9 +148,6 @@ impl Heap {
             let moved_ptr = self.next_ptr(total_size).expect("heap overflow");
             std::ptr::copy_nonoverlapping(ptr, moved_ptr, total_size);
             header.forwarding_ptr = moved_ptr;
-            eprintln!("Moved {ptr:?} to {moved_ptr:?}");
-
-            self.move_object_refs(moved_ptr);
 
             Some(moved_ptr)
         }
@@ -139,27 +181,25 @@ impl Heap {
         if size == 0 {
             panic!("attempted to allocate a ZST");
         }
-        unsafe {
-            // TODO: no hardcoded alignment
-            let padding = self.alloc_ptr.align_offset(8);
-            let total_size = padding + size;
-            if self.alloc_ptr.add(total_size) > self.from_space.add(self.size) {
-                None
-            } else {
-                let ptr = self.alloc_ptr.add(padding);
-                self.alloc_ptr = self.alloc_ptr.add(total_size);
+        // TODO: no hardcoded alignment
+        let padding = self.alloc_ptr.align_offset(8);
+        let total_size = padding + size;
+        if self.alloc_ptr.addr() + total_size > self.from_space.addr() + self.size {
+            None
+        } else {
+            let ptr = unsafe { self.alloc_ptr.add(padding) };
+            self.alloc_ptr = unsafe { self.alloc_ptr.add(total_size) };
 
-                Some(ptr)
-            }
+            Some(ptr)
         }
     }
 }
 
 unsafe fn total_size_of(obj: *const u8) -> usize {
     unsafe {
-        match &*(*(obj as *const ObjectHeader)).type_info {
-            TypeInfo::Object { .. } => HeapObject(obj as *mut u8).size(),
-            TypeInfo::Array { .. } => HeapArray(obj as *mut u8).size()
+        match &*(*obj.cast::<ObjectHeader>()).type_info {
+            TypeInfo::Object { .. } => HeapObject(obj as *mut _).size(),
+            TypeInfo::Array { .. } => HeapArray(obj as *mut _).size()
         }
     }
 }
@@ -211,8 +251,8 @@ impl HeapObject {
 
         let mut object = Self(ptr);
         unsafe {
-            (object.0 as *mut ObjectHeader).write(header);
-            (object.field_ptr_mut()).write_bytes(0, object.obj_size());
+            object.0.cast::<ObjectHeader>().write(header);
+            object.field_ptr_mut().write_bytes(0, object.obj_size());
         };
         object
     }
@@ -230,7 +270,7 @@ impl HeapObject {
     }
 
     pub fn header(&self) -> &ObjectHeader {
-        unsafe { &*(self.0 as *const ObjectHeader) }
+        unsafe { &*self.0.cast() }
     }
 
     pub fn type_info(&self) -> &TypeInfo {
@@ -297,8 +337,8 @@ impl HeapArray {
 
         let mut array = Self(ptr);
         unsafe {
-            (array.0 as *mut ObjectHeader).write(header);
-            (array.0.add(size_of::<ObjectHeader>()) as *mut usize).write(len);
+            array.0.cast::<ObjectHeader>().write(header);
+            array.0.add(size_of::<ObjectHeader>()).cast::<usize>().write(len);
             array.element_ptr_mut().write_bytes(0, array.len() * array.element_size());
         };
         array
@@ -325,7 +365,7 @@ impl HeapArray {
     }
 
     pub fn header(&self) -> &ObjectHeader {
-        unsafe { &*(self.0 as *const ObjectHeader) }
+        unsafe { &*self.0.cast() }
     }
 
     pub fn type_info(&self) -> &TypeInfo {
@@ -359,7 +399,7 @@ impl HeapArray {
     }
 
     pub fn len(&self) -> usize {
-        unsafe { *(self.0.add(size_of::<ObjectHeader>()) as *const usize) }
+        unsafe { *self.0.add(size_of::<ObjectHeader>()).cast() }
     }
 
     pub fn get(&self, index: usize) -> Option<*const u8> {
