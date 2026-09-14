@@ -916,10 +916,10 @@ impl<'t> LanternStructData<'t> {
             .max()
             .unwrap_or(1);
 
-        let mut size = 0;
+        let mut size = 0usize;
         let fields = fields.into_iter()
             .map(|(name, ty)| {
-                size += size % ty.alignment();
+                size = size.next_multiple_of(ty.alignment());
                 let field = LanternStructField { name, offset: size, ty };
                 size += ty.size();
                 field
