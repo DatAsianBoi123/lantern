@@ -169,6 +169,28 @@ impl VM {
         })
     }
 
+    pub fn heap_alloc_string(
+        heap: &mut Heap,
+        stack: &mut LanternStack,
+        types: &[TypeInfo],
+        builtin_type_indices: &[usize],
+        bytes: &[u8],
+    ) -> HeapObject {
+        let type_info = &types[builtin_type_indices[BuiltinType::String as usize]];
+        let mut chars = Self::alloc_array(heap, stack, bytes.len(), &types[Self::BYTE_ARR_TYPE_INDEX]);
+        for (i, byte) in bytes.iter().enumerate() {
+            unsafe {
+                chars.set(i, byte);
+            }
+        }
+
+        let mut string = Self::alloc_obj(heap, stack, type_info);
+        let field_ptr = string.field_ptr_mut().cast::<*mut u8>();
+        unsafe { field_ptr.write(chars.as_mut_ptr()); };
+
+        string
+    }
+
     pub fn alloc_obj(heap: &mut Heap, stack: &mut LanternStack, type_info: &TypeInfo) -> HeapObject {
         heap.alloc_obj(type_info).unwrap_or_else(|| {
             heap.gc(stack);
@@ -206,19 +228,7 @@ impl VM {
     }
 
     pub fn alloc_string(&mut self, bytes: &[u8]) -> HeapObject {
-        let type_info = &self.types[self.builtin_type_indexes[BuiltinType::String as usize]];
-        let mut chars = Self::alloc_array(&mut self.heap, &mut self.stack, bytes.len(), &self.types[Self::BYTE_ARR_TYPE_INDEX]);
-        for (i, byte) in bytes.iter().enumerate() {
-            unsafe {
-                chars.set(i, byte);
-            }
-        }
-
-        let mut string = Self::alloc_obj(&mut self.heap, &mut self.stack, type_info);
-        let field_ptr = string.field_ptr_mut().cast::<*mut u8>();
-        unsafe { field_ptr.write(chars.as_mut_ptr()); };
-
-        string
+        Self::heap_alloc_string(&mut self.heap, &mut self.stack, &self.types, &self.builtin_type_indexes, bytes)
     }
 
     pub fn throw(&mut self, message: impl ToString) -> RuntimeError {
@@ -252,7 +262,7 @@ impl VM {
     }
 
     fn exec_one_inner(&mut self) -> Result<(), Box<dyn Error>> {
-        let Some(mut frame) = self.frames.last_mut() else { return Ok(()); };
+        let Some(frame) = self.frames.last_mut() else { return Ok(()); };
 
         let fun = &self.funs[frame.fun_index];
         match fun.kind {
@@ -300,10 +310,8 @@ impl VM {
                         self.stack.push_ref(obj.as_mut_ptr())?;
                     },
                     Instruction::AllocString(str) => {
-                        let mut string = self.alloc_string(str.as_bytes());
+                        let mut string = Self::heap_alloc_string(&mut self.heap, &mut self.stack, &self.types, &self.builtin_type_indexes, str.as_bytes());
                         self.stack.push_ref(string.as_mut_ptr())?;
-                        // allocating cannot modify number of frames
-                        frame = self.frames.last_mut().unwrap();
                     },
                     Instruction::AllocArray(index, len) => {
                         let mut array = Self::alloc_array(&mut self.heap, &mut self.stack, len, &self.types[index]);
