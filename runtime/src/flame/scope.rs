@@ -172,6 +172,7 @@ pub struct StackFrame<'t> {
     pub name: String,
     pub instructions: InstructionSet,
     pub locals: usize,
+    pub loop_context: LoopContext,
     pub line_table: Vec<LineMap>,
     pub ret_type: Option<TypeId<'t>>,
 }
@@ -182,6 +183,7 @@ impl<'t> StackFrame<'t> {
             name: "<module>".to_string(),
             instructions: InstructionSet::new(),
             locals: 0,
+            loop_context: LoopContext::new(),
             line_table: Vec::new(),
             ret_type: None,
         }
@@ -192,6 +194,7 @@ impl<'t> StackFrame<'t> {
             name,
             instructions: InstructionSet::new(),
             locals: 0,
+            loop_context: LoopContext::new(),
             line_table: Vec::new(),
             ret_type: Some(ret_type),
         }

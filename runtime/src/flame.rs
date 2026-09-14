@@ -4,7 +4,7 @@ use diagnostic::{Diagnostic, DiagnosticSink, error, symbol::{Symbol, SymbolDispl
 use instruction::InstructionSet;
 use parse::{FunArg, IfBranch, IfStmt, Item, ItemFun, ItemNativeFun, ItemPrimitive, ItemStruct, LanternFile, ReturnStmt, Stmt, StructField, ValDeclaration, WhileStmt, expr::{BinaryOperator, Expr, ExprArray, ExprBinary, ExprBlock, ExprField, ExprFunCall, ExprIndex, ExprParen, ExprStruct, ExprUnary, UnaryOperator}, lex::{Break, Ident, Literal, TokenKind}};
 
-use crate::{Slot, VM, error::{RuntimeError, StacktraceLocation}, flame::{instruction::Instruction, scope::{Globals, LineMap, LoopContext, LoopScope, Scope, ScopeKind, StackFrame}, r#type::{BuiltinType, LanternType, TypeContext, TypeId}}, heap::{HeapObject, ObjectHeader, TypeInfo}, inst};
+use crate::{Slot, VM, error::{RuntimeError, StacktraceLocation}, flame::{instruction::Instruction, scope::{Globals, LineMap, LoopScope, Scope, ScopeKind, StackFrame}, r#type::{BuiltinType, LanternType, TypeContext, TypeId}}, heap::{HeapObject, ObjectHeader, TypeInfo}, inst};
 
 pub type NativeFn = fn(&mut VM) -> Result<Slot, RuntimeError>;
 
@@ -31,7 +31,6 @@ pub struct FlameGen<'a, 't> {
     pub globals: &'a mut Globals,
     pub sink: &'a mut DiagnosticSink,
     pub symbol_table: &'a SymbolTable<'a>,
-    loop_context: LoopContext,
 }
 
 impl<'a, 't> FlameGen<'a, 't> {
@@ -41,7 +40,6 @@ impl<'a, 't> FlameGen<'a, 't> {
             globals,
             sink,
             symbol_table,
-            loop_context: LoopContext::new(),
         }
     }
 
@@ -203,7 +201,7 @@ impl<'a, 't> FlameGen<'a, 't> {
                     let condition_index = self.frame.instructions.len();
                     inst!(with self.frame => block.open_brace.span(); POP_GOTO_IF_FALSE 0);
 
-                    self.loop_context.scopes.push(LoopScope::new(head));
+                    self.frame.loop_context.scopes.push(LoopScope::new(head));
                     let block_scope = scope.child_block();
                     // we can't assume the initial condition is met so these may not even be ran
                     let _ = self.compile_stmts(block.stmts, block_scope, tcx);
@@ -211,7 +209,7 @@ impl<'a, 't> FlameGen<'a, 't> {
 
                     self.frame.instructions[condition_index] = Instruction::PopGotoIfFalse(self.frame.instructions.len());
 
-                    for break_index in self.loop_context.scopes.pop().expect("in loop").breaks {
+                    for break_index in self.frame.loop_context.scopes.pop().expect("in loop").breaks {
                         self.frame.instructions[break_index] = Instruction::Goto(self.frame.instructions.len());
                     }
                 },
@@ -271,14 +269,14 @@ impl<'a, 't> FlameGen<'a, 't> {
                     return ControlFlow::Break(());
                 },
                 Stmt::Continue(continue_keyword, _) => {
-                    if let Some(LoopScope { head, .. }) = self.loop_context.scopes.last() {
+                    if let Some(LoopScope { head, .. }) = self.frame.loop_context.scopes.last_mut() {
                         inst!(with self.frame => continue_keyword.span(); GOTO *head);
                     } else {
                         error!(in self.sink; continue_keyword.span() => "{continue_keyword} not allowed here");
                     }
                 },
                 Stmt::Break(Break(span), _) => {
-                    if let Some(LoopScope { breaks, .. }) = self.loop_context.scopes.last_mut() {
+                    if let Some(LoopScope { breaks, .. }) = self.frame.loop_context.scopes.last_mut() {
                         breaks.push(self.frame.instructions.len());
                         inst!(with self.frame => span; GOTO 0);
                     } else {
