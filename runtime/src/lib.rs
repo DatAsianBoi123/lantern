@@ -93,9 +93,7 @@ impl Slot {
     /// # Safety
     /// The Slot must actually contain a ptr to T
     pub unsafe fn read_ptr<T>(&self) -> *mut T {
-        unsafe {
-            self.0.ptr.cast()
-        }
+        unsafe { self.0.ptr.cast() }
     }
 
     /// # Safety
@@ -138,7 +136,7 @@ impl VM {
     pub fn new(file: LanternFile, sink: &mut DiagnosticSink, symbol_table: &SymbolTable) -> Option<Self> {
         let mut globals = Globals {
             funs: Vec::new(),
-            // TODO: better way of array type info
+            // TODO: better way of builtin array type infos
             types: vec![
                 TypeInfo::Array { element_size: 1, is_ref: false },
                 TypeInfo::Array { element_size: 8, is_ref: false },
