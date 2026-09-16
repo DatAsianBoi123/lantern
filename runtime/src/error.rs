@@ -9,8 +9,11 @@ pub struct RuntimeError {
 impl Display for RuntimeError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "Error: {}", self.message)?;
-        for element in &self.stacktrace {
-            write!(f, "\n  at {} ({})", element.0, element.1)?;
+        self.stacktrace.iter().take(30).try_for_each(|(function, location)| {
+            write!(f, "\n  at {function} ({location})")
+        })?;
+        if self.stacktrace.len() > 30 {
+            write!(f, "\n  ...and {} more", self.stacktrace.len() - 30)?;
         }
         Ok(())
     }
