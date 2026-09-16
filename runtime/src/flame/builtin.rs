@@ -39,12 +39,12 @@ native_funs![for vm,
         let mut stdout = std::io::stdout();
         unsafe {
             let bytes = std::slice::from_raw_parts(byte_ptr.element_ptr(), byte_ptr.len());
-            stdout.write_all(bytes).unwrap();
+            stdout.write_all(bytes).map_err(|err| vm.throw(err));
         }
         Ok(Slot::new_usize(0))
     },
     "flush" = () => {
-        std::io::stdout().flush();
+        std::io::stdout().flush().map_err(|err| vm.throw(err));
         Ok(Slot::new_usize(0))
     },
     "gc" = () => {
@@ -61,12 +61,12 @@ native_funs![for vm,
     },
     "input_float" = () => {
         let mut input = String::new();
-        std::io::stdin().read_line(&mut input).unwrap();
+        std::io::stdin().read_line(&mut input).map_err(|err| vm.throw(err));
         Ok(Slot::new_float(input.trim().parse::<f64>().map_err(|_| vm.throw("not a float"))?))
     },
     "input_int" = () => {
         let mut input = String::new();
-        std::io::stdin().read_line(&mut input).unwrap();
+        std::io::stdin().read_line(&mut input).map_err(|err| vm.throw(err));
         Ok(Slot::new_int(input.trim().parse::<i64>().map_err(|_| vm.throw("not an integer"))?))
     },
 ];
