@@ -40,7 +40,6 @@ impl Heap {
     }
 
     pub fn gc(&mut self, stack: &mut LanternStack) {
-        eprintln!("GC Cycle Start");
         let alloc_before = self.alloc_ptr.addr() - self.from_space.addr();
 
         let before = Instant::now();
@@ -84,22 +83,15 @@ impl Heap {
 
     fn scan(&mut self) {
         let mut scan = self.from_space;
-        if scan == self.alloc_ptr {
-            return;
-        }
 
-        loop {
-            let size_moved = self.move_object_refs(scan);
-            let new_scan = scan.addr() + size_moved;
-            if new_scan != self.alloc_ptr.addr() {
-                scan = scan.with_addr(new_scan);
-            } else {
-                break;
-            }
+        while scan < self.alloc_ptr {
+            self.move_object_refs(scan);
+            let size = unsafe { obj_size_of(scan) };
+            scan = scan.wrapping_add(size.next_multiple_of(align_of::<ObjectHeader>()));
         }
     }
 
-    fn move_object_refs(&mut self, obj: *mut u8) -> usize {
+    fn move_object_refs(&mut self, obj: *mut u8) {
         unsafe {
             let header = &*obj.cast::<ObjectHeader>();
             match &*header.type_info {
@@ -112,7 +104,6 @@ impl Heap {
                         let Some(moved) = self.move_ref(obj) else { continue; };
                         field.write(moved);
                     }
-                    object.size()
                 },
                 TypeInfo::Array { element_size, is_ref } => {
                     let mut array = HeapArray::from_raw(obj);
@@ -126,7 +117,6 @@ impl Heap {
                             element.write(moved);
                         }
                     }
-                    array.size()
                 },
             }
         }
@@ -138,13 +128,11 @@ impl Heap {
         unsafe {
             let header = &mut *(ptr.cast::<ObjectHeader>());
 
-            let from_addr = self.from_space.addr();
-            // use from_space here because from_space and to_space get swapped during GC
-            if !header.forwarding_ptr.is_null() && (from_addr..from_addr + self.size).contains(&header.forwarding_ptr.addr()) {
+            if !header.forwarding_ptr.is_null() {
                 return Some(header.forwarding_ptr);
             }
 
-            let total_size = total_size_of(ptr);
+            let total_size = obj_size_of(ptr);
             let moved_ptr = self.next_ptr(total_size).expect("heap overflow");
             std::ptr::copy_nonoverlapping(ptr, moved_ptr, total_size);
             header.forwarding_ptr = moved_ptr;
@@ -181,13 +169,12 @@ impl Heap {
         if size == 0 {
             panic!("attempted to allocate a ZST");
         }
-        // TODO: no hardcoded alignment
-        let padding = self.alloc_ptr.align_offset(8);
-        let total_size = padding + size;
+        let obj_offset = self.alloc_ptr.align_offset(align_of::<ObjectHeader>());
+        let total_size = obj_offset + size;
         if self.alloc_ptr.addr() + total_size > self.from_space.addr() + self.size {
             None
         } else {
-            let ptr = unsafe { self.alloc_ptr.add(padding) };
+            let ptr = unsafe { self.alloc_ptr.add(obj_offset) };
             self.alloc_ptr = unsafe { self.alloc_ptr.add(total_size) };
 
             Some(ptr)
@@ -195,7 +182,7 @@ impl Heap {
     }
 }
 
-unsafe fn total_size_of(obj: *const u8) -> usize {
+unsafe fn obj_size_of(obj: *const u8) -> usize {
     unsafe {
         match &*(*obj.cast::<ObjectHeader>()).type_info {
             TypeInfo::Object { .. } => HeapObject(obj as *mut _).size(),
@@ -257,8 +244,13 @@ impl HeapObject {
         object
     }
 
-    pub const fn field_offset() -> usize {
+    pub fn field_offset() -> usize {
+        // ObjectHeader has no padding and is aligned to 8 so no need to add anything extra
         size_of::<ObjectHeader>()
+    }
+
+    pub fn size_of(size: usize) -> usize {
+        Self::field_offset() + size
     }
 
     pub fn as_ptr(&self) -> *const u8 {
@@ -275,14 +267,6 @@ impl HeapObject {
 
     pub fn type_info(&self) -> &TypeInfo {
         unsafe { &*(self.header().type_info) }
-    }
-
-    pub fn size_of(size: usize) -> usize {
-        unsafe { Layout::from_size_align_unchecked(Self::field_offset() + size, 8).pad_to_align().size() }
-    }
-
-    pub fn size(&self) -> usize {
-        Self::size_of(self.obj_size())
     }
 
     pub fn obj_size(&self) -> usize {
@@ -307,6 +291,9 @@ impl HeapObject {
         unsafe { self.0.add(Self::field_offset()) }
     }
 
+    pub fn size(&self) -> usize {
+        Self::size_of(self.obj_size())
+    }
 }
 
 /// # Memory Layout
@@ -344,16 +331,13 @@ impl HeapArray {
         array
     }
 
-    pub const fn element_offset() -> usize {
+    pub fn element_offset() -> usize {
+        // ObjectHeader and usize have the same alignment so no padding bytes needed
         size_of::<ObjectHeader>() + size_of::<usize>()
     }
 
     pub fn size_of(len: usize, element_size: usize) -> usize {
-        unsafe { Layout::from_size_align_unchecked(Self::element_offset() + len * element_size, 8).pad_to_align().size() }
-    }
-
-    pub fn size(&self) -> usize {
-        Self::size_of(self.len(), self.element_size())
+        Self::element_offset() + len * element_size
     }
 
     pub fn as_ptr(&self) -> *const u8 {
@@ -370,6 +354,10 @@ impl HeapArray {
 
     pub fn type_info(&self) -> &TypeInfo {
         unsafe { &*(self.header().type_info) }
+    }
+
+    pub fn size(&self) -> usize {
+        Self::size_of(self.len(), self.element_size())
     }
 
     pub fn is_ref(&self) -> bool {
@@ -394,12 +382,12 @@ impl HeapArray {
         unsafe { self.0.add(Self::element_offset()) }
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
     pub fn len(&self) -> usize {
         unsafe { *self.0.add(size_of::<ObjectHeader>()).cast() }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     pub fn get(&self, index: usize) -> Option<*const u8> {
