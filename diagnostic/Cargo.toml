@@ -8,5 +8,5 @@ name = "diagnostic"
 path = "src/lib.rs"
 
 [dependencies]
-thiserror = { workspace = true }
+color-print = "0.3.7"
 

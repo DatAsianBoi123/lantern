@@ -1,4 +1,4 @@
-use diagnostic::{Diagnostic, error, symbol::{SymbolDisplay, SymbolTable}};
+use diagnostic::{Diagnostic, FileId, error, symbol::{SymbolDisplay, SymbolTable}};
 use lex::{ArrowRight, At, Break, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Continue, Else, Equals, Fun, Ident, If, Keyword, Native, OpenBrace, OpenBracket, OpenParen, Period, Primitive, Punct, Return, Semi, Struct, Throw, Token, TokenKind, Using, Val, While};
 use macros::Parse;
 
@@ -23,8 +23,8 @@ impl<T: TokenKind> ParseTokens for T {
     }
 }
 
-pub fn parse<'a>(content: &'a str, symbol_table: &mut SymbolTable<'a>) -> Result<LanternFile> {
-    TokenStream::from_input(content, symbol_table).parse()
+pub fn parse<'a>(source: FileId, content: &'a str, symbol_table: &mut SymbolTable<'a>) -> Result<LanternFile> {
+    TokenStream::from_input(source, content, symbol_table).parse()
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -212,7 +212,7 @@ impl ParseTokens for ReturnStmt {
 #[derive(Parse, Debug, Clone, PartialEq)]
 pub enum IfBranch {
     #[parse(using(If))]
-    ElseIf(IfStmt),
+    ElseIf(#[parse(boxed(IfStmt))] Box<IfStmt>),
     #[parse(using(OpenBrace))]
     Else(ExprBlock),
 }

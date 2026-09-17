@@ -1,4 +1,4 @@
-use diagnostic::symbol::SymbolTable;
+use diagnostic::{FileId, symbol::SymbolTable};
 use lex::{Lexer, Token, TokenKind};
 
 use crate::{ParseTokens, Result};
@@ -18,8 +18,8 @@ impl<'a, 's> TokenStream<'a, 's> {
         T::parse(self)
     }
 
-    pub fn from_input(str: &'a str, symbol_table: &'s mut SymbolTable<'a>) -> Self {
-        Self::new(Lexer::new(str, symbol_table))
+    pub fn from_input(source: FileId, str: &'a str, symbol_table: &'s mut SymbolTable<'a>) -> Self {
+        Self::new(Lexer::new(source, str, symbol_table))
     }
 
     pub fn is_eof(&mut self) -> Result<bool> {
@@ -69,16 +69,21 @@ pub fn parse_punctuated_untrailed<T: ParseTokens, P: ParseTokens, E: TokenKind>(
 
 #[cfg(test)]
 mod tests {
-    use diagnostic::symbol::SymbolTable;
+    use std::path::PathBuf;
+
+    use diagnostic::{SourceMap, symbol::SymbolTable};
     use lex::{Eof, Literal};
 
     use crate::{stream::parse_punctuated_untrailed, *};
 
     #[test]
     fn test_punctuated() {
-        let mut symbol_table = SymbolTable::new();
         let input = "1,23,4";
-        let mut stream = TokenStream::from_input(input, &mut symbol_table);
+
+        let mut source_map = SourceMap::new();
+        let root = source_map.add_source(PathBuf::new(), input);
+        let mut symbol_table = SymbolTable::new();
+        let mut stream = TokenStream::from_input(root, input, &mut symbol_table);
 
         let parsed = parse_punctuated_untrailed::<Literal, Comma, Eof>(&mut stream);
         assert!(parsed.is_ok());
@@ -87,9 +92,12 @@ mod tests {
 
     #[test]
     fn test_stream() {
-        let mut symbol_table = SymbolTable::new();
         let input = "val a: std.int = 10;";
-        let mut stream = TokenStream::from_input(input, &mut symbol_table);
+
+        let mut source_map = SourceMap::new();
+        let root = source_map.add_source(PathBuf::new(), input);
+        let mut symbol_table = SymbolTable::new();
+        let mut stream = TokenStream::from_input(root, input, &mut symbol_table);
 
         let val = stream.parse();
         assert!(matches!(val, Ok(ValDeclaration { .. })));

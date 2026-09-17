@@ -134,13 +134,15 @@ impl<'a, 't> FlameGen<'a, 't> {
             match statement {
                 Stmt::IfStmt(if_stmt) => {
                     let mut end_indices = Vec::new();
-                    let mut current_branch = IfBranch::ElseIf(if_stmt);
+                    let mut current_branch = IfBranch::ElseIf(Box::new(if_stmt));
                     let mut overall_return = None;
                     let mut has_else = false;
 
                     loop {
                         match current_branch {
-                            IfBranch::ElseIf(IfStmt { condition, block, branch, .. }) => {
+                            IfBranch::ElseIf(if_stmt) => {
+                                let IfStmt { condition, block, branch, .. } = *if_stmt;
+
                                 let condition_span = condition.span();
                                 let ty = self.compile_expr(condition, &scope, tcx)?;
                                 if ty != tcx.primitive(&builtin::BOOL_PRIMITIVE) {
@@ -335,7 +337,7 @@ impl<'a, 't> FlameGen<'a, 't> {
             ScopeKind::Function(_, span) => {
                 let ret_type = self.frame.ret_type.expect("function scope has return type");
                 if ret_type != tcx.null() {
-                    error!(in self.sink; span.clone() => "expected function to return null");
+                    error!(in self.sink; span => "expected function to return null");
                 };
                 inst! { with self.frame => span;
                     [PUSHU 0]

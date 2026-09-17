@@ -139,14 +139,14 @@ macro_rules! inst {
     };
 
     (with $frame: expr => $span: expr; $([$($tt: tt)+])*) => {{
-        if $frame.line_table.last().is_none_or(|map| $span.line() > map.line) {
-            $frame.line_table.push($crate::flame::scope::LineMap::new($frame.instructions.len(), $span.line()));
+        if $frame.line_table.last().is_none_or(|map| $span.start().line > map.line) {
+            $frame.line_table.push($crate::flame::scope::LineMap::new($frame.instructions.len(), $span.start().line));
         }
         inst!($frame.instructions; $([$($tt)+])*);
     }};
     (with $frame: expr => $span: expr; $($tt: tt)+) => {{
-        if $frame.line_table.last().is_none_or(|map| $span.line() > map.line) {
-            $frame.line_table.push($crate::flame::scope::LineMap::new($frame.instructions.len(), $span.line()));
+        if $frame.line_table.last().is_none_or(|map| $span.start().line > map.line) {
+            $frame.line_table.push($crate::flame::scope::LineMap::new($frame.instructions.len(), $span.start().line));
         }
         inst!($frame.instructions; $($tt)+);
     }};

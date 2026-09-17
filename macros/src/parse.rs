@@ -111,7 +111,7 @@ fn expand_for_fields(fields: &Fields) -> impl Iterator<Item = TokenStream> {
                             None
                         }
                     }
-                }
+                },
                 Ok(FieldAttributes { boxed: Some(Some(ty)), .. }) => quote! {
                     #member: ::std::boxed::Box::new(stream.parse::<#ty>()?)
                 },

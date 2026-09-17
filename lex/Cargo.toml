@@ -9,5 +9,4 @@ path = "src/lib.rs"
 
 [dependencies]
 diagnostic = { path = "../diagnostic" }
-thiserror = { workspace = true }
 

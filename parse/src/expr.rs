@@ -75,19 +75,18 @@ impl From<PrimaryExpr> for Expr {
 
 impl Expr {
     pub fn span(&self) -> Span {
-        // TODO: ended span
         match self {
             Expr::Literal(literal) => literal.span(),
-            Expr::Identifier(Ident(_, span)) => span.clone(),
-            Expr::Field(ExprField { expr, .. }) => expr.span(),
-            Expr::FunCall(ExprFunCall { expr, .. }) => expr.span(),
-            Expr::Struct(ExprStruct { ident, .. }) => ident.span(),
-            Expr::Paren(ExprParen { open_paren, .. }) => open_paren.0.clone(),
-            Expr::Block(ExprBlock { open_brace, .. }) => open_brace.0.clone(),
-            Expr::Array(ExprArray { open_bracket, .. }) => open_bracket.0.clone(),
-            Expr::Index(ExprIndex { expr, .. }) => expr.span(),
-            Expr::Binary(ExprBinary { lhs, .. }) => lhs.span(),
-            Expr::Unary(ExprUnary { op, .. }) => op.span(),
+            Expr::Identifier(ident) => ident.span(),
+            Expr::Field(ExprField { expr, ident }) => expr.span().containing(ident.span()),
+            Expr::FunCall(ExprFunCall { expr, closed_paren, .. }) => expr.span().containing(closed_paren.span()),
+            Expr::Struct(ExprStruct { ident, closed_brace, .. }) => ident.span().containing(closed_brace.span()),
+            Expr::Paren(ExprParen { open_paren, closed_paren, .. }) => open_paren.span().containing(closed_paren.span()),
+            Expr::Block(ExprBlock { open_brace, closed_brace, .. }) => open_brace.span().containing(closed_brace.span()),
+            Expr::Array(ExprArray { open_bracket, closed_bracket, .. }) => open_bracket.span().containing(closed_bracket.span()),
+            Expr::Index(ExprIndex { expr, closed_bracket, .. }) => expr.span().containing(closed_bracket.span()),
+            Expr::Binary(ExprBinary { lhs, rhs, .. }) => lhs.span().containing(rhs.span()),
+            Expr::Unary(ExprUnary { op, expr }) => op.span().containing(expr.span()),
         }
     }
 
@@ -410,8 +409,8 @@ pub enum UnaryOperator {
 impl UnaryOperator {
     pub fn span(&self) -> Span {
         match self {
-            Self::Negate(punct) => punct.0.clone(),
-            Self::Not(punct) => punct.0.clone(),
+            Self::Negate(punct) => punct.span(),
+            Self::Not(punct) => punct.span(),
         }
     }
 
