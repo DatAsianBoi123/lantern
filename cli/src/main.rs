@@ -9,14 +9,16 @@ use runtime::{VM, flame::FunctionKind};
 struct Args {
     file: String,
 
-    #[arg(short, long)]
-    verbose: bool,
+    #[arg(long)]
+    print_ast: bool,
+    #[arg(long)]
+    print_codegen: bool,
     #[arg(short, long)]
     no_run: bool,
 }
 
 fn main() -> ExitCode {
-    let Args { file: file_name, verbose, no_run } = Args::parse();
+    let Args { file: file_name, print_ast, print_codegen, no_run } = Args::parse();
 
     let path: &Path = file_name.as_ref();
     let Ok(mut file) = File::open(path) else {
@@ -41,10 +43,8 @@ fn main() -> ExitCode {
         }
     };
 
-    if verbose {
-        let took = Instant::now().duration_since(before_compile);
+    if print_ast {
         println!("{lantern_file:#?}");
-        println!("Parsed in {took:?}");
     }
 
     let mut sink = DiagnosticSink::new();
@@ -54,7 +54,7 @@ fn main() -> ExitCode {
 
     let Some(vm) = vm else { return ExitCode::from(101); };
 
-    if verbose {
+    if print_codegen {
         vm.funs().iter().enumerate().for_each(|(i, fun)| {
             println!("Generated {i} ({}):", fun.name);
             match &fun.kind {
