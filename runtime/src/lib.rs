@@ -264,7 +264,7 @@ impl VM {
         let fun = &self.funs[frame.fun_index];
         match fun.kind {
             FunctionKind::Instructions(ref instructions, _) => {
-                match instructions[frame.inst_ptr].clone() {
+                match instructions[frame.inst_ptr] {
                     Instruction::Pushusize(u64) => self.stack.push_usize(u64)?,
                     Instruction::Pushi64(i64) => self.stack.push_int(i64)?,
                     Instruction::Pushf64(f64) => self.stack.push_float(f64)?,

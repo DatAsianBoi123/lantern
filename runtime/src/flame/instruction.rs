@@ -201,7 +201,7 @@ impl InstructionSet {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Instruction {
     Pushusize(usize),
     Pushi64(i64),

@@ -1004,24 +1004,24 @@ impl PrimitiveOps {
 
     pub fn get_bin_op(&self, op: &BinaryOperator) -> Option<Instruction> {
         match op {
-            BinaryOperator::Add(_) | BinaryOperator::AddAssign(_) => self.add_inst.clone(),
-            BinaryOperator::Sub(_) | BinaryOperator::SubAssign(_) => self.sub_inst.clone(),
-            BinaryOperator::Mult(_) | BinaryOperator::MultAssign(_) => self.mult_inst.clone(),
-            BinaryOperator::Div(_) | BinaryOperator::DivAssign(_) => self.div_inst.clone(),
-            BinaryOperator::Mod(_) | BinaryOperator::ModAssign(_) => self.mod_inst.clone(),
-            BinaryOperator::Lt(_) => self.lt_inst.clone(),
-            BinaryOperator::Le(_) => self.le_inst.clone(),
-            BinaryOperator::Gt(_) => self.gt_inst.clone(),
-            BinaryOperator::Ge(_) => self.ge_inst.clone(),
-            BinaryOperator::Eq(_) | BinaryOperator::Neq(_) => self.eq_inst.clone(),
+            BinaryOperator::Add(_) | BinaryOperator::AddAssign(_) => self.add_inst,
+            BinaryOperator::Sub(_) | BinaryOperator::SubAssign(_) => self.sub_inst,
+            BinaryOperator::Mult(_) | BinaryOperator::MultAssign(_) => self.mult_inst,
+            BinaryOperator::Div(_) | BinaryOperator::DivAssign(_) => self.div_inst,
+            BinaryOperator::Mod(_) | BinaryOperator::ModAssign(_) => self.mod_inst,
+            BinaryOperator::Lt(_) => self.lt_inst,
+            BinaryOperator::Le(_) => self.le_inst,
+            BinaryOperator::Gt(_) => self.gt_inst,
+            BinaryOperator::Ge(_) => self.ge_inst,
+            BinaryOperator::Eq(_) | BinaryOperator::Neq(_) => self.eq_inst,
             _ => None,
         }
     }
 
     pub fn get_un_op(&self, op: &UnaryOperator) -> Option<Instruction> {
         match op {
-            UnaryOperator::Not(_) => self.not_inst.clone(),
-            UnaryOperator::Negate(_) => self.negate_inst.clone(),
+            UnaryOperator::Not(_) => self.not_inst,
+            UnaryOperator::Negate(_) => self.negate_inst,
         }
     }
 }
