@@ -25,13 +25,14 @@ cargo install --path cli/
 Usage: lantern [OPTIONS] <FILE>
 
 Arguments:
-  <FILE>  
+  <FILE>
 
 Options:
-  -v, --verbose  
-  -n, --no-run   
-  -h, --help     Print help
-  -V, --version  Print version
+      --print-ast
+      --print-codegen
+  -n, --no-run
+  -h, --help           Print help
+  -V, --version        Print version
 ```
 
 A basic syntax file for `neovim` can be found at `syntax/la.vim`.
