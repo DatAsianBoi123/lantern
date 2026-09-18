@@ -86,9 +86,6 @@ macro_rules! inst {
     (ALLOC_OBJ $i: expr) => {
         $crate::flame::instruction::Instruction::AllocObj($i)
     };
-    (ALLOC_STR $str: expr) => {
-        $crate::flame::instruction::Instruction::AllocString($str)
-    };
     (ALLOC_ARR $t: expr, $l: expr) => {
         $crate::flame::instruction::Instruction::AllocArray($t, $l)
     };
@@ -97,6 +94,9 @@ macro_rules! inst {
     };
     (LOAD_LOCAL $i: expr) => {
         $crate::flame::instruction::Instruction::LoadLocal($i)
+    };
+    (LOAD_GLOBAL $i: expr) => {
+        $crate::flame::instruction::Instruction::LoadGlobal($i)
     };
     (RET) => {
         $crate::flame::instruction::Instruction::Return
@@ -244,12 +244,12 @@ pub enum Instruction {
     Not,
 
     AllocObj(usize),
-    // PERF: use something else to reduce size
-    AllocString(String),
     AllocArray(usize, usize),
 
     StoreLocal(usize),
     LoadLocal(usize),
+
+    LoadGlobal(usize),
 
     Return,
     Throw,
@@ -301,10 +301,10 @@ impl Display for Instruction {
             Self::Not => write!(f, "NOT"),
             Self::Throw => write!(f, "THRW"),
             Self::AllocObj(index) => write!(f, "{:20}{index}", "ALLOC_OBJ"),
-            Self::AllocString(str) => write!(f, "{:20}{str:?}", "ALLOC_STR"),
             Self::AllocArray(index, len) => write!(f, "{:20}{index} {len}", "ALLOC_ARRAY"),
             Self::StoreLocal(index) => write!(f, "{:20}{index}", "STORE_LOCAL"),
             Self::LoadLocal(index) => write!(f, "{:20}{index}", "LOAD_LOCAL"),
+            Self::LoadGlobal(index) => write!(f, "{:20}{index}", "LOAD_GLOBAL"),
             Self::Return => write!(f, "RET"),
             Self::Invoke(num_args) => write!(f, "{:20}{num_args}", "INV"),
             Self::InvokeMethod(num_args) => write!(f, "{:20}{num_args}", "INV_MET"),

@@ -6,7 +6,7 @@ use error::RuntimeError;
 use flame::{GeneratedFunction, instruction::Instruction};
 use parse::LanternFile;
 
-use crate::{error::{OutOfBoundsError, UserError}, flame::{FunctionKind, scope::Globals, r#type::{BuiltinType, TypeContext}}, heap::{Heap, HeapArray, HeapObject, TypeInfo}, stack::LanternStack};
+use crate::{error::{OutOfBoundsError, UserError}, flame::{FunctionKind, scope::{GlobalVariables, Globals}, r#type::{BuiltinType, TypeContext}}, heap::{GlobalStorage, Heap, HeapArray, HeapObject, TypeInfo}, stack::LanternStack};
 
 macro_rules! args {
     (@pop usize, $stack: expr) => {
@@ -122,6 +122,7 @@ impl Slot {
 pub struct VM {
     stack: LanternStack,
     frames: Vec<Frame>,
+    globals: GlobalStorage,
     funs: Box<[GeneratedFunction]>,
     types: Box<[TypeInfo]>,
     builtin_type_indexes: [usize; BuiltinType::SIZE],
@@ -142,6 +143,7 @@ impl VM {
                 TypeInfo::Array { element_size: 8, is_ref: false },
                 TypeInfo::Array { element_size: size_of::<usize>(), is_ref: true },
             ],
+            vars: GlobalVariables::new(),
         };
         let arena = Arena::new(25);
         let tcx = TypeContext::new(&arena);
@@ -156,37 +158,23 @@ impl VM {
         globals.funs.push(root);
         let mut frames = Vec::with_capacity(512);
         frames.push(Frame::new(globals.funs.len() - 1, 0));
+
+        let types = globals.types.into_boxed_slice();
+        let builtin_type_indexes = tcx.into_builtins();
         Some(Self {
             stack,
             frames,
+            globals: GlobalStorage::allocate(
+                globals.vars,
+                &types[Self::BYTE_ARR_TYPE_INDEX],
+                &types[builtin_type_indexes[BuiltinType::String as usize]],
+            ),
             funs: globals.funs.into_boxed_slice(),
-            types: globals.types.into_boxed_slice(),
-            builtin_type_indexes: tcx.into_builtins(),
+            types,
+            builtin_type_indexes,
             // 4 MiB
             heap: Heap::new(4 * 2usize.pow(20)),
         })
-    }
-
-    pub fn heap_alloc_string(
-        heap: &mut Heap,
-        stack: &mut LanternStack,
-        types: &[TypeInfo],
-        builtin_type_indices: &[usize],
-        bytes: &[u8],
-    ) -> HeapObject {
-        let type_info = &types[builtin_type_indices[BuiltinType::String as usize]];
-        let mut chars = Self::alloc_array(heap, stack, bytes.len(), &types[Self::BYTE_ARR_TYPE_INDEX]);
-        for (i, byte) in bytes.iter().enumerate() {
-            unsafe {
-                chars.set(i, byte);
-            }
-        }
-
-        let mut string = Self::alloc_obj(heap, stack, type_info);
-        let field_ptr = string.field_ptr_mut().cast::<*mut u8>();
-        unsafe { field_ptr.write(chars.as_mut_ptr()); };
-
-        string
     }
 
     pub fn alloc_obj(heap: &mut Heap, stack: &mut LanternStack, type_info: &TypeInfo) -> HeapObject {
@@ -226,7 +214,18 @@ impl VM {
     }
 
     pub fn alloc_string(&mut self, bytes: &[u8]) -> HeapObject {
-        Self::heap_alloc_string(&mut self.heap, &mut self.stack, &self.types, &self.builtin_type_indexes, bytes)
+        let byte_type_info = &self.types[Self::BYTE_ARR_TYPE_INDEX];
+        let mut chars = Self::alloc_array(&mut self.heap, &mut self.stack, bytes.len(), byte_type_info);
+        for (i, byte) in bytes.iter().enumerate() {
+            unsafe { chars.set(i, byte) };
+        }
+
+        let string_type_info = &self.types[self.builtin_type_indexes[BuiltinType::String as usize]];
+        let mut string = Self::alloc_obj(&mut self.heap, &mut self.stack, string_type_info);
+        let field_ptr = string.field_ptr_mut().cast::<*mut u8>();
+        unsafe { field_ptr.write(chars.as_mut_ptr()) };
+
+        string
     }
 
     pub fn throw(&mut self, message: impl ToString) -> RuntimeError {
@@ -307,10 +306,6 @@ impl VM {
                         let mut obj = Self::alloc_obj(&mut self.heap, &mut self.stack, &self.types[index]);
                         self.stack.push_ref(obj.as_mut_ptr())?;
                     },
-                    Instruction::AllocString(str) => {
-                        let mut string = Self::heap_alloc_string(&mut self.heap, &mut self.stack, &self.types, &self.builtin_type_indexes, str.as_bytes());
-                        self.stack.push_ref(string.as_mut_ptr())?;
-                    },
                     Instruction::AllocArray(index, len) => {
                         let mut array = Self::alloc_array(&mut self.heap, &mut self.stack, len, &self.types[index]);
                         for i in 1..=len {
@@ -325,6 +320,8 @@ impl VM {
                         // don't pop since assignment is an expression, value will be popped
                         self.stack[frame.bottom + index] = self.stack.peek()?;
                     },
+                    // global strings are stored as array then object
+                    Instruction::LoadGlobal(index) => self.stack.push_ref(self.globals[index * 2 + 1])?,
                     Instruction::Return => {
                         let ret = self.stack.pop()?;
                         let bottom = self.frames.pop().expect("frame exists").bottom;

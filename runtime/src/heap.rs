@@ -1,6 +1,6 @@
-use std::{alloc::Layout, time::Instant};
+use std::{alloc::Layout, ops::Index, time::Instant};
 
-use crate::{SlotType, stack::LanternStack};
+use crate::{SlotType, flame::scope::GlobalVariables, stack::LanternStack};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Heap {
@@ -123,7 +123,8 @@ impl Heap {
     }
 
     fn move_ref(&mut self, ptr: *mut u8) -> Option<*mut u8> {
-        if ptr.is_null() { return None; };
+        let to_addr = self.to_space.addr();
+        if ptr.is_null() || !(to_addr..to_addr + self.size).contains(&ptr.addr()) { return None; };
 
         unsafe {
             let header = &mut *(ptr.cast::<ObjectHeader>());
@@ -424,6 +425,134 @@ impl HeapArray {
             let element_ptr = self.element_ptr_mut().add(self.element_size() * index);
             element_ptr.copy_from(ptr, self.element_size());
         }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct ManagedObject(pub HeapObject);
+
+impl ManagedObject {
+    /// # Safety
+    /// See [HeapObject::from_raw]
+    pub unsafe fn drop(ptr: *mut u8) {
+        unsafe { Self(HeapObject::from_raw(ptr)) };
+    }
+
+    /// # Safety
+    /// type_info must be valid
+    pub unsafe fn allocate(type_info: *const TypeInfo) -> HeapObject {
+        let obj_size = match unsafe { &*type_info } {
+            TypeInfo::Object { size, .. } => *size,
+            _ => panic!("not an object"),
+        };
+
+        let layout = Layout::from_size_align(HeapObject::size_of(obj_size), align_of::<ObjectHeader>()).expect("size overflow");
+        let ptr = unsafe { std::alloc::alloc(layout) };
+        if ptr.is_null() {
+            std::alloc::handle_alloc_error(layout)
+        }
+
+        unsafe { HeapObject::write(ptr, type_info) }
+    }
+}
+
+impl Drop for ManagedObject {
+    fn drop(&mut self) {
+        unsafe {
+            let layout = Layout::from_size_align_unchecked(self.0.size(), align_of::<ObjectHeader>());
+            std::alloc::dealloc(self.0.as_mut_ptr(), layout);
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct ManagedArray(pub HeapArray);
+
+impl ManagedArray {
+    /// # Safety
+    /// See [HeapArray::from_raw]
+    pub unsafe fn drop(ptr: *mut u8) {
+        unsafe { Self(HeapArray::from_raw(ptr)) };
+    }
+
+    /// # Safety
+    /// type_info must be valid
+    pub unsafe fn allocate(len: usize, type_info: *const TypeInfo) -> HeapArray {
+        let element_size = match unsafe { &*type_info } {
+            TypeInfo::Array { element_size, .. } => *element_size,
+            _ => unreachable!(),
+        };
+
+        let layout = Layout::from_size_align(HeapArray::size_of(len, element_size), align_of::<ObjectHeader>()).expect("size overflow");
+        let ptr = unsafe { std::alloc::alloc(layout) };
+        if ptr.is_null() {
+            std::alloc::handle_alloc_error(layout)
+        }
+
+        unsafe { HeapArray::write(ptr, len, type_info) }
+    }
+}
+
+impl Drop for ManagedArray {
+    fn drop(&mut self) {
+        unsafe {
+            let layout = Layout::from_size_align_unchecked(self.0.size(), align_of::<ObjectHeader>());
+            std::alloc::dealloc(self.0.as_mut_ptr(), layout);
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct GlobalStorage(Box<[*mut u8]>);
+
+impl Index<usize> for GlobalStorage {
+    type Output = *mut u8;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
+    }
+}
+
+impl Drop for GlobalStorage {
+    fn drop(&mut self) {
+        for ptr in &self.0 {
+            unsafe {
+                let header = &*ptr.cast::<ObjectHeader>();
+                // drop the allocated objects
+                match &*header.type_info {
+                    TypeInfo::Object { .. } => ManagedObject::drop(*ptr),
+                    TypeInfo::Array { .. } => ManagedArray::drop(*ptr),
+                }
+            }
+        }
+    }
+}
+
+impl GlobalStorage {
+    pub fn allocate(
+        vars: GlobalVariables,
+        bytes_type_info: &TypeInfo,
+        string_type_info: &TypeInfo,
+    ) -> Self {
+        let strs = vars.into_strs();
+        // each String contains a HeapObject + HeapArray
+        let mut array = Box::new_uninit_slice(strs.len() * 2);
+        strs.into_iter().enumerate().for_each(|(i, str)| {
+            unsafe {
+                let mut bytes = ManagedArray::allocate(str.len(), bytes_type_info);
+                for (i, byte) in str.bytes().enumerate() {
+                    bytes.set(i, &raw const byte);
+                }
+                array[i * 2].write(bytes.as_mut_ptr());
+
+                let mut string = ManagedObject::allocate(string_type_info);
+                let field_ptr = string.field_ptr_mut().cast::<*mut u8>();
+                // this pointer won't dangle since GlobalStorage deallocates everything at once
+                field_ptr.write(bytes.as_mut_ptr());
+                array[i * 2 + 1].write(string.as_mut_ptr());
+            }
+        });
+        Self(unsafe { array.assume_init() })
     }
 }
 

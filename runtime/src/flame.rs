@@ -376,8 +376,8 @@ impl<'a, 't> FlameGen<'a, 't> {
                 ControlFlow::Continue(tcx.primitive(&builtin::BOOL_PRIMITIVE))
             },
             Expr::Literal(Literal::String(string, span)) => {
-                // TODO: better string alloc
-                inst!(with self.frame => span; ALLOC_STR string.clone());
+                let global = self.globals.vars.insert_str(string.into_boxed_str());
+                inst!(with self.frame => span; LOAD_GLOBAL global);
                 ControlFlow::Continue(tcx.builtin(BuiltinType::String))
             },
             Expr::FunCall(ExprFunCall { expr, args, closed_paren, .. }) => {

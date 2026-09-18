@@ -228,5 +228,38 @@ impl LineMap {
 pub struct Globals {
     pub funs: Vec<GeneratedFunction>,
     pub types: Vec<TypeInfo>,
+    pub vars: GlobalVariables,
+}
+
+#[derive(Debug, Clone)]
+pub struct GlobalVariables {
+    // PERF: don't store two clones of string
+    map: HashMap<Box<str>, usize>,
+    strs: Vec<Box<str>>,
+}
+
+impl Default for GlobalVariables {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GlobalVariables {
+    pub fn new() -> Self {
+        Self { map: HashMap::new(), strs: Vec::new() }
+    }
+
+    pub fn insert_str(&mut self, str: Box<str>) -> usize {
+        *self.map.entry(str.clone())
+            .or_insert_with(|| {
+                let id = self.strs.len();
+                self.strs.push(str);
+                id
+            })
+    }
+
+    pub fn into_strs(self) -> Vec<Box<str>> {
+        self.strs
+    }
 }
 
