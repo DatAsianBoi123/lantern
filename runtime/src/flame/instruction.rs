@@ -163,9 +163,9 @@ macro_rules! inst {
         inst!($frame.instructions; $($tt)+);
     }};
 
-    ($inst: expr; $([$($tt: tt)+])*) => {
+    ($inst: expr; $([$($tt: tt)+])*) => {{
         $($inst.push(inst!($($tt)+)));*
-    };
+    }};
     ($inst: expr; $($tt: tt)+) => {
         $inst.push(inst!($($tt)+))
     };
