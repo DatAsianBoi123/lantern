@@ -10,6 +10,9 @@ struct Args {
     file: String,
 
     #[arg(long)]
+    use_spark: bool,
+
+    #[arg(long)]
     print_ast: bool,
     #[arg(long)]
     print_codegen: bool,
@@ -18,7 +21,7 @@ struct Args {
 }
 
 fn main() -> ExitCode {
-    let Args { file: file_name, print_ast, print_codegen, no_run } = Args::parse();
+    let Args { file: file_name, use_spark, print_ast, print_codegen, no_run } = Args::parse();
 
     let path: &Path = file_name.as_ref();
     let Ok(mut file) = File::open(path) else {
@@ -48,7 +51,11 @@ fn main() -> ExitCode {
     }
 
     let mut sink = DiagnosticSink::new();
-    let vm = VM::new(lantern_file, &mut sink, &symbol_table);
+    let vm = if use_spark {
+        VM::new_spark(lantern_file, &mut sink, &symbol_table)
+    } else {
+        VM::new(lantern_file, &mut sink, &symbol_table)
+    };
 
     eprintln!("{}", sink.display_errors(&source_map));
 
