@@ -173,12 +173,12 @@ impl<'t> TypeContext<'t> {
         }
     }
 
-    pub fn into_builtins(self) -> [usize; BuiltinType::SIZE] {
+    pub fn into_builtins(self, offset: usize) -> [usize; BuiltinType::SIZE] {
         let builtins = self.builtins.into_inner();
         let mut ids = [0; BuiltinType::SIZE];
         for (i, ty) in builtins.iter().enumerate() {
             let id = match *ty.expect("builtin has been interned") {
-                LanternType::Struct(LanternStruct { id, .. }) => id,
+                LanternType::Struct(LanternStruct { id, .. }) => id + offset,
                 _ => panic!("expected builtin to be a struct"),
             };
             ids[i] = id;

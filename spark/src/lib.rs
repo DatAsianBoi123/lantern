@@ -1,4 +1,3 @@
-use arena::Arena;
 use diagnostic::{DiagnosticError, DiagnosticSink, Span, symbol::{SymbolDisplay, SymbolTable}};
 use parse::{FunArg, Item, ItemFun, ItemNativeFun, ItemPrimitive, ItemStruct, ReturnStmt, StructField, ValDeclaration, WhileStmt, expr::{self as pe, BinaryOperator, ExprArray, ExprBinary, ExprBlock, ExprField, ExprFunCall, ExprIndex, ExprMethodCall, ExprParen, ExprStruct, ExprUnary}, lex::{self, TokenKind}};
 
@@ -18,16 +17,16 @@ pub struct Lighter<'a, 't> {
     pub globals: Globals<'t>,
     pub sink: &'a mut DiagnosticSink,
     pub symbol_table: &'a SymbolTable<'a>,
-    pub tcx: TypeContext<'t>,
+    pub tcx: &'a mut TypeContext<'t>,
 }
 
 impl<'a, 't> Lighter<'a, 't> {
-    pub fn new(sink: &'a mut DiagnosticSink, symbol_table: &'a SymbolTable<'a>, arena: &'t Arena<LanternType<'t>>) -> Self {
+    pub fn new(sink: &'a mut DiagnosticSink, symbol_table: &'a SymbolTable<'a>, tcx: &'a mut TypeContext<'t>) -> Self {
         Self {
             globals: Globals::new(),
             sink,
             symbol_table,
-            tcx: TypeContext::new(arena),
+            tcx,
         }
     }
 
@@ -41,7 +40,7 @@ impl<'a, 't> Lighter<'a, 't> {
             match stmt {
                 parse::Stmt::Item(Item::Fun(ItemFun { path, ret, block, .. })) => {
                     let ret = ret
-                        .map(|(_, ret)| self.sink.emit_or(LanternType::resolve(&ret, scope, &self.tcx), self.tcx.error()))
+                        .map(|(_, ret)| self.sink.emit_or(LanternType::resolve(&ret, scope, self.tcx), self.tcx.error()))
                         .unwrap_or(self.tcx.null());
 
                     let fun_def = match path.items.len() {
@@ -96,7 +95,7 @@ impl<'a, 't> Lighter<'a, 't> {
                     let init = self.lower_expr(init, scope);
                     let ty = r#type
                         .map(|(_, ty)| {
-                            let ty = self.sink.emit_or(LanternType::resolve(&ty, scope, &self.tcx), self.tcx.error());
+                            let ty = self.sink.emit_or(LanternType::resolve(&ty, scope, self.tcx), self.tcx.error());
                             if !init.ty.is_error_or_eq(ty) {
                                 self.emit(TypeMismatch {
                                     expected: ty,
@@ -115,7 +114,7 @@ impl<'a, 't> Lighter<'a, 't> {
                 parse::Stmt::ValDeclaration(ValDeclaration { ident, r#type, .. }) => {
                     // TODO: ensure uninitialized vars are initialized before usage
                     let ty = r#type
-                        .map(|(_, ty)| self.sink.emit_or(LanternType::resolve(&ty, scope, &self.tcx), self.tcx.error()))
+                        .map(|(_, ty)| self.sink.emit_or(LanternType::resolve(&ty, scope, self.tcx), self.tcx.error()))
                         .unwrap_or_else(|| {
                             self.emit(UninitVarNeedsType(ident));
                             self.tcx.error()
@@ -202,7 +201,7 @@ impl<'a, 't> Lighter<'a, 't> {
                     Expr::new(ExprKind::Static(fun.index), fun.ty, ident.span())
                 } else {
                     self.emit(UnknownIdent { ident });
-                    Expr::error(&self.tcx, ident.span())
+                    Expr::error(self.tcx, ident.span())
                 }
             }
             pe::Expr::Field(ExprField { expr, ident }) => {
@@ -210,14 +209,14 @@ impl<'a, 't> Lighter<'a, 't> {
                 if let Some(ty) = self.item_static(&expr, scope) {
                     let Some(associated) = scope.associated(ty, ident.0) else {
                         self.emit(UnknownAssociated { ident, ty });
-                        return Expr::error(&self.tcx, ident.span());
+                        return Expr::error(self.tcx, ident.span());
                     };
                     return Expr::new(ExprKind::Static(associated.index), associated.ty, ident.span());
                 }
 
                 let base = self.lower_expr(*expr, scope);
                 if *base.ty == LanternType::Error {
-                    return Expr::error(&self.tcx, ident.span());
+                    return Expr::error(self.tcx, ident.span());
                 }
                 match *base.ty {
                     LanternType::Struct(ref r#struct) => {
@@ -236,7 +235,7 @@ impl<'a, 't> Lighter<'a, 't> {
                 } else {
                     self.emit(UnknownField { ident, ty: base.ty });
                 }
-                Expr::error(&self.tcx, ident.span())
+                Expr::error(self.tcx, ident.span())
             }
             pe::Expr::FunCall(ExprFunCall { expr, args, closed_paren, .. }) => {
                 let span = expr.span();
@@ -253,11 +252,11 @@ impl<'a, 't> Lighter<'a, 't> {
                         for arg in args {
                             self.lower_expr(arg, scope);
                         }
-                        Expr::error(&self.tcx, closed_paren.span())
+                        Expr::error(self.tcx, closed_paren.span())
                     }
                     _ => {
                         self.emit(ExpectedFunction(span));
-                        Expr::error(&self.tcx, closed_paren.span())
+                        Expr::error(self.tcx, closed_paren.span())
                     }
                 }
             }
@@ -266,7 +265,7 @@ impl<'a, 't> Lighter<'a, 't> {
                     Some(ty) => {
                         let Some(associated) = scope.associated(ty, ident.0) else {
                             self.emit(UnknownAssociated { ident, ty });
-                            return Expr::error(&self.tcx, ident.span());
+                            return Expr::error(self.tcx, ident.span());
                         };
                         (associated, None)
                     }
@@ -277,13 +276,13 @@ impl<'a, 't> Lighter<'a, 't> {
                             for arg in args {
                                 self.lower_expr(arg, scope);
                             }
-                            return Expr::error(&self.tcx, closed_paren.span());
+                            return Expr::error(self.tcx, closed_paren.span());
                         }
 
                         let Some(method) = scope.associated(recv.ty, ident.0) else {
                             // TODO: diagnostic hint for (obj.field)()
                             self.emit(UnknownAssociated { ident, ty: recv.ty });
-                            return Expr::error(&self.tcx, closed_paren.span());
+                            return Expr::error(self.tcx, closed_paren.span());
                         };
 
                         if !method.has_receiver(recv.ty) {
@@ -292,7 +291,7 @@ impl<'a, 't> Lighter<'a, 't> {
                             for arg in args {
                                 self.lower_expr(arg, scope);
                             }
-                            return Expr::error(&self.tcx, closed_paren.span());
+                            return Expr::error(self.tcx, closed_paren.span());
                         }
 
                         (method, Some(recv))
@@ -322,11 +321,11 @@ impl<'a, 't> Lighter<'a, 't> {
             pe::Expr::Struct(ExprStruct { ident, fields, closed_brace, .. }) => {
                 let Some(item) = scope.item(ident.0) else {
                     self.emit(UnknownIdent { ident });
-                    return Expr::error(&self.tcx, closed_brace.span());
+                    return Expr::error(self.tcx, closed_brace.span());
                 };
                 let LanternType::Struct(ref r#struct) = *item else {
                     self.emit(NotAStruct { ty: item, span: ident.span() });
-                    return Expr::error(&self.tcx, closed_brace.span());
+                    return Expr::error(self.tcx, closed_brace.span());
                 };
 
                 let mut init_fields = Vec::new();
@@ -373,7 +372,7 @@ impl<'a, 't> Lighter<'a, 't> {
                 Expr::new(ExprKind::Block(stmts), self.tcx.null(), span)
             }
             pe::Expr::Array(ExprArray { open_bracket, elements, closed_bracket, ty }) => {
-                let mut ty = ty.map(|ty| self.sink.emit_or(LanternType::resolve(&ty, scope, &self.tcx), self.tcx.error()));
+                let mut ty = ty.map(|ty| self.sink.emit_or(LanternType::resolve(&ty, scope, self.tcx), self.tcx.error()));
 
                 let mut element_exprs = Vec::new();
                 for element in elements {
@@ -391,11 +390,11 @@ impl<'a, 't> Lighter<'a, 't> {
                 }
 
                 match ty {
-                    Some(ty) if *ty == LanternType::Error => Expr::error(&self.tcx, closed_bracket.span()),
+                    Some(ty) if *ty == LanternType::Error => Expr::error(self.tcx, closed_bracket.span()),
                     Some(ty) => Expr::new(ExprKind::Array(ty, element_exprs), self.tcx.intern(LanternType::Array(ty)), closed_bracket.span()),
                     None => {
                         self.emit(TypeRequiredForEmptyArray(open_bracket.span().containing(closed_bracket.span())));
-                        Expr::error(&self.tcx, closed_bracket.span())
+                        Expr::error(self.tcx, closed_bracket.span())
                     }
                 }
             }
@@ -485,7 +484,7 @@ impl<'a, 't> Lighter<'a, 't> {
                                     op,
                                     rhs: rhs.ty,
                                 });
-                                return Expr::error(&self.tcx, rhs_span);
+                                return Expr::error(self.tcx, rhs_span);
                             }
                         }
                     }
@@ -493,7 +492,7 @@ impl<'a, 't> Lighter<'a, 't> {
                 }
 
                 if *lhs.ty == LanternType::Error || *rhs.ty == LanternType::Error {
-                    return Expr::error(&self.tcx, rhs_span);
+                    return Expr::error(self.tcx, rhs_span);
                 }
                 if lhs.ty != rhs.ty {
                     self.emit(TypeMismatch {
@@ -501,7 +500,7 @@ impl<'a, 't> Lighter<'a, 't> {
                         got: rhs.ty,
                         span: op.span(),
                     });
-                    return Expr::error(&self.tcx, rhs_span);
+                    return Expr::error(self.tcx, rhs_span);
                 }
                 match (&*lhs.ty, &*rhs.ty) {
                     (LanternType::Primitive(lhs_primitive), LanternType::Primitive(_))
@@ -521,7 +520,7 @@ impl<'a, 't> Lighter<'a, 't> {
                             op,
                             rhs: rhs.ty,
                         });
-                        Expr::error(&self.tcx, rhs_span)
+                        Expr::error(self.tcx, rhs_span)
                     }
                 }
             }
@@ -538,7 +537,7 @@ impl<'a, 't> Lighter<'a, 't> {
                             ty: base.ty,
                             op,
                         });
-                        Expr::error(&self.tcx, span)
+                        Expr::error(self.tcx, span)
                     }
                 }
             }
@@ -616,16 +615,16 @@ impl<'a, 't> Lighter<'a, 't> {
                     Item::Fun(ItemFun { path, args, ret, .. }) => {
                         let args = args.iter()
                             .map(|FunArg { ident, r#type, .. }| {
-                                (*ident, self.sink.emit_or(LanternType::resolve(r#type, scope, &self.tcx), self.tcx.error()))
+                                (*ident, self.sink.emit_or(LanternType::resolve(r#type, scope, self.tcx), self.tcx.error()))
                             })
                             .collect();
 
                         let ret = ret.as_ref()
-                            .map(|(_, ty)| self.sink.emit_or(LanternType::resolve(ty, scope, &self.tcx), self.tcx.error()))
+                            .map(|(_, ty)| self.sink.emit_or(LanternType::resolve(ty, scope, self.tcx), self.tcx.error()))
                             .unwrap_or(self.tcx.null());
 
                         let name = path.last().0;
-                        let fun = LanternFunction::new(self.globals.funs.len(), args, ret, &self.tcx);
+                        let fun = LanternFunction::new(self.globals.funs.len(), args, ret, self.tcx);
                         if path.items.len() == 1 {
                             if scope.insert_function(name, fun).is_none() {
                                 self.emit(FunAlreadyDeclared(path.clone()));
@@ -670,7 +669,7 @@ impl<'a, 't> Lighter<'a, 't> {
                         let mut arg_types = Vec::new();
                         let mut has_err = false;
                         for arg in args {
-                            match LanternType::resolve(&arg.r#type, scope, &self.tcx) {
+                            match LanternType::resolve(&arg.r#type, scope, self.tcx) {
                                 Ok(ty) => arg_types.push(ty),
                                 Err(err) => {
                                     self.sink.emit(err);
@@ -680,7 +679,7 @@ impl<'a, 't> Lighter<'a, 't> {
                         }
 
                         let ret_ty = ret.as_ref()
-                            .map(|(_, ty)| self.sink.emit_or(LanternType::resolve(ty, scope, &self.tcx), self.tcx.error()))
+                            .map(|(_, ty)| self.sink.emit_or(LanternType::resolve(ty, scope, self.tcx), self.tcx.error()))
                             .unwrap_or(self.tcx.null());
 
                         if has_err || *ret_ty == LanternType::Error {
@@ -692,7 +691,7 @@ impl<'a, 't> Lighter<'a, 't> {
                                 let args = args.iter().zip(arg_types.iter())
                                     .map(|(arg, ty)| (arg.ident, *ty))
                                     .collect();
-                                let fun = LanternFunction::new(self.globals.funs.len(), args, ret_ty, &self.tcx);
+                                let fun = LanternFunction::new(self.globals.funs.len(), args, ret_ty, self.tcx);
                                 let exists = match base {
                                     Some(base) => scope.insert_associated(base, ident.0, fun),
                                     None => scope.insert_function(ident.0, fun),
@@ -719,7 +718,7 @@ impl<'a, 't> Lighter<'a, 't> {
                             .map(|StructField { ident, r#type, .. }| {
                                 // type may not have fields initialized, but structs have constant
                                 // size/alignment and primitives are hardcoded
-                                (ident.0, self.sink.emit_or(LanternType::resolve(r#type, scope, &self.tcx), self.tcx.error()))
+                                (ident.0, self.sink.emit_or(LanternType::resolve(r#type, scope, self.tcx), self.tcx.error()))
                             })
                             .collect();
 
@@ -829,6 +828,6 @@ pub enum SparkFunction<'t> {
     Native {
         name: Box<str>,
         native: NativeFun,
-    }
+    },
 }
 

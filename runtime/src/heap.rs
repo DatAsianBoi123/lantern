@@ -212,6 +212,17 @@ pub enum TypeInfo {
     },
 }
 
+impl From<spark::def::LanternStructData<'_>> for TypeInfo {
+    fn from(value: spark::def::LanternStructData) -> Self {
+        Self::Object {
+            size: value.size(),
+            ref_offets: value.fields().iter()
+                .filter_map(|field| field.ty.is_ref().then_some(field.offset))
+                .collect(),
+        }
+    }
+}
+
 /// # Memory Layout
 ///
 /// ┌───────────────────┐

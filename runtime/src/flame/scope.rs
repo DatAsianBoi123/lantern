@@ -178,6 +178,17 @@ pub struct StackFrame<'t> {
 }
 
 impl<'t> StackFrame<'t> {
+    pub fn new(name: String, locals: usize) -> Self {
+        Self {
+            name,
+            instructions: InstructionSet::new(),
+            locals,
+            loop_context: LoopContext::new(),
+            line_table: Vec::new(),
+            ret_type: None,
+        }
+    }
+
     pub fn new_module() -> Self {
         Self {
             name: "<module>".to_string(),

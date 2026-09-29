@@ -3,7 +3,7 @@ use std::{cell::OnceCell, fmt::Formatter, hash, ops::ControlFlow};
 use diagnostic::{Diagnostic, DiagnosticSink, Span, error, symbol::{Symbol, SymbolDisplay, SymbolTable}};
 use instruction::InstructionSet;
 use parse::{FunArg, IfBranch, IfStmt, Item, ItemFun, ItemNativeFun, ItemPrimitive, ItemStruct, LanternFile, ReturnStmt, Stmt, StructField, ValDeclaration, WhileStmt, expr::{BinaryOperator, Expr, ExprArray, ExprBinary, ExprBlock, ExprField, ExprFunCall, ExprIndex, ExprMethodCall, ExprParen, ExprStruct, ExprUnary, UnaryOperator}, lex::{Break, Ident, Literal, TokenKind}};
-use spark::expr::{ExprKind as SExpr, LogicalOperation};
+use spark::{SparkFunction, expr::{ExprKind as SExpr, LogicalOperation}, stmt::Stmt as SStmt};
 
 use crate::{Slot, VM, error::{RuntimeError, StacktraceLocation}, flame::{instruction::Instruction, scope::{Globals, LineMap, LoopScope, Scope, ScopeKind, StackFrame}, r#type::{BuiltinType, LanternType, TypeContext, TypeId}}, heap::{HeapArray, HeapObject, ObjectHeader, TypeInfo}, inst};
 
@@ -26,12 +26,34 @@ pub fn ignite(
     r#gen.frame.into_gen()
 }
 
+pub fn ignite_spark(lighter: spark::Lighter, root: SparkFunction, globals: &mut Globals, symbol_table: &SymbolTable) {
+    let runtime_types = globals.types.len();
+    let mut r#gen = FlameGen::new(globals, lighter.sink, symbol_table);
+    r#gen.type_offset = runtime_types;
+
+    for fun in lighter.globals.funs {
+        r#gen.compile_spark_fun(fun);
+    }
+
+    for lantern_struct in lighter.globals.types {
+        r#gen.globals.types.push(lantern_struct.get().expect("all type data is initialized").clone().into());
+    }
+
+    for var in lighter.globals.vars.into_strs() {
+        r#gen.globals.vars.insert_str(var);
+    }
+
+    // module is last
+    r#gen.compile_spark_fun(root);
+}
+
 #[derive(Debug)]
 pub struct FlameGen<'a, 't> {
     pub frame: StackFrame<'t>,
     pub globals: &'a mut Globals,
     pub sink: &'a mut DiagnosticSink,
     pub symbol_table: &'a SymbolTable<'a>,
+    pub type_offset: usize,
 }
 
 impl<'a, 't> FlameGen<'a, 't> {
@@ -41,6 +63,7 @@ impl<'a, 't> FlameGen<'a, 't> {
             globals,
             sink,
             symbol_table,
+            type_offset: 0,
         }
     }
 
@@ -49,6 +72,103 @@ impl<'a, 't> FlameGen<'a, 't> {
         fun(self);
         std::mem::swap(&mut self.frame, &mut frame);
         frame.into_gen()
+    }
+
+    pub fn compile_spark_fun(&mut self, fun: SparkFunction) {
+        let generated = match fun {
+            SparkFunction::Lantern { name, stmts, locals } => {
+                self.using_frame(StackFrame::new(name.to_string(), locals), |this| this.compile_spark_stmts(&stmts))
+            }
+            SparkFunction::Native { name, native } => GeneratedFunction::new(name, FunctionKind::Native(builtin::get_native_spark_fn(native))),
+        };
+        self.globals.funs.push(generated);
+    }
+
+    pub fn compile_spark_stmts(&mut self, stmts: &[SStmt]) {
+        for stmt in stmts {
+            match stmt {
+                SStmt::If(if_stmt) => {
+                    let mut end_indices = Vec::new();
+                    self.compile_if_stmt(if_stmt, &mut end_indices);
+                    for index in end_indices {
+                        self.frame.instructions[index] = inst!(GOTO self.frame.instructions.len());
+                    }
+                },
+                SStmt::While { cond, stmts } => {
+                    let head = self.frame.instructions.len();
+                    self.frame.loop_context.scopes.push(LoopScope::new(head));
+
+                    self.compile_spark_expr(cond);
+
+                    let goto_index = self.frame.instructions.len();
+                    inst!(self.frame.instructions; POP_GOTO_IF_FALSE 0);
+
+                    self.compile_spark_stmts(stmts);
+                    inst!(self.frame.instructions; GOTO head);
+
+                    let end = self.frame.instructions.len();
+                    self.frame.instructions[goto_index] = inst!(POP_GOTO_IF_FALSE end);
+                    let while_scope = self.frame.loop_context.scopes.pop().expect("in loop");
+                    for break_index in while_scope.breaks {
+                        self.frame.instructions[break_index] = inst!(GOTO end);
+                    }
+                }
+                // TODO: span data
+                SStmt::Val(id, init) => {
+                    if let Some(init) = init {
+                        self.compile_spark_expr(init);
+                    } else {
+                        inst!(self.frame.instructions; PUSHU 0);
+                    }
+                    inst!(self.frame.instructions; STORE_LOCAL *id);
+                }
+                SStmt::Return(expr) => {
+                    if let Some(expr) = expr {
+                        self.compile_spark_expr(expr);
+                    } else {
+                        inst!(self.frame.instructions; PUSHU 0);
+                    }
+                    inst!(self.frame.instructions; RET);
+                }
+                // TODO: span data
+                SStmt::Continue => {
+                    let loop_scope = self.frame.loop_context.scopes.last().expect("`continue` in a loop");
+                    inst!(self.frame.instructions; GOTO loop_scope.head);
+                }
+                // TODO: span data
+                SStmt::Break => {
+                    let loop_scope = self.frame.loop_context.scopes.last_mut().expect("`break` in a loop");
+                    loop_scope.breaks.push(self.frame.instructions.len());
+                    inst!(self.frame.instructions; GOTO 0);
+                }
+                SStmt::Throw(expr) => {
+                    self.compile_spark_expr(expr);
+                    inst!(self.frame.instructions; THRW);
+                }
+                SStmt::Expr(expr) => {
+                    self.compile_spark_expr(expr);
+                    inst!(self.frame.instructions; POP);
+                }
+            }
+        }
+    }
+
+    pub fn compile_if_stmt(&mut self, if_stmt: &spark::stmt::IfStmt, end_indices: &mut Vec<usize>) {
+        self.compile_spark_expr(&if_stmt.cond);
+        let goto_index = self.frame.instructions.len();
+        inst!(self.frame.instructions; POP_GOTO_IF_FALSE 0);
+
+        self.compile_spark_stmts(&if_stmt.stmts);
+        end_indices.push(self.frame.instructions.len());
+        inst!(self.frame.instructions; GOTO 0);
+
+        self.frame.instructions[goto_index] = inst!(POP_GOTO_IF_FALSE self.frame.instructions.len());
+
+        match &if_stmt.branch {
+            Some(spark::stmt::IfBranch::ElseIf(if_stmt)) => self.compile_if_stmt(if_stmt, end_indices),
+            Some(spark::stmt::IfBranch::Else(stmts)) => self.compile_spark_stmts(stmts),
+            None => {}
+        }
     }
 
     pub fn compile_spark_expr(&mut self, expr: &spark::expr::Expr) {
@@ -136,10 +256,8 @@ impl<'a, 't> FlameGen<'a, 't> {
                 inst!(with self.frame => expr.span; INV_MET args.len());
             }
             SExpr::Struct(id, fields) => {
-                // assume self.globals.types only include builtin types provided by the runtime
-                // (this will be changed later once spark is fully ported)
                 // TODO: better span information here
-                inst!(self.frame.instructions; ALLOC_OBJ (*id + self.globals.types.len()));
+                inst!(self.frame.instructions; ALLOC_OBJ (*id + self.type_offset));
                 for (field, offset) in fields {
                     inst!(with self.frame => field.span; PUSHU (HeapObject::field_offset() + *offset));
                     self.compile_spark_expr(field);

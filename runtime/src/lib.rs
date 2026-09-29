@@ -5,6 +5,7 @@ use diagnostic::{DiagnosticSink, symbol::SymbolTable};
 use error::RuntimeError;
 use flame::{GeneratedFunction, instruction::Instruction};
 use parse::LanternFile;
+use spark::{Lighter, SparkFunction};
 
 use crate::{error::{OutOfBoundsError, UserError}, flame::{FunctionKind, scope::{GlobalVariables, Globals}, r#type::{BuiltinType, TypeContext}}, heap::{GlobalStorage, Heap, HeapArray, HeapObject, TypeInfo}, stack::LanternStack};
 
@@ -161,6 +162,67 @@ impl VM {
 
         let types = globals.types.into_boxed_slice();
         let builtin_type_indexes = tcx.into_builtins();
+        Some(Self {
+            stack,
+            frames,
+            globals: GlobalStorage::allocate(
+                globals.vars,
+                &types[Self::BYTE_ARR_TYPE_INDEX],
+                &types[builtin_type_indexes[BuiltinType::String as usize]],
+            ),
+            funs: globals.funs.into_boxed_slice(),
+            types,
+            builtin_type_indexes,
+            // 4 MiB
+            heap: Heap::new(4 * 2usize.pow(20)),
+        })
+    }
+
+    pub fn new_spark(file: LanternFile, sink: &mut DiagnosticSink, symbol_table: &SymbolTable) -> Option<Self> {
+        let mut globals = Globals {
+            funs: Vec::new(),
+            // TODO: better way of builtin array type infos
+            types: vec![
+                TypeInfo::Array { element_size: 1, is_ref: false },
+                TypeInfo::Array { element_size: 8, is_ref: false },
+                TypeInfo::Array { element_size: size_of::<usize>(), is_ref: true },
+            ],
+            vars: GlobalVariables::new(),
+        };
+        let runtime_types = globals.types.len();
+        let arena = Arena::new(25);
+        let mut tcx = spark::ty::TypeContext::new(&arena);
+
+        let mut module_scope = spark::scope::Scope::new_module(&tcx);
+        let mut lighter = Lighter::new(sink, symbol_table, &mut tcx);
+        let root = lighter.lower_stmts(file.stmts, &mut module_scope);
+
+        if lighter.sink.fatal() {
+            return None;
+        }
+
+        flame::ignite_spark(
+            lighter,
+            SparkFunction::Lantern {
+                name: "<module>".to_string().into_boxed_str(),
+                stmts: root,
+                locals: module_scope.max_locals
+            },
+            &mut globals,
+            symbol_table,
+        );
+
+        let root = globals.funs.last().expect("root function");
+
+        let mut stack = LanternStack::new(2048);
+        if let FunctionKind::Instructions(_, locals) = root.kind { 
+            stack.reserve(locals).expect("too many locals");
+        }
+        let mut frames = Vec::with_capacity(512);
+        frames.push(Frame::new(globals.funs.len() - 1, 0));
+
+        let types = globals.types.into_boxed_slice();
+        let builtin_type_indexes = tcx.into_builtins(runtime_types);
         Some(Self {
             stack,
             frames,

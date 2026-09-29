@@ -3,7 +3,13 @@ use std::io::Write;
 use crate::{Slot, VM, error::RuntimeError, flame::{LanternPrimitive, PrimitiveOps, instruction::Instruction}, heap::HeapArray};
 
 macro_rules! native_funs {
-    (for $vm: pat, $( $name: literal = ( $($pat: pat),* $(,)? ) => $expr: expr ),* $(,)?) => {
+    (for $vm: pat, $( $native: ident : $name: literal = ( $($pat: pat),* $(,)? ) => $expr: expr ),* $(,)?) => {
+        pub fn get_native_spark_fn(native: ::spark::native::NativeFun) -> $crate::flame::NativeFn {
+            match native {$(
+                ::spark::native::NativeFun::$native => get_native_fn($name).unwrap(),
+            )*}
+        }
+
         pub fn get_native_fn(name: &str) -> Option<$crate::flame::NativeFn> {
             match name {
             $(
@@ -34,7 +40,7 @@ pub fn dummy_native(vm: &mut VM) -> Result<Slot, RuntimeError> {
 }
 
 native_funs![for vm,
-    "write" = (bytes) => {
+    Write: "write" = (bytes) => {
         let byte_ptr = unsafe { HeapArray::from_raw(bytes.read_ptr()) };
         let mut stdout = std::io::stdout();
         unsafe {
@@ -43,28 +49,28 @@ native_funs![for vm,
         }
         Ok(Slot::new_usize(0))
     },
-    "flush" = () => {
+    Flush: "flush" = () => {
         std::io::stdout().flush().map_err(|err| vm.throw(err));
         Ok(Slot::new_usize(0))
     },
-    "gc" = () => {
+    Gc: "gc" = () => {
         vm.heap.gc(&mut vm.stack);
         Ok(Slot::new_usize(0))
     },
-    "float_to_str" = (float) => {
+    FloatToStr: "float_to_str" = (float) => {
         let float = unsafe { float.read_float() };
         Ok(Slot::new_ref(vm.alloc_string(float.to_string().as_bytes()).as_mut_ptr()))
     },
-    "int_to_str" = (int) => {
+    IntToStr: "int_to_str" = (int) => {
         let int = unsafe { int.read_int() };
         Ok(Slot::new_ref(vm.alloc_string(int.to_string().as_bytes()).as_mut_ptr()))
     },
-    "input_float" = () => {
+    InputFloat: "input_float" = () => {
         let mut input = String::new();
         std::io::stdin().read_line(&mut input).map_err(|err| vm.throw(err));
         Ok(Slot::new_float(input.trim().parse::<f64>().map_err(|_| vm.throw("not a float"))?))
     },
-    "input_int" = () => {
+    InputInt: "input_int" = () => {
         let mut input = String::new();
         std::io::stdin().read_line(&mut input).map_err(|err| vm.throw(err));
         Ok(Slot::new_int(input.trim().parse::<i64>().map_err(|_| vm.throw("not an integer"))?))

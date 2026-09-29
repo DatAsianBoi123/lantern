@@ -122,6 +122,10 @@ impl<'t> LanternStructData<'t> {
         }
     }
 
+    pub fn size(&self) -> usize {
+        self.size
+    }
+
     pub fn fields(&self) -> &[LanternStructField<'t>] {
         &self.fields
     }
