@@ -16,6 +16,9 @@ macro_rules! inst {
     (POP) => {
         $crate::flame::instruction::Instruction::Pop
     };
+    (DUP $d: expr) => {
+        $crate::flame::instruction::Instruction::Dup($d)
+    };
     (ADDF) => {
         $crate::flame::instruction::Instruction::Addf
     };
@@ -216,6 +219,7 @@ pub enum Instruction {
     Pushi64(i64),
     Pushf64(f64),
     Pop,
+    Dup(usize),
     /// POP     f64: rhs
     /// POP     f64: lhs
     /// PUSH    f64: result
@@ -287,6 +291,7 @@ impl Display for Instruction {
             Self::Pushi64(i64) => write!(f, "{:20}{i64}", "PUSHI"),
             Self::Pushf64(f64) => write!(f, "{:20}{f64}", "PUSHF"),
             Self::Pop => write!(f, "POP"),
+            Self::Dup(depth) => write!(f, "{:20}{depth}", "DUP"),
             Self::Addf => write!(f, "ADDF"),
             Self::Addi => write!(f, "ADDI"),
             Self::Subf => write!(f, "SUBF"),

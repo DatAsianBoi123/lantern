@@ -269,6 +269,7 @@ impl VM {
                     Instruction::Pushi64(i64) => self.stack.push_int(i64)?,
                     Instruction::Pushf64(f64) => self.stack.push_float(f64)?,
                     Instruction::Pop => { self.stack.pop()?; },
+                    Instruction::Dup(depth) => { self.stack.push_slot(self.stack[self.stack.top() - 1 - depth])?; },
                     Instruction::Addf => args!((f64, f64) -> f64 in self.stack, (rhs, lhs) => lhs + rhs),
                     Instruction::Addi => args!((i64, i64) -> i64 in self.stack, (rhs, lhs) => lhs.wrapping_add(rhs)),
                     Instruction::Subf => args!((f64, f64) -> f64 in self.stack, (rhs, lhs) => lhs - rhs),
