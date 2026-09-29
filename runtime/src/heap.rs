@@ -251,7 +251,7 @@ impl HeapObject {
     }
 
     pub fn size_of(size: usize) -> usize {
-        Self::field_offset() + size
+        (Self::field_offset() + size).next_multiple_of(align_of::<ObjectHeader>())
     }
 
     pub fn as_ptr(&self) -> *const u8 {
@@ -342,7 +342,7 @@ impl HeapArray {
     }
 
     pub fn size_of(len: usize, element_size: usize) -> usize {
-        Self::element_offset() + len * element_size
+        (Self::element_offset() + len * element_size).next_multiple_of(align_of::<ObjectHeader>())
     }
 
     pub fn as_ptr(&self) -> *const u8 {
