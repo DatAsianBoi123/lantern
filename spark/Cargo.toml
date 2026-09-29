@@ -1,0 +1,14 @@
+[package]
+name = "spark"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "spark"
+path = "src/lib.rs"
+
+[dependencies]
+parse = { path = "../parse" }
+diagnostic = { path = "../diagnostic" }
+arena = { path = "../arena" }
+

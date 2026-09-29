@@ -39,7 +39,7 @@ macro_rules! define_keywords {
         }
 
         $(
-        #[derive(Debug, Clone, PartialEq, Eq)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         $vis struct $keyword(pub ::diagnostic::Span);
 
         impl TokenKind for $keyword {
@@ -100,7 +100,7 @@ macro_rules! define_puncts {
         }
 
         $(
-        #[derive(Debug, Clone, PartialEq, Eq)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         $vis struct $punct(pub ::diagnostic::Span);
 
         impl TokenKind for $punct {
@@ -254,7 +254,7 @@ impl TokenKind for Literal {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Ident(pub Symbol, pub Span);
 
 impl TokenKind for Ident {
@@ -290,7 +290,7 @@ impl Ident {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Eof(pub Span);
 
 impl Display for Eof {
@@ -321,7 +321,7 @@ impl TokenKind for Eof {
 }
 
 define_keywords! {
-    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum Keyword {
         Val = "val",
         If = "if",
@@ -340,7 +340,7 @@ define_keywords! {
 }
 
 define_puncts! {
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, Copy, PartialEq)]
     pub enum Punct {
         Comma = ',',
         Semi = ';',

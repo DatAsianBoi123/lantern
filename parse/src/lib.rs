@@ -1,4 +1,4 @@
-use diagnostic::{Diagnostic, FileId, error, symbol::{SymbolDisplay, SymbolTable}};
+use diagnostic::{Diagnostic, FileId, Span, error, symbol::{SymbolDisplay, SymbolTable}};
 use lex::{ArrowRight, At, Break, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Continue, Else, Equals, Fun, Ident, If, Keyword, Native, OpenBrace, OpenBracket, OpenParen, Period, Primitive, Punct, Return, Semi, Struct, Throw, Token, TokenKind, Using, Val, While};
 use macros::Parse;
 
@@ -101,7 +101,7 @@ pub struct ItemFun {
 pub struct ItemNativeFun {
     pub native: Native,
     pub fun: Fun,
-    pub ident: Ident,
+    pub path: Path,
     pub open_paren: OpenParen,
     #[parse(with(parse_punctuated::<FunArg, Comma, ClosedParen>))]
     pub args: Vec<FunArg>,
@@ -275,6 +275,16 @@ pub enum Type {
     Path(Path),
 }
 
+impl Type {
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Array(open_bracket, _, closed_bracket) => open_bracket.span().containing(closed_bracket.span()),
+            Self::Fun(fun_type) => fun_type.span(),
+            Self::Path(path) => path.span(),
+        }
+    }
+}
+
 impl SymbolDisplay for Type {
     fn display(&self, symbol_table: &SymbolTable) -> String {
         match self {
@@ -300,6 +310,13 @@ pub struct FunType {
     pub closed_paren: ClosedParen,
     #[parse(boxed, with_try(ArrowRight, Type))]
     pub ret: Option<(ArrowRight, Box<Type>)>,
+}
+
+impl FunType {
+    pub fn span(&self) -> Span {
+        let end = self.ret.as_ref().map_or(self.closed_paren.span(), |(_, ty)| ty.span());
+        self.fun.span().containing(end)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -328,12 +345,20 @@ impl ParseTokens for Path {
 }
 
 impl Path {
-    pub fn last(&self) -> &Ident {
-        self.items.last().unwrap()
+    pub fn first(&self) -> Ident {
+        *self.items.first().unwrap()
     }
 
-    pub fn into_last(mut self) -> Ident {
-        self.items.pop().unwrap()
+    pub fn last(&self) -> Ident {
+        *self.items.last().unwrap()
+    }
+
+    pub fn span(&self) -> Span {
+        if self.items.len() == 1 {
+            self.first().span()
+        } else {
+            self.first().span().containing(self.last().span())
+        }
     }
 }
 

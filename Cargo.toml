@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "runtime",
+  "spark",
   "parse",
   "lex",
   "diagnostic",

@@ -2,6 +2,8 @@ use std::{fmt::{Display, Formatter}, path::PathBuf};
 
 use color_print::cformat;
 
+use crate::symbol::SymbolTable;
+
 pub mod symbol;
 
 #[macro_export]
@@ -67,7 +69,6 @@ impl DiagnosticSink {
     }
 }
 
-// TODO: DiagnosticMessage enum
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
     pub message: String,
@@ -156,6 +157,10 @@ impl DiagnosticLevel {
             Self::Warning => cformat!("<y>{f}</>"),
         }
     }
+}
+
+pub trait DiagnosticError {
+    fn into_diagnostic(self, symbol_table: &SymbolTable) -> Diagnostic where Self: Sized;
 }
 
 #[derive(Debug)]

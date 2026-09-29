@@ -7,6 +7,12 @@ pub trait SymbolDisplay {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Symbol(usize);
 
+impl SymbolDisplay for Symbol {
+    fn display(&self, symbol_table: &SymbolTable) -> String {
+        symbol_table.resolve(*self).to_string()
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct SymbolTable<'a> {
     map: HashMap<&'a str, Symbol>,

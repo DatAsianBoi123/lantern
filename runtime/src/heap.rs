@@ -337,6 +337,10 @@ impl HeapArray {
         size_of::<ObjectHeader>() + size_of::<usize>()
     }
 
+    pub fn len_offset() -> usize {
+        size_of::<ObjectHeader>()
+    }
+
     pub fn size_of(len: usize, element_size: usize) -> usize {
         Self::element_offset() + len * element_size
     }

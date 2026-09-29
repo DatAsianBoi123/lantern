@@ -230,7 +230,17 @@ dependencies = [
  "arena",
  "diagnostic",
  "parse",
+ "spark",
  "thiserror",
+]
+
+[[package]]
+name = "spark"
+version = "0.1.0"
+dependencies = [
+ "arena",
+ "diagnostic",
+ "parse",
 ]
 
 [[package]]

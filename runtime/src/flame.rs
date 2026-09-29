@@ -2,7 +2,7 @@ use std::{cell::OnceCell, fmt::Formatter, hash, ops::ControlFlow};
 
 use diagnostic::{Diagnostic, DiagnosticSink, error, symbol::{Symbol, SymbolDisplay, SymbolTable}};
 use instruction::InstructionSet;
-use parse::{FunArg, IfBranch, IfStmt, Item, ItemFun, ItemNativeFun, ItemPrimitive, ItemStruct, LanternFile, ReturnStmt, Stmt, StructField, ValDeclaration, WhileStmt, expr::{BinaryOperator, Expr, ExprArray, ExprBinary, ExprBlock, ExprField, ExprFunCall, ExprIndex, ExprParen, ExprStruct, ExprUnary, UnaryOperator}, lex::{Break, Ident, Literal, TokenKind}};
+use parse::{FunArg, IfBranch, IfStmt, Item, ItemFun, ItemNativeFun, ItemPrimitive, ItemStruct, LanternFile, ReturnStmt, Stmt, StructField, ValDeclaration, WhileStmt, expr::{BinaryOperator, Expr, ExprArray, ExprBinary, ExprBlock, ExprField, ExprFunCall, ExprIndex, ExprMethodCall, ExprParen, ExprStruct, ExprUnary, UnaryOperator}, lex::{Break, Ident, Literal, TokenKind}};
 
 use crate::{Slot, VM, error::{RuntimeError, StacktraceLocation}, flame::{instruction::Instruction, scope::{Globals, LineMap, LoopScope, Scope, ScopeKind, StackFrame}, r#type::{BuiltinType, LanternType, TypeContext, TypeId}}, heap::{HeapObject, ObjectHeader, TypeInfo}, inst};
 
@@ -68,7 +68,7 @@ impl<'a, 't> FlameGen<'a, 't> {
                     Item::Using(_) => {},
                     Item::Fun(ItemFun { path, args, ret, .. }) => {
                         let args = args.iter()
-                            .map(|FunArg { ident, r#type, .. }| (ident.clone(), self.sink.emit_or(LanternType::resolve(r#type, &scope, tcx), tcx.null())))
+                            .map(|FunArg { ident, r#type, .. }| (*ident, self.sink.emit_or(LanternType::resolve(r#type, &scope, tcx), tcx.null())))
                             .collect();
 
                         let ret = ret.as_ref()
@@ -94,23 +94,23 @@ impl<'a, 't> FlameGen<'a, 't> {
                         // this gets overridden when the function is generated
                         self.globals.funs.push(GeneratedFunction::new("".into(), FunctionKind::Native(builtin::dummy_native)));
                     },
-                    Item::NativeFun(ItemNativeFun { ident, args, ret, .. }) => {
+                    Item::NativeFun(ItemNativeFun { path, args, ret, .. }) => {
                         let args = args.iter()
-                            .map(|FunArg { ident, r#type, .. }| (ident.clone(), self.sink.emit_or(LanternType::resolve(r#type, &scope, tcx), tcx.null())))
+                            .map(|FunArg { ident, r#type, .. }| (*ident, self.sink.emit_or(LanternType::resolve(r#type, &scope, tcx), tcx.null())))
                             .collect();
 
                         let ret = ret.as_ref()
                             .map(|(_, r#type)| self.sink.emit_or(LanternType::resolve(r#type, &scope, tcx), tcx.null()))
                             .unwrap_or(tcx.null());
 
-                        scope.insert_function(ident.0, LanternFunction::new(self.globals.funs.len(), args, ret, tcx));
+                        scope.insert_function(path.last().0, LanternFunction::new(self.globals.funs.len(), args, ret, tcx));
 
-                        let ptr = builtin::get_native_fn(self.symbol_table.resolve(ident.0)).unwrap_or_else(|| {
-                            error!(in self.sink; ident.span() => "unknown native `{}`", self.display(ident));
+                        let ptr = builtin::get_native_fn(self.symbol_table.resolve(path.last().0)).unwrap_or_else(|| {
+                            error!(in self.sink; path.span() => "unknown native `{}`", self.display(path));
                             builtin::dummy_native
                         });
 
-                        self.globals.funs.push(GeneratedFunction::new(self.symbol_table.resolve(ident.0).into(), FunctionKind::Native(ptr)));
+                        self.globals.funs.push(GeneratedFunction::new(self.symbol_table.resolve(path.last().0).into(), FunctionKind::Native(ptr)));
                     },
                     Item::Struct(ItemStruct { ident, fields, .. }) => {
                         let fields = fields.iter()
@@ -672,6 +672,14 @@ impl<'a, 't> FlameGen<'a, 't> {
                         ControlFlow::Continue(tcx.null())
                     }
                 }
+            },
+            Expr::MethodCall(ExprMethodCall { expr, ident, open_paren, args, closed_paren }) => {
+                self.compile_expr(Expr::FunCall(ExprFunCall {
+                    expr: Box::new(Expr::Field(ExprField { expr, ident })),
+                    open_paren,
+                    args,
+                    closed_paren,
+                }), scope, tcx)
             },
         }
     }

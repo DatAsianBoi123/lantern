@@ -3,7 +3,6 @@ use lex::{Lexer, Token, TokenKind};
 
 use crate::{ParseTokens, Result};
 
-#[derive(Debug)]
 pub struct TokenStream<'a, 's> {
     lexer: Lexer<'a, 's>,
     peek: Option<Result<Token>>,

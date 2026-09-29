@@ -1,5 +1,7 @@
 use std::{fmt::{Display, Formatter}, ops::{Deref, DerefMut}};
 
+use spark::expr::{BinaryOperation, UnaryOperation};
+
 #[macro_export]
 macro_rules! inst {
     (PUSHU $b: expr) => {
@@ -80,6 +82,12 @@ macro_rules! inst {
     (ICOMP_EQ) => {
         $crate::flame::instruction::Instruction::ICompareEq
     };
+    (FCOMP_NEQ) => {
+        $crate::flame::instruction::Instruction::FCompareNeq
+    };
+    (ICOMP_NEQ) => {
+        $crate::flame::instruction::Instruction::ICompareNeq
+    };
     (NOT) => {
         $crate::flame::instruction::Instruction::Not
     };
@@ -138,16 +146,17 @@ macro_rules! inst {
         $crate::flame::instruction::Instruction::Throw
     };
 
-    (with $frame: expr => $span: expr; $([$($tt: tt)+])*) => {{
+    (with $frame: expr => $span: expr) => {{
         if $frame.line_table.last().is_none_or(|map| $span.start().line > map.line) {
             $frame.line_table.push($crate::flame::scope::LineMap::new($frame.instructions.len(), $span.start().line));
         }
+    }};
+    (with $frame: expr => $span: expr; $([$($tt: tt)+])*) => {{
+        inst!(with $frame => $span);
         inst!($frame.instructions; $([$($tt)+])*);
     }};
     (with $frame: expr => $span: expr; $($tt: tt)+) => {{
-        if $frame.line_table.last().is_none_or(|map| $span.start().line > map.line) {
-            $frame.line_table.push($crate::flame::scope::LineMap::new($frame.instructions.len(), $span.start().line));
-        }
+        inst!(with $frame => $span);
         inst!($frame.instructions; $($tt)+);
     }};
 
@@ -239,6 +248,8 @@ pub enum Instruction {
     ICompareGe,
     FCompareEq,
     ICompareEq,
+    FCompareNeq,
+    ICompareNeq,
     /// POP     bool: value
     /// PUSH    bool: !value
     Not,
@@ -298,6 +309,8 @@ impl Display for Instruction {
             Self::ICompareGe => write!(f, "ICOMP_GE"),
             Self::FCompareEq => write!(f, "FCOMP_EQ"),
             Self::ICompareEq => write!(f, "ICOMP_EQ"),
+            Self::FCompareNeq => write!(f, "FCOMP_NEQ"),
+            Self::ICompareNeq => write!(f, "ICOMP_NEQ"),
             Self::Not => write!(f, "NOT"),
             Self::Throw => write!(f, "THRW"),
             Self::AllocObj(index) => write!(f, "{:20}{index}", "ALLOC_OBJ"),
@@ -317,6 +330,45 @@ impl Display for Instruction {
             Self::GotoIfFalse(index) => write!(f, "{:20}{index}", "GOTO_IF_FALSE"),
             Self::PopGotoIfTrue(index) => write!(f, "{:20}{index}", "POP_GOTO_IF_TRUE"),
             Self::PopGotoIfFalse(index) => write!(f, "{:20}{index}", "POP_GOTO_IF_FALSE"),
+        }
+    }
+}
+
+impl From<BinaryOperation> for Instruction {
+    fn from(value: BinaryOperation) -> Self {
+        match value {
+            BinaryOperation::Addf => Self::Addf,
+            BinaryOperation::Addi => Self::Addi,
+            BinaryOperation::Subf => Self::Subf,
+            BinaryOperation::Subi => Self::Subi,
+            BinaryOperation::Multf => Self::Multf,
+            BinaryOperation::Multi => Self::Multi,
+            BinaryOperation::Divf => Self::Divf,
+            BinaryOperation::Divi => Self::Divi,
+            BinaryOperation::Modf => Self::Modf,
+            BinaryOperation::Modi => Self::Modi,
+            BinaryOperation::FCompareLt => Self::FCompareLt,
+            BinaryOperation::ICompareLt => Self::ICompareLt,
+            BinaryOperation::FCompareLe => Self::FCompareLe,
+            BinaryOperation::ICompareLe => Self::ICompareLe,
+            BinaryOperation::FCompareGt => Self::FCompareGt,
+            BinaryOperation::ICompareGt => Self::ICompareGt,
+            BinaryOperation::FCompareGe => Self::FCompareGe,
+            BinaryOperation::ICompareGe => Self::ICompareGe,
+            BinaryOperation::FCompareEq => Self::FCompareEq,
+            BinaryOperation::ICompareEq => Self::ICompareEq,
+            BinaryOperation::FCompareNeq => Self::FCompareNeq,
+            BinaryOperation::ICompareNeq => Self::ICompareNeq,
+        }
+    }
+}
+
+impl From<UnaryOperation> for Instruction {
+    fn from(value: UnaryOperation) -> Self {
+        match value {
+            UnaryOperation::Negf => Self::Negf,
+            UnaryOperation::Negi => Self::Negi,
+            UnaryOperation::Not => Self::Not,
         }
     }
 }

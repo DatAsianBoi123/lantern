@@ -51,6 +51,7 @@ pub enum Expr {
     Identifier(Ident),
     Field(ExprField),
     FunCall(ExprFunCall),
+    MethodCall(ExprMethodCall),
     Struct(ExprStruct),
     Paren(ExprParen),
     Block(ExprBlock),
@@ -80,6 +81,7 @@ impl Expr {
             Expr::Identifier(ident) => ident.span(),
             Expr::Field(ExprField { expr, ident }) => expr.span().containing(ident.span()),
             Expr::FunCall(ExprFunCall { expr, closed_paren, .. }) => expr.span().containing(closed_paren.span()),
+            Expr::MethodCall(ExprMethodCall { expr, closed_paren, .. }) => expr.span().containing(closed_paren.span()),
             Expr::Struct(ExprStruct { ident, closed_brace, .. }) => ident.span().containing(closed_brace.span()),
             Expr::Paren(ExprParen { open_paren, closed_paren, .. }) => open_paren.span().containing(closed_paren.span()),
             Expr::Block(ExprBlock { open_brace, closed_brace, .. }) => open_brace.span().containing(closed_brace.span()),
@@ -95,7 +97,19 @@ impl Expr {
         loop {
             if Period::is_token(stream.peek()?) {
                 let _ = stream.next_token();
-                lhs = Self::Field(ExprField { expr: Box::new(lhs), ident: stream.parse()? });
+                let ident = stream.parse()?;
+                if OpenParen::is_token(stream.peek()?) {
+                    let open_paren = stream.parse().unwrap();
+                    lhs = Self::MethodCall(ExprMethodCall {
+                        expr: Box::new(lhs),
+                        ident,
+                        open_paren,
+                        args: parse_punctuated::<_, Comma, ClosedParen>(stream)?,
+                        closed_paren: stream.parse()?,
+                    })
+                } else {
+                    lhs = Self::Field(ExprField { expr: Box::new(lhs), ident });
+                }
                 continue;
             }
 
@@ -115,7 +129,12 @@ impl Expr {
                 // highest BP
                 let open_paren = stream.parse()?;
 
-                lhs = Self::FunCall(ExprFunCall { expr: Box::new(lhs), open_paren, args: parse_punctuated::<Expr, Comma, ClosedParen>(stream)?, closed_paren: stream.parse()? });
+                lhs = Self::FunCall(ExprFunCall {
+                    expr: Box::new(lhs),
+                    open_paren,
+                    args: parse_punctuated::<_, Comma, ClosedParen>(stream)?,
+                    closed_paren: stream.parse()?,
+                });
 
                 continue;
             }
@@ -158,6 +177,15 @@ pub struct ExprField {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct ExprMethodCall {
+    pub expr: Box<Expr>,
+    pub ident: Ident,
+    pub open_paren: OpenParen,
+    pub args: Vec<Expr>,
+    pub closed_paren: ClosedParen,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct ExprFunCall {
     pub expr: Box<Expr>,
     pub open_paren: OpenParen,
@@ -195,6 +223,12 @@ pub struct ExprBlock {
     #[parse(with(parse_repetition::<Stmt, ClosedBrace>))]
     pub stmts: Vec<Stmt>,
     pub closed_brace: ClosedBrace,
+}
+
+impl ExprBlock {
+    pub fn span(&self) -> Span {
+        self.open_brace.span().containing(self.closed_brace.span())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -245,7 +279,7 @@ pub struct ExprBinary {
     pub rhs: Box<Expr>,
 }
 
-#[derive(Parse, Debug, Clone, PartialEq, Eq)]
+#[derive(Parse, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOperator {
     Assign(Equals),
 
@@ -400,7 +434,7 @@ pub struct ExprUnary {
     pub expr: Box<Expr>,
 }
 
-#[derive(Parse, Debug, Clone, PartialEq, Eq)]
+#[derive(Parse, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnaryOperator {
     Negate(Hyphen),
     Not(Bang),
