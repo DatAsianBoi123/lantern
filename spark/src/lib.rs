@@ -477,8 +477,7 @@ impl<'a, 't> Lighter<'a, 't> {
                             (LanternType::Primitive(lhs_primitive), LanternType::Primitive(_))
                                 if let Some(op) = lhs_primitive.ops.get_bin_op(op) =>
                             {
-                                let ty = lhs.ty;
-                                return Expr::new(ExprKind::BinaryAssign(Box::new(lhs), op, Box::new(rhs)), ty, rhs_span);
+                                return Expr::new(ExprKind::BinaryAssign(Box::new(lhs), op, Box::new(rhs)), self.tcx.null(), rhs_span);
                             }
                             _ => {
                                 self.emit(NoBinOp {
