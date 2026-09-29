@@ -1,10 +1,11 @@
 use std::{cell::OnceCell, fmt::Formatter, hash, ops::ControlFlow};
 
-use diagnostic::{Diagnostic, DiagnosticSink, error, symbol::{Symbol, SymbolDisplay, SymbolTable}};
+use diagnostic::{Diagnostic, DiagnosticSink, Span, error, symbol::{Symbol, SymbolDisplay, SymbolTable}};
 use instruction::InstructionSet;
 use parse::{FunArg, IfBranch, IfStmt, Item, ItemFun, ItemNativeFun, ItemPrimitive, ItemStruct, LanternFile, ReturnStmt, Stmt, StructField, ValDeclaration, WhileStmt, expr::{BinaryOperator, Expr, ExprArray, ExprBinary, ExprBlock, ExprField, ExprFunCall, ExprIndex, ExprMethodCall, ExprParen, ExprStruct, ExprUnary, UnaryOperator}, lex::{Break, Ident, Literal, TokenKind}};
+use spark::expr::{ExprKind as SExpr, LogicalOperation};
 
-use crate::{Slot, VM, error::{RuntimeError, StacktraceLocation}, flame::{instruction::Instruction, scope::{Globals, LineMap, LoopScope, Scope, ScopeKind, StackFrame}, r#type::{BuiltinType, LanternType, TypeContext, TypeId}}, heap::{HeapObject, ObjectHeader, TypeInfo}, inst};
+use crate::{Slot, VM, error::{RuntimeError, StacktraceLocation}, flame::{instruction::Instruction, scope::{Globals, LineMap, LoopScope, Scope, ScopeKind, StackFrame}, r#type::{BuiltinType, LanternType, TypeContext, TypeId}}, heap::{HeapArray, HeapObject, ObjectHeader, TypeInfo}, inst};
 
 pub type NativeFn = fn(&mut VM) -> Result<Slot, RuntimeError>;
 
@@ -48,6 +49,145 @@ impl<'a, 't> FlameGen<'a, 't> {
         fun(self);
         std::mem::swap(&mut self.frame, &mut frame);
         frame.into_gen()
+    }
+
+    pub fn compile_spark_expr(&mut self, expr: &spark::expr::Expr) {
+        match &expr.kind {
+            SExpr::Literal(spark::expr::Literal::Int(int)) => inst!(with self.frame => expr.span; PUSHI *int),
+            SExpr::Literal(spark::expr::Literal::Float(float)) => inst!(with self.frame => expr.span; PUSHF *float),
+            SExpr::Literal(spark::expr::Literal::True) => inst!(with self.frame => expr.span; PUSHU crate::bool_to_slot(true)),
+            SExpr::Literal(spark::expr::Literal::False) => inst!(with self.frame => expr.span; PUSHU crate::bool_to_slot(false)),
+            SExpr::Static(id) => inst!(with self.frame => expr.span; PUSHU *id),
+            SExpr::Global(id) => inst!(with self.frame => expr.span; LOAD_GLOBAL *id),
+            SExpr::Local(id) => inst!(with self.frame => expr.span; LOAD_LOCAL *id),
+            SExpr::Block(_) => todo!(),
+            SExpr::Field(obj, offset) => {
+                self.compile_spark_expr(obj);
+                let size = if expr.ty.is_primitive() { expr.ty.size() } else { 0 };
+                inst! { with self.frame => expr.span;
+                    [PUSHU HeapObject::field_offset() + *offset]
+                    [READ size]
+                }
+            }
+            SExpr::Len(array) => {
+                self.compile_spark_expr(array);
+                inst! { with self.frame => expr.span;
+                    [PUSHU HeapArray::len_offset()]
+                    [READ size_of::<i64>()]
+                }
+            }
+            SExpr::Index(array, index) => {
+                self.compile_spark_expr(array);
+                self.compile_spark_expr(index);
+                inst!(with self.frame => expr.span; INDEX)
+            }
+            SExpr::Binary(lhs, op, rhs) => {
+                self.compile_spark_expr(lhs);
+                self.compile_spark_expr(rhs);
+                inst!(with self.frame => expr.span);
+                self.frame.instructions.push((*op).into());
+            }
+            SExpr::BinaryAssign(lhs, op, rhs) => {
+                let place = self.compile_place(lhs);
+                for _ in 0..place.operands() {
+                    inst!(self.frame.instructions; DUP place.operands() - 1);
+                }
+                self.read_place(place, lhs.span);
+                self.compile_spark_expr(rhs);
+                self.frame.instructions.push((*op).into());
+                self.write_place(place, expr.span);
+            }
+            SExpr::Unary(op, value) => {
+                self.compile_spark_expr(value);
+                inst!(with self.frame => expr.span);
+                self.frame.instructions.push((*op).into());
+            }
+            SExpr::Logical(lhs, logical, rhs) => {
+                self.compile_spark_expr(lhs);
+                let goto_index = self.frame.instructions.len();
+                inst!(self.frame.instructions; POP);
+
+                inst!(self.frame.instructions; POP);
+                self.compile_spark_expr(rhs);
+
+                match logical {
+                    LogicalOperation::And => self.frame.instructions[goto_index] = inst!(GOTO_IF_FALSE self.frame.instructions.len()),
+                    LogicalOperation::Or => self.frame.instructions[goto_index] = inst!(GOTO_IF_TRUE self.frame.instructions.len()),
+                }
+            }
+            SExpr::Assign(place, value) => {
+                let place = self.compile_place(place);
+                self.compile_spark_expr(value);
+                self.write_place(place, expr.span);
+            }
+            SExpr::Call(fun, args) => {
+                self.compile_spark_expr(fun);
+                for arg in args {
+                    self.compile_spark_expr(arg);
+                }
+                inst!(with self.frame => expr.span; INV args.len());
+            }
+            SExpr::CallMethod(recv, id, args) => {
+                self.compile_spark_expr(recv);
+                inst!(with self.frame => expr.span; PUSHU *id);
+                for arg in args {
+                    self.compile_spark_expr(arg);
+                }
+                inst!(with self.frame => expr.span; INV_MET args.len());
+            }
+            SExpr::Struct(id, fields) => {
+                // assume self.globals.types only include builtin types provided by the runtime
+                // (this will be changed later once spark is fully ported)
+                // TODO: better span information here
+                inst!(self.frame.instructions; ALLOC_OBJ (*id + self.globals.types.len()));
+                for (field, offset) in fields {
+                    inst!(with self.frame => field.span; PUSHU (HeapObject::field_offset() + *offset));
+                    self.compile_spark_expr(field);
+                    inst!(with self.frame => field.span; WRITE field.ty.size());
+                }
+            }
+            SExpr::Array(ty, elements) => {
+                for element in elements {
+                    self.compile_spark_expr(element);
+                }
+                let id = if ty.is_ref() { VM::REF_ARR_TYPE_INDEX } else { VM::PRIMITIVE_ARR_TYPE_INDEX };
+                inst!(with self.frame => expr.span; ALLOC_ARR id, elements.len());
+            }
+            SExpr::Error => panic!("error expression encountered"),
+        }
+    }
+
+    pub fn compile_place<'p>(&mut self, place: &spark::expr::Expr<'p>) -> Place<'p> {
+        match &place.kind {
+            SExpr::Local(id) => Place::Local(*id),
+            SExpr::Field(base, offset) => {
+                self.compile_spark_expr(base);
+                inst!(with self.frame => base.span; PUSHU (HeapObject::field_offset() + *offset));
+                Place::Field(place.ty)
+            }
+            SExpr::Index(array, index) => {
+                self.compile_spark_expr(array);
+                self.compile_spark_expr(index);
+                Place::Index
+            }
+            _ => panic!("attempting to write to a value"),
+        }
+    }
+
+    pub fn read_place(&mut self, place: Place, span: Span) {
+        match place {
+            Place::Local(id) => inst!(with self.frame => span; LOAD_LOCAL id),
+            Place::Field(ty) => inst!(with self.frame => span; READ if ty.is_primitive() { ty.size() } else { 0 }),
+            Place::Index => inst!(with self.frame => span; INDEX),
+        }
+    }
+
+    pub fn write_place(&mut self, place: Place, span: Span) {
+        match place {
+            Place::Local(id) => inst!(with self.frame => span; STORE_LOCAL id),
+            Place::Field(ty) => inst!(with self.frame => span; WRITE ty.size()),
+            Place::Index => inst!(with self.frame => span; WRITE_INDEX),
+        }
     }
 
     // use a &TypeContext to tell the compiler that tcx is not borrowed mutably until partial
@@ -817,6 +957,22 @@ impl<'a, 't> FlameGen<'a, 't> {
 
     fn display<T: SymbolDisplay>(&self, dis: &T) -> String {
         dis.display(self.symbol_table)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Place<'t> {
+    Local(usize),
+    Field(spark::ty::TypeId<'t>),
+    Index,
+}
+
+impl Place<'_> {
+    pub fn operands(&self) -> usize {
+        match self {
+            Self::Local(_) => 0,
+            Self::Field(_) | Self::Index => 2,
+        }
     }
 }
 

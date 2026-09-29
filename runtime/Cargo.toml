@@ -8,6 +8,7 @@ name = "runtime"
 path = "src/lib.rs"
 
 [dependencies]
+spark = { path = "../spark" }
 parse = { path = "../parse" }
 diagnostic = { path = "../diagnostic" }
 arena = { path = "../arena" }
