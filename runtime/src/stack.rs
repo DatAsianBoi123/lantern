@@ -100,7 +100,7 @@ impl LanternStack {
     }
 
     pub fn read_mut(&mut self, addr: usize) -> Result<&mut Slot, AccessUndefinedError> {
-        if addr > self.top { return Err(AccessUndefinedError); };
+        if addr >= self.top { return Err(AccessUndefinedError); };
         unsafe { Ok(self.inner.get_unchecked_mut(addr).assume_init_mut()) }
     }
 
