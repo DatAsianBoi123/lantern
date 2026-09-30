@@ -678,7 +678,7 @@ impl<'a, 't> Lighter<'a, 't> {
                         }
 
                         let fun_name = name.ident.0;
-                        match NativeFun::from_def(base, self.symbol_table.resolve(fun_name), &arg_types, ret_ty) {
+                        match NativeFun::from_def(base, self.symbol_table.resolve(fun_name), &arg_types, ret_ty, self.tcx) {
                             Ok(native) => {
                                 let args = args.iter().zip(arg_types.iter())
                                     .map(|(arg, ty)| (arg.ident, *ty))

@@ -1,9 +1,9 @@
-use crate::{primitive::{BYTE_PRIMITIVE, FLOAT_PRIMITIVE, INT_PRIMITIVE}, ty::{LanternType, TypeId}};
+use crate::{primitive::{BYTE_PRIMITIVE, FLOAT_PRIMITIVE, INT_PRIMITIVE}, ty::{BuiltinType, LanternType, TypeId}};
 
 macro_rules! define_natives {
-    ($(#[$meta:meta])* $vis:vis enum $ident:ident {
+    (for $tcx:pat, $(#[$meta:meta])* $vis:vis enum $ident:ident {
         $(
-        $variant:ident = $([$base_pat:pat = $base:expr])? $name:literal ($($pat:pat = $ty:expr),*) $(-> $ret_pat:pat = $ret:expr)?,
+        $variant:ident = $([$base_pat:pat = $base:expr])? $name:literal ($($pat:pat = $ty:expr),*) -> $ret_pat:pat $( = $ret:expr )?,
         )*
     }) => {
         $(#[$meta])*
@@ -13,7 +13,14 @@ macro_rules! define_natives {
 
         impl $ident {
             #[allow(unused)]
-            pub fn from_def(base: Option<TypeId<'_>>, name: &str, args: &[TypeId<'_>], ret: TypeId<'_>) -> Result<Self, FromDefError> {
+            pub fn from_def<'t>(
+                base: Option<TypeId<'t>>,
+                name: &str,
+                args: &[TypeId<'t>],
+                ret: TypeId<'t>,
+                tcx: &$crate::ty::TypeContext<'t>,
+            ) -> Result<Self, FromDefError> {
+                let $tcx = tcx;
                 match (base, name) {
                     $(
                         (base, $name) $( if let Some($base_pat) = base && $base )? => {
@@ -27,12 +34,10 @@ macro_rules! define_natives {
                             if args_iter.next().is_some() {
                                 return Err(FromDefError::MismatchedArgs);
                             }
-                            $(
-                                match &*ret {
-                                    $ret_pat if $ret => {}
-                                    _ => return Err(FromDefError::MismatchedRet),
-                                }
-                            )?
+                            match &*ret {
+                                $ret_pat $(if $ret)? => {}
+                                _ => return Err(FromDefError::MismatchedRet),
+                            }
                             Ok(Self::$variant)
                         }
                     )*
@@ -43,14 +48,16 @@ macro_rules! define_natives {
     };
 }
 
-define_natives! {
+define_natives! { for tcx,
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum NativeFun {
-        Write = "write"(LanternType::Array(inner) = inner.is_primitive_type(&BYTE_PRIMITIVE)),
-        Flush = "flush"(),
-        Gc = "gc"(),
-        FloatToStr = [ty = ty.is_primitive_type(&FLOAT_PRIMITIVE)]"to_str"(ty = ty.is_primitive_type(&FLOAT_PRIMITIVE)),
-        IntToStr = [ty = ty.is_primitive_type(&INT_PRIMITIVE)]"to_str"(ty = ty.is_primitive_type(&INT_PRIMITIVE)),
+        Write = "write"(LanternType::Array(inner) = inner.is_primitive_type(&BYTE_PRIMITIVE)) -> LanternType::Null,
+        Flush = "flush"() -> LanternType::Null,
+        Gc = "gc"() -> LanternType::Null,
+        FloatToStr = [ty = ty.is_primitive_type(&FLOAT_PRIMITIVE)]"to_str"(ty = ty.is_primitive_type(&FLOAT_PRIMITIVE))
+            -> ty = tcx.builtin(BuiltinType::String).eq_ty(ty),
+        IntToStr = [ty = ty.is_primitive_type(&INT_PRIMITIVE)]"to_str"(ty = ty.is_primitive_type(&INT_PRIMITIVE))
+            -> ty = tcx.builtin(BuiltinType::String).eq_ty(ty),
         InputFloat = "input_float"() -> ty = ty.is_primitive_type(&FLOAT_PRIMITIVE),
         InputInt = "input_int"() -> ty = ty.is_primitive_type(&INT_PRIMITIVE),
     }
