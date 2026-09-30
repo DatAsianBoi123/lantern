@@ -14,15 +14,9 @@ macro_rules! define_natives {
         impl $ident {
             #[allow(unused)]
             pub fn from_def(base: Option<TypeId<'_>>, name: &str, args: &[TypeId<'_>], ret: TypeId<'_>) -> Result<Self, FromDefError> {
-                match name {
+                match (base, name) {
                     $(
-                        $name => {
-                            $(
-                                match base {
-                                    Some($base_pat) if $base => {}
-                                    _ => return Err(FromDefError::NotFound),
-                                }
-                            )?
+                        (base, $name) $( if let Some($base_pat) = base && $base )? => {
                             let mut args_iter = args.iter().copied();
                             $(
                                 match args_iter.next().as_deref() {
