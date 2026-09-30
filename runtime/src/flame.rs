@@ -324,7 +324,7 @@ impl<'a, 't> FlameGen<'a, 't> {
             .for_each(|item| {
                 match item {
                     Item::Using(_) => {},
-                    Item::Fun(ItemFun { path, args, ret, .. }) => {
+                    Item::Fun(ItemFun { name, args, ret, .. }) => {
                         let args = args.iter()
                             .map(|FunArg { ident, r#type, .. }| (*ident, self.sink.emit_or(LanternType::resolve(r#type, &scope, tcx), tcx.null())))
                             .collect();
@@ -333,26 +333,25 @@ impl<'a, 't> FlameGen<'a, 't> {
                             .map(|(_, r#type)| self.sink.emit_or(LanternType::resolve(r#type, &scope, tcx), tcx.null()))
                             .unwrap_or(tcx.null());
 
-                        let name = path.last().0;
                         let fun = LanternFunction::new(self.globals.funs.len(), args, ret, tcx);
-                        if path.items.len() == 1 {
-                            if scope.insert_function(name, fun).is_none() {
-                                error!(in self.sink; path.last().span() => "function already declared");
+                        if let Some(base) = &name.base {
+                            match LanternType::resolve(base, &scope, tcx) {
+                                Ok(ty) => {
+                                    if scope.insert_associated(ty, name.ident.0, fun).is_none() {
+                                        error!(in self.sink; name.span() => "associated function already declared");
+                                    }
+                                }
+                                Err(err) => self.sink.emit(err),
                             }
                         } else {
-                            let ident = &path.items[0];
-                            if let Some(item) = scope.item(ident.0) {
-                                if scope.insert_associated(item, name, fun).is_none() {
-                                    error!(in self.sink; ident.span() => "associated function already declared");
-                                }
-                            } else {
-                                error!(in self.sink; ident.span() => "item {} not found", self.display(ident));
+                            if scope.insert_function(name.ident.0, fun).is_none() {
+                                error!(in self.sink; name.span() => "function already declared");
                             }
                         }
                         // this gets overridden when the function is generated
                         self.globals.funs.push(GeneratedFunction::new("".into(), FunctionKind::Native(builtin::dummy_native)));
                     },
-                    Item::NativeFun(ItemNativeFun { path, args, ret, .. }) => {
+                    Item::NativeFun(ItemNativeFun { name, args, ret, .. }) => {
                         let args = args.iter()
                             .map(|FunArg { ident, r#type, .. }| (*ident, self.sink.emit_or(LanternType::resolve(r#type, &scope, tcx), tcx.null())))
                             .collect();
@@ -361,14 +360,14 @@ impl<'a, 't> FlameGen<'a, 't> {
                             .map(|(_, r#type)| self.sink.emit_or(LanternType::resolve(r#type, &scope, tcx), tcx.null()))
                             .unwrap_or(tcx.null());
 
-                        scope.insert_function(path.last().0, LanternFunction::new(self.globals.funs.len(), args, ret, tcx));
+                        scope.insert_function(name.ident.0, LanternFunction::new(self.globals.funs.len(), args, ret, tcx));
 
-                        let ptr = builtin::get_native_fn(self.symbol_table.resolve(path.last().0)).unwrap_or_else(|| {
-                            error!(in self.sink; path.span() => "unknown native `{}`", self.display(path));
+                        let ptr = builtin::get_native_fn(self.symbol_table.resolve(name.ident.0)).unwrap_or_else(|| {
+                            error!(in self.sink; name.span() => "unknown native `{}`", self.display(name));
                             builtin::dummy_native
                         });
 
-                        self.globals.funs.push(GeneratedFunction::new(self.symbol_table.resolve(path.last().0).into(), FunctionKind::Native(ptr)));
+                        self.globals.funs.push(GeneratedFunction::new(self.symbol_table.resolve(name.ident.0).into(), FunctionKind::Native(ptr)));
                     },
                     Item::Struct(ItemStruct { ident, fields, .. }) => {
                         let fields = fields.iter()
@@ -556,19 +555,19 @@ impl<'a, 't> FlameGen<'a, 't> {
                     self.compile_expr(expr, &scope, tcx)?;
                     inst!(self.frame.instructions; POP);
                 },
-                Stmt::Item(Item::Fun(ItemFun { path, block, ret, .. })) => {
+                Stmt::Item(Item::Fun(ItemFun { name, block, ret, .. })) => {
                     let ret = ret
                         .map(|(_, r#type)| self.sink.emit_or(LanternType::resolve(&r#type, &scope, tcx), tcx.null()))
                         .unwrap_or(tcx.null());
 
-                    let fun = if path.items.len() == 1 {
-                        scope.function(path.last().0).expect("function in scope")
+                    let fun = if let Some(base) = &name.base {
+                        scope.associated(LanternType::resolve(base, &scope, tcx).expect("type is valid"), name.ident.0).expect("assosiated in scope")
                     } else {
-                        scope.associated(scope.item(path.items[0].0).expect("item in scope"), path.last().0).expect("assosiated in scope")
+                        scope.function(name.ident.0).expect("function in scope")
                     };
 
                     let mut fun_scope = scope.child_function(block.closed_brace.span());
-                    let mut fun_frame = StackFrame::new_fun(self.display(&path), ret);
+                    let mut fun_frame = StackFrame::new_fun(self.display(&name), ret);
 
                     for (ident, ty) in &fun.args {
                         let local_index = fun_frame.declare_local();

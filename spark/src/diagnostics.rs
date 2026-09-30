@@ -1,5 +1,5 @@
 use diagnostic::{Diagnostic, DiagnosticError, Span, error, symbol::{Symbol, SymbolDisplay, SymbolTable}};
-use parse::{Path, expr::{BinaryOperator, UnaryOperator}, lex::{Break, Continue, Ident, TokenKind}};
+use parse::{FunName, Path, expr::{BinaryOperator, UnaryOperator}, lex::{Break, Continue, Ident, TokenKind}};
 
 use crate::ty::TypeId;
 
@@ -222,7 +222,7 @@ impl DiagnosticError for PrimitiveAlreadyDeclared {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NativeAlreadyDeclared(pub Path);
+pub struct NativeAlreadyDeclared(pub FunName);
 
 impl DiagnosticError for NativeAlreadyDeclared {
     fn into_diagnostic(self, symbol_table: &SymbolTable) -> Diagnostic {
@@ -294,7 +294,7 @@ impl DiagnosticError for StructAlreadyDeclared {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FunAlreadyDeclared(pub Path);
+pub struct FunAlreadyDeclared(pub FunName);
 
 impl DiagnosticError for FunAlreadyDeclared {
     fn into_diagnostic(self, symbol_table: &SymbolTable) -> Diagnostic {
@@ -321,7 +321,7 @@ impl DiagnosticError for UnknownPrimitive {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UnknownNative(pub Path);
+pub struct UnknownNative(pub FunName);
 
 impl DiagnosticError for UnknownNative {
     fn into_diagnostic(self, symbol_table: &SymbolTable) -> Diagnostic {

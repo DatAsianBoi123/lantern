@@ -87,7 +87,7 @@ impl ParseTokens for Item {
 #[derive(Parse, Debug, Clone, PartialEq)]
 pub struct ItemFun {
     pub fun: Fun,
-    pub path: Path,
+    pub name: FunName,
     pub open_paren: OpenParen,
     #[parse(with(parse_punctuated::<FunArg, Comma, ClosedParen>))]
     pub args: Vec<FunArg>,
@@ -101,7 +101,7 @@ pub struct ItemFun {
 pub struct ItemNativeFun {
     pub native: Native,
     pub fun: Fun,
-    pub path: Path,
+    pub name: FunName,
     pub open_paren: OpenParen,
     #[parse(with(parse_punctuated::<FunArg, Comma, ClosedParen>))]
     pub args: Vec<FunArg>,
@@ -109,6 +109,62 @@ pub struct ItemNativeFun {
     #[parse(with_try(ArrowRight, Type))]
     pub ret: Option<(ArrowRight, Type)>,
     pub semi: Semi,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunName {
+    pub base: Option<Type>,
+    pub ident: Ident,
+}
+
+impl FunName {
+    pub fn span(&self) -> Span {
+        match &self.base {
+            Some(ty) => ty.span().containing(self.ident.span()),
+            None => self.ident.span(),
+        }
+    }
+}
+
+impl SymbolDisplay for FunName {
+    fn display(&self, symbol_table: &SymbolTable) -> String {
+        match &self.base {
+            Some(ty) => format!("{}.{}", ty.display(symbol_table), self.ident.display(symbol_table)),
+            None => self.ident.display(symbol_table),
+        }
+    }
+}
+
+impl ParseTokens for FunName {
+    fn parse(stream: &mut TokenStream) -> Result<Self> {
+        match stream.peek()? {
+            Token::Punct(Punct::OpenBracket(_)) | Token::Keyword(Keyword::Fun(_)) => {
+                Ok(Self {
+                    base: Some(stream.parse()?),
+                    ident: stream.parse()?,
+                })
+            }
+            Token::Ident(ident) => {
+                let ident = *ident;
+
+                stream.next_token()?;
+                if let Ok(Token::Punct(Punct::Period(_))) = stream.peek() {
+                    // type.name
+                    stream.next_token()?;
+                    let mut path: Path = stream.parse()?;
+                    path.items.insert(0, ident);
+
+                    let ident = path.items.pop().expect("path has at least 1 element");
+
+                    Ok(Self { base: Some(Type::Path(path)), ident })
+                } else {
+                    // name
+                    Ok(Self { base: None, ident })
+                }
+            }
+            token => Err(error!(token.span() => "expected `FunName`")),
+        }
+    }
 }
 
 #[derive(Parse, Debug, Clone, PartialEq)]

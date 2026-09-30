@@ -38,26 +38,22 @@ impl<'a, 't> Lighter<'a, 't> {
 
         for stmt in stmts {
             match stmt {
-                parse::Stmt::Item(Item::Fun(ItemFun { path, ret, block, .. })) => {
+                parse::Stmt::Item(Item::Fun(ItemFun { name, ret, block, .. })) => {
                     let ret = ret
                         .map(|(_, ret)| self.sink.emit_or(LanternType::resolve(&ret, scope, self.tcx), self.tcx.error()))
                         .unwrap_or(self.tcx.null());
 
-                    let fun_def = match path.items.len() {
-                        1 if let Some(fun) = scope.function(path.last().0) => fun,
-                        2 if let Some(item) = scope.item(path.items[0].0)
-                            && let Some(associated) = scope.associated(item, path.items[1].0) =>
+                    let fun_def = match &name.base {
+                        Some(base) if let Ok(ty) = LanternType::resolve(base, scope, self.tcx)
+                            && let Some(fun) = scope.associated(ty, name.ident.0) =>
                         {
-                            associated
+                            fun
                         }
-                        3.. => {
-                            self.emit(BadFunctionName(path));
-                            continue;
-                        }
+                        None if let Some(fun) = scope.function(name.ident.0) => fun,
                         _ => continue,
                     };
 
-                    let mut fun_scope = scope.child_function(path.span(), ret);
+                    let mut fun_scope = scope.child_function(name.span(), ret);
                     for (ident, ty) in &fun_def.args {
                         if fun_scope.insert_variable(ident.0, *ty).is_none() {
                             self.emit(DuplicateFunArg(*ident));
@@ -65,7 +61,7 @@ impl<'a, 't> Lighter<'a, 't> {
                     }
                     let stmts = self.lower_stmts(block.stmts, &mut fun_scope);
                     self.globals.funs[fun_def.index] = SparkFunction::Lantern {
-                        name: path.display(self.symbol_table).into_boxed_str(),
+                        name: name.display(self.symbol_table).into_boxed_str(),
                         stmts,
                         locals: fun_scope.max_locals,
                     };
@@ -612,7 +608,7 @@ impl<'a, 't> Lighter<'a, 't> {
                 _ => None,
             })
             .for_each(|item| match item {
-                    Item::Fun(ItemFun { path, args, ret, .. }) => {
+                    Item::Fun(ItemFun { name, args, ret, .. }) => {
                         let args = args.iter()
                             .map(|FunArg { ident, r#type, .. }| {
                                 (*ident, self.sink.emit_or(LanternType::resolve(r#type, scope, self.tcx), self.tcx.error()))
@@ -623,27 +619,28 @@ impl<'a, 't> Lighter<'a, 't> {
                             .map(|(_, ty)| self.sink.emit_or(LanternType::resolve(ty, scope, self.tcx), self.tcx.error()))
                             .unwrap_or(self.tcx.null());
 
-                        let name = path.last().0;
                         let fun = LanternFunction::new(self.globals.funs.len(), args, ret, self.tcx);
-                        if path.items.len() == 1 {
-                            if scope.insert_function(name, fun).is_none() {
-                                self.emit(FunAlreadyDeclared(path.clone()));
-                                return;
+                        match &name.base {
+                            Some(ty) => {
+                                match LanternType::resolve(ty, scope, self.tcx) {
+                                    Ok(ty) => {
+                                        if scope.insert_associated(ty, name.ident.0, fun).is_none() {
+                                            self.emit(FunAlreadyDeclared(name.clone()));
+                                            return;
+                                        }
+                                    }
+                                    Err(err) => {
+                                        self.sink.emit(err);
+                                        return;
+                                    }
+                                }
                             }
-                        } else if path.items.len() == 2 {
-                            let ident = &path.items[0];
-                            if let Some(item) = scope.item(ident.0) {
-                                if scope.insert_associated(item, name, fun).is_none() {
-                                    self.emit(FunAlreadyDeclared(path.clone()));
+                            None => {
+                                if scope.insert_function(name.ident.0, fun).is_none() {
+                                    self.emit(FunAlreadyDeclared(name.clone()));
                                     return;
                                 }
-                            } else {
-                                self.emit(ItemNotFound(*ident));
-                                return;
                             }
-                        } else {
-                            // error will be emitted once the function is built
-                            return;
                         }
                         // this gets overridden when the function is generated
                         self.globals.funs.push(SparkFunction::Lantern {
@@ -652,19 +649,9 @@ impl<'a, 't> Lighter<'a, 't> {
                             locals: 0,
                         });
                     }
-                    Item::NativeFun(ItemNativeFun { path, open_paren, args, closed_paren, ret, semi, .. }) => {
-                        let base = if path.items.len() == 1 {
-                            None
-                        } else if path.items.len() == 2 {
-                            Some(scope.item(path.items[0].0).unwrap_or_else(|| {
-                                self.emit(ItemNotFound(path.items[0]));
-                                self.tcx.error()
-                            }))
-                        } else {
-                            self.emit(BadFunctionName(path.clone()));
-                            Some(self.tcx.error())
-                        };
-                        let ident = path.last();
+                    Item::NativeFun(ItemNativeFun { name, open_paren, args, closed_paren, ret, semi, .. }) => {
+                        let base = name.base.as_ref()
+                            .map(|ty| self.sink.emit_or(LanternType::resolve(ty, scope, self.tcx), self.tcx.error()));
 
                         let mut arg_types = Vec::new();
                         let mut has_err = false;
@@ -682,30 +669,31 @@ impl<'a, 't> Lighter<'a, 't> {
                             .map(|(_, ty)| self.sink.emit_or(LanternType::resolve(ty, scope, self.tcx), self.tcx.error()))
                             .unwrap_or(self.tcx.null());
 
-                        if has_err || *ret_ty == LanternType::Error {
+                        if has_err || *ret_ty == LanternType::Error || base.is_some_and(|ty| *ty == LanternType::Error) {
                             return;
                         }
 
-                        match NativeFun::from_def(base, self.symbol_table.resolve(ident.0), &arg_types, ret_ty) {
+                        let fun_name = name.ident.0;
+                        match NativeFun::from_def(base, self.symbol_table.resolve(fun_name), &arg_types, ret_ty) {
                             Ok(native) => {
                                 let args = args.iter().zip(arg_types.iter())
                                     .map(|(arg, ty)| (arg.ident, *ty))
                                     .collect();
                                 let fun = LanternFunction::new(self.globals.funs.len(), args, ret_ty, self.tcx);
                                 let exists = match base {
-                                    Some(base) => scope.insert_associated(base, ident.0, fun),
-                                    None => scope.insert_function(ident.0, fun),
+                                    Some(base) => scope.insert_associated(base, fun_name, fun),
+                                    None => scope.insert_function(fun_name, fun),
                                 };
                                 if exists.is_none() {
-                                    self.emit(NativeAlreadyDeclared(path.clone()));
+                                    self.emit(NativeAlreadyDeclared(name.clone()));
                                 } else {
                                     self.globals.funs.push(SparkFunction::Native {
-                                        name: path.display(self.symbol_table).into_boxed_str(),
+                                        name: name.display(self.symbol_table).into_boxed_str(),
                                         native,
                                     });
                                 }
                             }
-                            Err(FromDefError::NotFound) => self.emit(UnknownNative(path.clone())),
+                            Err(FromDefError::NotFound) => self.emit(UnknownNative(name.clone())),
                             Err(FromDefError::MismatchedArgs) => self.emit(MismatchedNativeArgs(open_paren.span().containing(closed_paren.span()))),
                             Err(FromDefError::MismatchedRet) => {
                                 let span = ret.as_ref().map_or(semi.span(), |(_, ty)| ty.span());
