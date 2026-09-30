@@ -138,9 +138,21 @@ impl SymbolDisplay for FunName {
 impl ParseTokens for FunName {
     fn parse(stream: &mut TokenStream) -> Result<Self> {
         match stream.peek()? {
-            Token::Punct(Punct::OpenBracket(_)) | Token::Keyword(Keyword::Fun(_)) => {
+            Token::Punct(Punct::OpenParen(_)) => {
+                stream.next_token()?;
+                let base = stream.parse()?;
+                stream.parse::<ClosedParen>()?;
+                stream.parse::<Period>()?;
                 Ok(Self {
-                    base: Some(stream.parse()?),
+                    base: Some(base),
+                    ident: stream.parse()?,
+                })
+            }
+            Token::Punct(Punct::OpenBracket(_)) | Token::Keyword(Keyword::Fun(_)) => {
+                let base = stream.parse()?;
+                stream.parse::<Period>()?;
+                Ok(Self {
+                    base: Some(base),
                     ident: stream.parse()?,
                 })
             }
