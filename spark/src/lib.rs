@@ -158,15 +158,19 @@ impl<'a, 't> Lighter<'a, 't> {
             }
         }
 
-        if !scope.diverges && let ScopeKind::Function(_, span) = scope.kind() {
-            if !self.tcx.null().is_error_or_eq(scope.expected_ret) {
-                self.emit(TypeMismatch {
-                    expected: scope.expected_ret,
-                    got: self.tcx.null(),
-                    span: *span,
-                });
+        match scope.kind() {
+            ScopeKind::Function(_, span) if !scope.diverges => {
+                if !self.tcx.null().is_error_or_eq(scope.expected_ret) {
+                    self.emit(TypeMismatch {
+                        expected: scope.expected_ret,
+                        got: self.tcx.null(),
+                        span: *span,
+                    });
+                }
+                spark_stmts.push(Stmt::Return(None));
             }
-            spark_stmts.push(Stmt::Return(None));
+            ScopeKind::Module => spark_stmts.push(Stmt::Return(None)),
+            _ => {}
         }
 
         spark_stmts
