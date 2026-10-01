@@ -3,17 +3,10 @@ use std::io::Write;
 use crate::{Slot, heap::HeapArray};
 
 macro_rules! native_funs {
-    (for $vm: pat, $( $native: ident : $name: literal = ( $($pat: pat),* $(,)? ) => $expr: expr ),* $(,)?) => {
+    (for $vm: pat, $( $native: ident( $($pat: pat),* $(,)? ) $expr: block )*) => {
         pub fn get_native_spark_fn(native: ::spark::native::NativeFun) -> $crate::flame::NativeFn {
             match native {$(
-                ::spark::native::NativeFun::$native => get_native_fn($name).unwrap(),
-            )*}
-        }
-
-        pub fn get_native_fn(name: &str) -> Option<$crate::flame::NativeFn> {
-            match name {
-            $(
-                $name => {
+                ::spark::native::NativeFun::$native => {
                     #[allow(unused)]
                     fn inner(vm: &mut $crate::VM) -> Result<crate::Slot, $crate::error::RuntimeError> {
                         let stack = vm.stack();
@@ -26,17 +19,15 @@ macro_rules! native_funs {
                         let $vm = vm;
                         $expr
                     }
-                    Some(inner as $crate::flame::NativeFn)
-                },
-            )*
-                _ => None,
-            }
+                    inner as $crate::flame::NativeFn
+                }
+            )*}
         }
     };
 }
 
 native_funs![for vm,
-    Write: "write" = (bytes) => {
+    Write(bytes) {
         let byte_ptr = unsafe { HeapArray::from_raw(bytes.read_ptr()) };
         let mut stdout = std::io::stdout();
         unsafe {
@@ -44,32 +35,32 @@ native_funs![for vm,
             stdout.write_all(bytes).map_err(|err| vm.throw(err));
         }
         Ok(Slot::new_usize(0))
-    },
-    Flush: "flush" = () => {
+    }
+    Flush() {
         std::io::stdout().flush().map_err(|err| vm.throw(err));
         Ok(Slot::new_usize(0))
-    },
-    Gc: "gc" = () => {
+    }
+    Gc() {
         vm.heap.gc(&mut vm.stack);
         Ok(Slot::new_usize(0))
-    },
-    FloatToStr: "float_to_str" = (float) => {
+    }
+    FloatToStr(float) {
         let float = unsafe { float.read_float() };
         Ok(Slot::new_ref(vm.alloc_string(float.to_string().as_bytes()).as_mut_ptr()))
-    },
-    IntToStr: "int_to_str" = (int) => {
+    }
+    IntToStr(int) {
         let int = unsafe { int.read_int() };
         Ok(Slot::new_ref(vm.alloc_string(int.to_string().as_bytes()).as_mut_ptr()))
-    },
-    InputFloat: "input_float" = () => {
+    }
+    InputFloat() {
         let mut input = String::new();
         std::io::stdin().read_line(&mut input).map_err(|err| vm.throw(err));
         Ok(Slot::new_float(input.trim().parse::<f64>().map_err(|_| vm.throw("not a float"))?))
-    },
-    InputInt: "input_int" = () => {
+    }
+    InputInt() {
         let mut input = String::new();
         std::io::stdin().read_line(&mut input).map_err(|err| vm.throw(err));
         Ok(Slot::new_int(input.trim().parse::<i64>().map_err(|_| vm.throw("not an integer"))?))
-    },
+    }
 ];
 
