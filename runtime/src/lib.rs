@@ -1,13 +1,10 @@
 use std::{error::Error, fmt::{Display, Formatter}};
 
-use arena::Arena;
-use diagnostic::{DiagnosticSink, symbol::SymbolTable};
 use error::RuntimeError;
 use flame::{GeneratedFunction, instruction::Instruction};
-use parse::LanternFile;
-use spark::{Lighter, SparkFunction};
+use spark::{Spark, scope::GlobalVariables, ty::BuiltinType};
 
-use crate::{error::{OutOfBoundsError, UserError}, flame::{FunctionKind, scope::{GlobalVariables, Globals}, r#type::{BuiltinType, TypeContext}}, heap::{GlobalStorage, Heap, HeapArray, HeapObject, TypeInfo}, stack::LanternStack};
+use crate::{error::{OutOfBoundsError, UserError}, flame::{FunctionKind, Globals}, heap::{GlobalStorage, Heap, HeapArray, HeapObject, TypeInfo}, stack::LanternStack};
 
 macro_rules! args {
     (@pop usize, $stack: expr) => {
@@ -126,7 +123,7 @@ pub struct VM {
     globals: GlobalStorage,
     funs: Box<[GeneratedFunction]>,
     types: Box<[TypeInfo]>,
-    builtin_type_indexes: [usize; BuiltinType::SIZE],
+    builtin_type_indices: [usize; BuiltinType::SIZE],
     pub heap: Heap,
 }
 
@@ -135,7 +132,7 @@ impl VM {
     pub const PRIMITIVE_ARR_TYPE_INDEX: usize = 1;
     pub const REF_ARR_TYPE_INDEX: usize = 2;
 
-    pub fn new(file: LanternFile, sink: &mut DiagnosticSink, symbol_table: &SymbolTable) -> Option<Self> {
+    pub fn new(spark: Spark<'_>) -> Self {
         let mut globals = Globals {
             funs: Vec::new(),
             // TODO: better way of builtin array type infos
@@ -146,71 +143,7 @@ impl VM {
             ],
             vars: GlobalVariables::new(),
         };
-        let arena = Arena::new(25);
-        let tcx = TypeContext::new(&arena);
-        let root = flame::ignite(file, &mut globals, sink, symbol_table, &tcx);
-        if sink.fatal() {
-            return None;
-        }
-        let mut stack = LanternStack::new(2048);
-        if let FunctionKind::Instructions(_, locals) = root.kind { 
-            stack.reserve(locals).expect("too many locals");
-        }
-        globals.funs.push(root);
-        let mut frames = Vec::with_capacity(512);
-        frames.push(Frame::new(globals.funs.len() - 1, 0));
-
-        let types = globals.types.into_boxed_slice();
-        let builtin_type_indexes = tcx.into_builtins();
-        Some(Self {
-            stack,
-            frames,
-            globals: GlobalStorage::allocate(
-                globals.vars,
-                &types[Self::BYTE_ARR_TYPE_INDEX],
-                &types[builtin_type_indexes[BuiltinType::String as usize]],
-            ),
-            funs: globals.funs.into_boxed_slice(),
-            types,
-            builtin_type_indexes,
-            // 4 MiB
-            heap: Heap::new(4 * 2usize.pow(20)),
-        })
-    }
-
-    pub fn new_spark(file: LanternFile, sink: &mut DiagnosticSink, symbol_table: &SymbolTable) -> Option<Self> {
-        let mut globals = Globals {
-            funs: Vec::new(),
-            // TODO: better way of builtin array type infos
-            types: vec![
-                TypeInfo::Array { element_size: 1, is_ref: false },
-                TypeInfo::Array { element_size: 8, is_ref: false },
-                TypeInfo::Array { element_size: size_of::<usize>(), is_ref: true },
-            ],
-            vars: GlobalVariables::new(),
-        };
-        let runtime_types = globals.types.len();
-        let arena = Arena::new(25);
-        let mut tcx = spark::ty::TypeContext::new(&arena);
-
-        let mut module_scope = spark::scope::Scope::new_module(&tcx);
-        let mut lighter = Lighter::new(sink, symbol_table, &mut tcx);
-        let root = lighter.lower_stmts(file.stmts, &mut module_scope);
-
-        if lighter.sink.fatal() {
-            return None;
-        }
-
-        flame::ignite_spark(
-            lighter,
-            SparkFunction::Lantern {
-                name: "<module>".to_string().into_boxed_str(),
-                stmts: root,
-                locals: module_scope.max_locals
-            },
-            &mut globals,
-            symbol_table,
-        );
+        let builtin_type_indices = flame::ignite(spark, &mut globals);
 
         let root = globals.funs.last().expect("root function");
 
@@ -222,21 +155,20 @@ impl VM {
         frames.push(Frame::new(globals.funs.len() - 1, 0));
 
         let types = globals.types.into_boxed_slice();
-        let builtin_type_indexes = tcx.into_builtins(runtime_types);
-        Some(Self {
+        Self {
             stack,
             frames,
             globals: GlobalStorage::allocate(
                 globals.vars,
                 &types[Self::BYTE_ARR_TYPE_INDEX],
-                &types[builtin_type_indexes[BuiltinType::String as usize]],
+                &types[builtin_type_indices[BuiltinType::String as usize]],
             ),
             funs: globals.funs.into_boxed_slice(),
             types,
-            builtin_type_indexes,
+            builtin_type_indices,
             // 4 MiB
             heap: Heap::new(4 * 2usize.pow(20)),
-        })
+        }
     }
 
     pub fn alloc_obj(heap: &mut Heap, stack: &mut LanternStack, type_info: &TypeInfo) -> HeapObject {
@@ -282,7 +214,7 @@ impl VM {
             unsafe { chars.set(i, byte) };
         }
 
-        let string_type_info = &self.types[self.builtin_type_indexes[BuiltinType::String as usize]];
+        let string_type_info = &self.types[self.builtin_type_indices[BuiltinType::String as usize]];
         let mut string = Self::alloc_obj(&mut self.heap, &mut self.stack, string_type_info);
         let field_ptr = string.field_ptr_mut().cast::<*mut u8>();
         unsafe { field_ptr.write(chars.as_mut_ptr()) };

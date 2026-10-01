@@ -8,8 +8,10 @@ name = "lantern"
 path = "src/main.rs"
 
 [dependencies]
+arena = { path = "../arena" }
 diagnostic = { path = "../diagnostic" }
 parse = { path = "../parse" }
+spark = { path = "../spark" }
 runtime = { path = "../runtime" }
 clap = { version = "4.5.31", features = ["derive"] }
 

@@ -151,7 +151,7 @@ macro_rules! inst {
 
     (with $frame: expr => $span: expr) => {{
         if $frame.line_table.last().is_none_or(|map| $span.start().line > map.line) {
-            $frame.line_table.push($crate::flame::scope::LineMap::new($frame.instructions.len(), $span.start().line));
+            $frame.line_table.push($crate::flame::LineMap::new($frame.instructions.len(), $span.start().line));
         }
     }};
     (with $frame: expr => $span: expr; $([$($tt: tt)+])*) => {{

@@ -1,15 +1,21 @@
 primitive byte;
 primitive int;
 
-fun print(str: [byte]) {
-  write(str);
-  write("\n");
+native fun int.to_str(self: int) -> String;
+
+@std(string)
+struct String {
+  bytes: [byte],
+}
+
+fun print(str: String) {
+  write(str.bytes);
+  write("\n".bytes);
   flush();
 }
 
 native fun write(x: [byte]);
 native fun flush();
-native fun int_to_str(int: int) -> [byte];
 native fun input_int() -> int;
 
 val index: int = 1;
@@ -30,7 +36,7 @@ fun fizzbuzz(x: int) {
   } else if (x % 3 == 0) {
     print("Fizz");
   } else {
-    print(int_to_str(x));
+    print(x.to_str());
   }
 }
 

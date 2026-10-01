@@ -1,6 +1,8 @@
 use std::{alloc::Layout, ops::Index, time::Instant};
 
-use crate::{SlotType, flame::scope::GlobalVariables, stack::LanternStack};
+use spark::scope::GlobalVariables;
+
+use crate::{SlotType, stack::LanternStack};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Heap {

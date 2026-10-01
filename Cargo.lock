@@ -100,10 +100,12 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 name = "cli"
 version = "0.1.0"
 dependencies = [
+ "arena",
  "clap",
  "diagnostic",
  "parse",
  "runtime",
+ "spark",
 ]
 
 [[package]]
@@ -227,9 +229,7 @@ dependencies = [
 name = "runtime"
 version = "0.1.0"
 dependencies = [
- "arena",
  "diagnostic",
- "parse",
  "spark",
  "thiserror",
 ]

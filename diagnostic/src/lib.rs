@@ -48,10 +48,6 @@ impl DiagnosticSink {
         self.fatal
     }
 
-    pub fn into_emitted(self) -> Vec<Diagnostic> {
-        self.emitted
-    }
-
     pub fn display_errors(self, source_map: &SourceMap) -> String {
         self.emitted.into_iter()
             .map(|diagnostic| diagnostic.display(source_map))
@@ -210,10 +206,6 @@ impl Span {
 
     pub fn new_single(source: FileId, line: u32, col: u32) -> Self {
         Self::new_width(source, line, col, 1)
-    }
-
-    pub fn with_end(self, end: Location) -> Self {
-        Self { source: self.source, start: self.start, end }
     }
 
     pub fn containing(self, other: Span) -> Self {

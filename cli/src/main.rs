@@ -1,16 +1,14 @@
 use std::{fs::File, io::Read, path::Path, process::ExitCode, time::Instant};
 
+use arena::Arena;
 use clap::Parser;
-use diagnostic::{DiagnosticSink, SourceMap, symbol::SymbolTable};
+use diagnostic::{SourceMap, symbol::SymbolTable};
 use runtime::{VM, flame::FunctionKind};
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
 struct Args {
     file: String,
-
-    #[arg(long)]
-    use_spark: bool,
 
     #[arg(long)]
     print_ast: bool,
@@ -21,7 +19,7 @@ struct Args {
 }
 
 fn main() -> ExitCode {
-    let Args { file: file_name, use_spark, print_ast, print_codegen, no_run } = Args::parse();
+    let Args { file: file_name, print_ast, print_codegen, no_run } = Args::parse();
 
     let path: &Path = file_name.as_ref();
     let Ok(mut file) = File::open(path) else {
@@ -34,9 +32,12 @@ fn main() -> ExitCode {
         eprintln!("file contains invalid UTF-8");
         return ExitCode::from(3);
     };
+
     let mut source_map = SourceMap::new();
     let root = source_map.add_source(path.into(), &content);
+
     let mut symbol_table = SymbolTable::new();
+
     let before_compile = Instant::now();
     let lantern_file = match parse::parse(root, content.trim(), &mut symbol_table) {
         Ok(tokens) => tokens,
@@ -50,17 +51,13 @@ fn main() -> ExitCode {
         println!("{lantern_file:#?}");
     }
 
-    let mut sink = DiagnosticSink::new();
-    let vm = if use_spark {
-        VM::new_spark(lantern_file, &mut sink, &symbol_table)
-    } else {
-        VM::new(lantern_file, &mut sink, &symbol_table)
-    };
-
+    let type_arena = Arena::new(64);
+    let (spark, sink) = spark::lower(lantern_file, &type_arena, &symbol_table);
     eprintln!("{}", sink.display_errors(&source_map));
 
-    let Some(vm) = vm else { return ExitCode::from(101); };
+    let Some(spark) = spark else { return ExitCode::from(101); };
 
+    let vm = VM::new(spark);
     if print_codegen {
         vm.funs().iter().enumerate().for_each(|(i, fun)| {
             println!("Generated {i} ({}):", fun.name);

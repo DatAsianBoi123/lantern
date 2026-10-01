@@ -2,12 +2,13 @@ primitive int;
 primitive byte;
 primitive bool;
 
+native fun int.to_str(self: int) -> String;
+
 @std(string)
 struct String {
   bytes: [byte],
 }
 
-native fun int_to_str(int: int) -> String;
 native fun write(bytes: [byte]);
 native fun flush();
 native fun gc();
@@ -82,7 +83,7 @@ fun LinkedList.for_each(self: LinkedList, fn: fun(LinkedList, int, int)) {
 }
 fun LinkedList.display(self: LinkedList) {
   fun fmt(list: LinkedList, i: int, int: int) {
-    print(int_to_str(int));
+    print(int.to_str());
     if (i != list.len - 1) {
       print(", ");
     }
@@ -98,11 +99,11 @@ val mylist = LinkedList.new();
 mylist.root = Node.new(0);
 val node = mylist.root;
 val i = 1;
-while (i < 20000) {
+while (i < 100) {
   node.next = Node.new(i);
   node = node.next;
   i += 1;
 }
-mylist.len = 20000;
+mylist.len = 100;
 mylist.display();
 

@@ -1,7 +1,11 @@
 primitive byte;
 primitive float;
 
-native fun float_to_str(float: float) -> [byte];
+@std(string)
+struct String {
+  bytes: [byte],
+}
+
 native fun write(str: [byte]);
 native fun flush();
 
@@ -20,5 +24,4 @@ fun nested(secret: float) -> float {
 }
 
 val num = nested(10.0);
-write(float_to_str(num));
 

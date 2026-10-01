@@ -8,11 +8,13 @@ fun int.abs(self: int) -> int {
     return self;
   }
 }
+native fun int.to_str(self: int) -> String;
 
 primitive float;
 fun float.inverse(self: float) -> float {
   return 1.0 / self;
 }
+native fun float.to_str(self: float) -> String;
 
 primitive bool;
 
@@ -38,8 +40,6 @@ fun println(str: String) {
 
 native fun write(bytes: [byte]);
 native fun flush();
-native fun int_to_str(int: int) -> String;
-native fun float_to_str(float: float) -> String;
 native fun input_float() -> float;
 native fun input_int() -> int;
 

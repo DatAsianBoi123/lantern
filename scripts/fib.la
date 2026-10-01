@@ -1,9 +1,21 @@
 primitive byte;
 primitive int;
 
+native fun int.to_str(self: int) -> String;
+
+@std(string)
+struct String {
+  bytes: [byte],
+}
+
+fun println(str: String) {
+  write(str.bytes);
+  write("\n".bytes);
+  flush();
+}
+
 native fun write(bytes: [byte]);
 native fun flush();
-native fun int_to_str(int: int) -> [byte];
 
 fun fib(n: int) -> int {
   if (n < 2) {
@@ -31,6 +43,5 @@ fun fib_recursive(n: int) -> int {
   return fib_recursive(n - 1) + fib_recursive(n - 2);
 }
 
-write(int_to_str(fib_recursive(20)));
-write("\n");
+println(fib_recursive(20).to_str());
 

@@ -2,19 +2,25 @@ primitive byte;
 primitive int;
 primitive float;
 
-fun print(str: [byte]) {
-  write(str);
-  write("\n");
+native fun float.to_str(self: float) -> String;
+
+@std(string)
+struct String {
+  bytes: [byte],
+}
+
+fun print(str: String) {
+  write(str.bytes);
+  write("\n".bytes);
   flush();
 }
 
 native fun write(x: [byte]);
 native fun flush();
 native fun gc();
-native fun float_to_str(float: float) -> [byte];
 
 struct Position {
-  name: [byte],
+  name: String,
   x: float,
   y: float,
 }
@@ -29,9 +35,9 @@ fun Position.print(self: Position) {
   print("name:");
   print(self.name);
   print("x:");
-  print(float_to_str(self.x));
+  print(self.x.to_str());
   print("y:");
-  print(float_to_str(self.y));
+  print(self.y.to_str());
 }
 
 my_pos.print();

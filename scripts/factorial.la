@@ -1,15 +1,21 @@
 primitive byte;
 primitive int;
 
-fun print(str: [byte]) {
-  write(str);
-  write("\n");
+native fun int.to_str(self: int) -> String;
+
+@std(string)
+struct String {
+  bytes: [byte],
+}
+
+fun print(str: String) {
+  write(str.bytes);
+  write("\n".bytes);
   flush();
 }
 
 native fun write(x: [byte]);
 native fun flush();
-native fun int_to_str(x: int) -> [byte];
 native fun input_int() -> int;
 
 fun factorial(num: int) -> int {
@@ -23,5 +29,5 @@ fun factorial(num: int) -> int {
 print("Enter number:");
 val num = input_int();
 print("Factorial is:");
-print(int_to_str(factorial(num)));
+print(factorial(num).to_str());
 

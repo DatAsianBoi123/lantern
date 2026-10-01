@@ -39,10 +39,6 @@ impl<'a, 't> Scope<'a, 't> {
         &self.kind
     }
 
-    pub fn into_kind(self) -> ScopeKind<'a, 't> {
-        self.kind
-    }
-
     pub fn item(&self, name: Symbol) -> Option<TypeId<'t>> {
         match self.kind {
             ScopeKind::Module => self.items.get(&name).copied(),
@@ -199,7 +195,7 @@ impl LoopScope {
     }
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq)]
 pub struct Globals<'t> {
     pub types: Vec<&'t OnceCell<LanternStructData<'t>>>,
     pub funs: Vec<SparkFunction<'t>>,
