@@ -678,30 +678,47 @@ impl<'a, 't> Lighter<'a, 't> {
                         }
 
                         let fun_name = name.ident.0;
-                        match NativeFun::from_def(base, self.symbol_table.resolve(fun_name), &arg_types, ret_ty, self.tcx) {
-                            Ok(native) => {
-                                let args = args.iter().zip(arg_types.iter())
-                                    .map(|(arg, ty)| (arg.ident, *ty))
-                                    .collect();
-                                let fun = LanternFunction::new(self.globals.funs.len(), args, ret_ty, self.tcx);
-                                let exists = match base {
-                                    Some(base) => scope.insert_associated(base, fun_name, fun),
-                                    None => scope.insert_function(fun_name, fun),
-                                };
-                                if exists.is_none() {
-                                    self.emit(NativeAlreadyDeclared(name.clone()));
-                                } else {
-                                    self.globals.funs.push(SparkFunction::Native {
-                                        name: name.display(self.symbol_table).into_boxed_str(),
-                                        native,
-                                    });
-                                }
+                        let args = args.iter().zip(arg_types.iter())
+                            .map(|(arg, ty)| (arg.ident, *ty))
+                            .collect();
+                        let fun = LanternFunction::new(self.globals.funs.len(), args, ret_ty, self.tcx);
+
+                        let native = match NativeFun::from_def(base, self.symbol_table.resolve(fun_name), &arg_types, ret_ty, self.tcx) {
+                            Ok(native) => Some(native),
+                            Err(FromDefError::NotFound) => {
+                                self.emit(UnknownNative(name.clone()));
+                                None
                             }
-                            Err(FromDefError::NotFound) => self.emit(UnknownNative(name.clone())),
-                            Err(FromDefError::MismatchedArgs) => self.emit(MismatchedNativeArgs(open_paren.span().containing(closed_paren.span()))),
+                            Err(FromDefError::MismatchedArgs) => {
+                                self.emit(MismatchedNativeArgs(open_paren.span().containing(closed_paren.span())));
+                                None
+                            }
                             Err(FromDefError::MismatchedRet) => {
                                 let span = ret.as_ref().map_or(semi.span(), |(_, ty)| ty.span());
                                 self.emit(MismatchedNativeRet(span))
+                                None
+                            }
+                        };
+
+                        let exists = match base {
+                            Some(base) => scope.insert_associated(base, fun_name, fun),
+                            None => scope.insert_function(fun_name, fun),
+                        };
+                        if exists.is_none() {
+                            self.emit(NativeAlreadyDeclared(name.clone()));
+                        } else {
+                            if let Some(native) = native {
+                                self.globals.funs.push(SparkFunction::Native {
+                                    name: name.display(self.symbol_table),
+                                    native,
+                                });
+                            } else {
+                                // "dummy" function
+                                self.globals.funs.push(SparkFunction::Lantern {
+                                    name: name.display(self.symbol_table).into_boxed_str(),
+                                    stmts: Vec::new(),
+                                    locals: 0,
+                                });
                             }
                         }
                     }
