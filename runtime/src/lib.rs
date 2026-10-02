@@ -207,19 +207,22 @@ impl VM {
         &self.stack
     }
 
-    pub fn alloc_string(&mut self, bytes: &[u8]) -> HeapObject {
+    pub fn alloc_string(&mut self, bytes: &[u8]) -> Result<HeapObject, RuntimeError> {
         let byte_type_info = &self.types[Self::BYTE_ARR_TYPE_INDEX];
         let mut chars = Self::alloc_array(&mut self.heap, &mut self.stack, bytes.len(), byte_type_info);
         for (i, byte) in bytes.iter().enumerate() {
             unsafe { chars.set(i, byte) };
         }
 
+        self.stack.push_ref(chars.as_mut_ptr()).map_err(|err| self.throw(err))?;
+
         let string_type_info = &self.types[self.builtin_type_indices[BuiltinType::String as usize]];
         let mut string = Self::alloc_obj(&mut self.heap, &mut self.stack, string_type_info);
         let field_ptr = string.field_ptr_mut().cast::<*mut u8>();
-        unsafe { field_ptr.write(chars.as_mut_ptr()) };
+        let chars_ptr = self.stack.pop().expect("chars pointer");
+        unsafe { field_ptr.write(chars_ptr.read_ptr()) };
 
-        string
+        Ok(string)
     }
 
     pub fn throw(&mut self, message: impl ToString) -> RuntimeError {
