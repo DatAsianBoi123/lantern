@@ -1,7 +1,7 @@
 use std::{cell::OnceCell, fmt::Formatter, hash};
 
 use diagnostic::symbol::Symbol;
-use parse::{expr::{BinaryOperator, UnaryOperator}, lex::Ident};
+use parse::{expr::{BinaryOperator, UnaryOperator}};
 
 use crate::{expr::{BinaryOperation, UnaryOperation}, ty::{LanternType, TypeContext, TypeId}};
 
@@ -20,13 +20,13 @@ impl<'t> LanternVariable<'t> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LanternFunction<'t> {
     pub index: usize,
-    pub args: Vec<(Ident, TypeId<'t>)>,
+    pub args: Vec<(Symbol, TypeId<'t>)>,
     pub ret: TypeId<'t>,
     pub ty: TypeId<'t>,
 }
 
 impl<'t> LanternFunction<'t> {
-    pub fn new(index: usize, args: Vec<(Ident, TypeId<'t>)>, ret: TypeId<'t>, tcx: &TypeContext<'t>) -> Self {
+    pub fn new(index: usize, args: Vec<(Symbol, TypeId<'t>)>, ret: TypeId<'t>, tcx: &TypeContext<'t>) -> Self {
         Self {
             ty: tcx.intern(Self::to_assoc_type(&args, ret)),
             index,
@@ -39,7 +39,7 @@ impl<'t> LanternFunction<'t> {
         self.args.first().is_some_and(|(_, ty)| *ty == recv)
     }
 
-    fn to_assoc_type(args: &[(Ident, TypeId<'t>)], ret: TypeId<'t>) -> LanternType<'t> {
+    fn to_assoc_type(args: &[(Symbol, TypeId<'t>)], ret: TypeId<'t>) -> LanternType<'t> {
         LanternType::Function { args: args.iter().map(|(_, ty)| *ty).collect(), ret }
     }
 }

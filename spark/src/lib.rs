@@ -72,7 +72,7 @@ impl<'a, 't> Lighter<'a, 't> {
 
         for stmt in stmts {
             match stmt {
-                parse::Stmt::Item(Item::Fun(ItemFun { name, ret, block, .. })) => {
+                parse::Stmt::Item(Item::Fun(ItemFun { name, args, ret, block, .. })) => {
                     let ret = ret
                         .map(|(_, ret)| self.sink.emit_or(LanternType::resolve(&ret, scope, &self.tcx), self.tcx.error()))
                         .unwrap_or(self.tcx.null());
@@ -88,11 +88,11 @@ impl<'a, 't> Lighter<'a, 't> {
                     };
 
                     let mut fun_scope = scope.child_function(name.span(), ret);
-                    for (ident, ty) in &fun_def.args {
-                        if fun_scope.insert_variable(ident.0, *ty).is_none() {
-                            self.emit(DuplicateFunArg(*ident));
+                    fun_def.args.iter().zip(args).for_each(|((arg_name, ty), fun_arg)| {
+                        if fun_scope.insert_variable(*arg_name, *ty).is_none() {
+                            self.emit(DuplicateFunArg(fun_arg.ident));
                         }
-                    }
+                    });
                     let stmts = self.lower_stmts(block.stmts, &mut fun_scope);
                     self.globals.funs[fun_def.index] = SparkFunction::Lantern {
                         name: name.display(self.symbol_table),
@@ -649,7 +649,7 @@ impl<'a, 't> Lighter<'a, 't> {
                     Item::Fun(ItemFun { name, args, ret, .. }) => {
                         let args = args.iter()
                             .map(|FunArg { ident, r#type, .. }| {
-                                (*ident, self.sink.emit_or(LanternType::resolve(r#type, scope, &self.tcx), self.tcx.error()))
+                                (ident.0, self.sink.emit_or(LanternType::resolve(r#type, scope, &self.tcx), self.tcx.error()))
                             })
                             .collect();
 
@@ -713,7 +713,7 @@ impl<'a, 't> Lighter<'a, 't> {
 
                         let fun_name = name.ident.0;
                         let args = args.iter().zip(arg_types.iter())
-                            .map(|(arg, ty)| (arg.ident, *ty))
+                            .map(|(arg, ty)| (arg.ident.0, *ty))
                             .collect();
                         let fun = LanternFunction::new(self.globals.funs.len(), args, ret_ty, &self.tcx);
 
