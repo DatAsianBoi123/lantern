@@ -132,7 +132,7 @@ impl VM {
     pub const PRIMITIVE_ARR_TYPE_INDEX: usize = 1;
     pub const REF_ARR_TYPE_INDEX: usize = 2;
 
-    pub fn new(spark: Spark<'_>) -> Self {
+    pub fn new(spark: Spark) -> Self {
         let mut globals = Globals {
             funs: Vec::new(),
             // TODO: better way of builtin array type infos
@@ -465,6 +465,7 @@ impl VM {
                             return Ok(());
                         }
                     },
+                    Instruction::Error => panic!("corrupted codegen, please repot this!"),
                 }
 
                 frame.inst_ptr += 1;

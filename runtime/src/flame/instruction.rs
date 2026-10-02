@@ -149,18 +149,18 @@ macro_rules! inst {
         $crate::flame::instruction::Instruction::Throw
     };
 
-    (with $frame: expr => $span: expr) => {{
-        if $frame.line_table.last().is_none_or(|map| $span.start().line > map.line) {
-            $frame.line_table.push($crate::flame::LineMap::new($frame.instructions.len(), $span.start().line));
+    (with $gen: expr => $span: expr) => {{
+        if $gen.line_table.last().is_none_or(|map| $span.start().line > map.line) {
+            $gen.line_table.push($crate::flame::LineMap::new($gen.instructions.len(), $span.start().line));
         }
     }};
-    (with $frame: expr => $span: expr; $([$($tt: tt)+])*) => {{
-        inst!(with $frame => $span);
-        inst!($frame.instructions; $([$($tt)+])*);
+    (with $gen: expr => $span: expr; $([$($tt: tt)+])*) => {{
+        inst!(with $gen => $span);
+        inst!($gen.instructions; $([$($tt)+])*);
     }};
-    (with $frame: expr => $span: expr; $($tt: tt)+) => {{
-        inst!(with $frame => $span);
-        inst!($frame.instructions; $($tt)+);
+    (with $gen: expr => $span: expr; $($tt: tt)+) => {{
+        inst!(with $gen => $span);
+        inst!($gen.instructions; $($tt)+);
     }};
 
     ($inst: expr; $([$($tt: tt)+])*) => {{
@@ -282,6 +282,8 @@ pub enum Instruction {
     GotoIfFalse(usize),
     PopGotoIfTrue(usize),
     PopGotoIfFalse(usize),
+
+    Error,
 }
 
 impl Display for Instruction {
@@ -335,6 +337,7 @@ impl Display for Instruction {
             Self::GotoIfFalse(index) => write!(f, "{:20}{index}", "GOTO_IF_FALSE"),
             Self::PopGotoIfTrue(index) => write!(f, "{:20}{index}", "POP_GOTO_IF_TRUE"),
             Self::PopGotoIfFalse(index) => write!(f, "{:20}{index}", "POP_GOTO_IF_FALSE"),
+            Self::Error => write!(f, "<error>"),
         }
     }
 }
