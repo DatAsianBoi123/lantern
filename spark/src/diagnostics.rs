@@ -80,7 +80,7 @@ pub struct FunctionArgMismatch {
 
 impl DiagnosticError for FunctionArgMismatch {
     fn into_diagnostic(self, _: &SymbolTable) -> Diagnostic {
-        error!(self.span => "function requires {} args, but got {} args instead", self.expected, self.got)
+        error!(self.span => "function requires {} arg(s), but got {} arg(s) instead", self.expected, self.got)
     }
 }
 
