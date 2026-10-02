@@ -1,20 +1,26 @@
 primitive byte;
 primitive int;
 
-fun print(str: [byte]) {
-  write(str);
-  write("\n");
+native fun int.to_str(self: int) -> String;
+
+@std(string)
+struct String {
+  bytes: [byte],
+}
+
+fun print(str: String) {
+  write(str.bytes);
+  write("\n".bytes);
   flush();
 }
 
 native fun write(str: [byte]);
 native fun flush();
-native fun int_to_str(int: int) -> [byte];
 
 fun print_array(array: [int]) {
   val i = 0;
   while (i < array.len) {
-    print(int_to_str(array[i]));
+    print(array[i].to_str());
     i = i + 1;
   }
 }
@@ -57,11 +63,11 @@ print_array(array);
 print("");
 
 print("Sum is: ");
-print(int_to_str(fold(array, 0, sum)));
+print(fold(array, 0, sum).to_str());
 print("");
 
 print("Largest is: ");
-print(int_to_str(fold(array, 0, largest)));
+print(fold(array, 0, largest).to_str());
 print("");
 
 map(array, double);
