@@ -344,7 +344,6 @@ impl VM {
                         frame.inst_ptr += 1;
                         let bottom = self.stack.top() - num_args;
                         let index = unsafe { self.stack[bottom - 1].read_usize() };
-                        // TODO: find a better way to do this
                         if let FunctionKind::Instructions(_, locals) = self.funs[index].kind {
                             self.stack.reserve(locals - num_args)?;
                         }
@@ -364,7 +363,6 @@ impl VM {
                         // unsafe is needed here since Rust won't allow two mutable references to
                         // self.stack
                         unsafe { std::ptr::write(index_slot, self.stack[bottom - 1]); };
-                        // TODO: find a better way to do this
                         if let FunctionKind::Instructions(_, locals) = self.funs[index].kind {
                             self.stack.reserve(locals - num_args - 1)?;
                         }

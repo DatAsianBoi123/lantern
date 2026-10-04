@@ -25,10 +25,6 @@ impl<'t> TypeId<'t> {
         ptr::eq(self.0, ty)
     }
 
-    pub fn is_error_or<F: FnOnce(Self) -> bool>(self, or: F) -> bool {
-        *self == LanternType::Error || or(self)
-    }
-
     pub fn is_error_or_eq(self, other: Self) -> bool {
         *self == LanternType::Error || *other == LanternType::Error || self == other
     }
