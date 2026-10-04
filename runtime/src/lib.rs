@@ -208,21 +208,28 @@ impl VM {
     }
 
     pub fn alloc_string(&mut self, bytes: &[u8]) -> Result<HeapObject, RuntimeError> {
+        let (string, chars) = self.alloc_string_raw(bytes.len())?;
+        unsafe { ptr::copy_nonoverlapping(bytes.as_ptr(), chars, bytes.len()) };
+        Ok(string)
+    }
+
+    pub fn alloc_string_zeroed(&mut self, len: usize) -> Result<HeapObject, RuntimeError> {
+        self.alloc_string_raw(len).map(|(obj, _)| obj)
+    }
+
+    fn alloc_string_raw(&mut self, len: usize) -> Result<(HeapObject, *mut u8), RuntimeError> {
         let byte_type_info = &self.types[Self::BYTE_ARR_TYPE_INDEX];
-        let mut chars = Self::alloc_array(&mut self.heap, &mut self.stack, bytes.len(), byte_type_info);
-        for (i, byte) in bytes.iter().enumerate() {
-            unsafe { chars.set(i, byte) };
-        }
+        let mut chars = Self::alloc_array(&mut self.heap, &mut self.stack, len, byte_type_info);
 
         self.stack.push_ref(chars.as_mut_ptr()).map_err(|err| self.throw(err))?;
 
         let string_type_info = &self.types[self.builtin_type_indices[BuiltinType::String as usize]];
         let mut string = Self::alloc_obj(&mut self.heap, &mut self.stack, string_type_info);
         let field_ptr = string.field_ptr_mut().cast::<*mut u8>();
-        let chars_ptr = self.stack.pop().expect("chars pointer");
-        unsafe { field_ptr.write(chars_ptr.read_ptr()) };
+        let chars_ptr = unsafe { self.stack.pop().expect("chars pointer").read_ptr() };
+        unsafe { field_ptr.write(chars_ptr) };
 
-        Ok(string)
+        Ok((string, unsafe { HeapArray::from_raw(chars_ptr).element_ptr_mut() }))
     }
 
     pub fn throw(&mut self, message: impl ToString) -> RuntimeError {
