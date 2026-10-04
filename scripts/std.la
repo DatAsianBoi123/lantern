@@ -30,6 +30,7 @@ fun String.char_len(self: String) -> int {
 fun String.char_at(self: String, at: int) -> byte {
   return self.bytes[at];
 }
+native fun String.concat(self: String, str: String) -> String;
 
 fun println(str: String) {
   write(str.bytes);

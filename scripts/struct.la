@@ -9,6 +9,8 @@ struct String {
   bytes: [byte],
 }
 
+native fun String.concat(self: String, str: String) -> String;
+
 fun print(str: String) {
   write(str.bytes);
   write("\n".bytes);
@@ -32,12 +34,9 @@ val my_pos = Position {
 };
 
 fun Position.print(self: Position) {
-  print("name:");
-  print(self.name);
-  print("x:");
-  print(self.x.to_str());
-  print("y:");
-  print(self.y.to_str());
+  print("name: ".concat(self.name));
+  print("x: ".concat(self.x.to_str()));
+  print("y: ".concat(self.y.to_str()));
 }
 
 my_pos.print();

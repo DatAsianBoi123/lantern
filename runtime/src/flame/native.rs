@@ -1,7 +1,7 @@
 use core::str;
 use std::{io::Write, ptr};
 
-use crate::{Slot, heap::HeapArray};
+use crate::{Slot, heap::{HeapArray, HeapObject}};
 
 macro_rules! native_funs {
     (for $vm: pat, $( $native: ident( $($pat: pat),* $(,)? ) $expr: block )*) => {
@@ -73,6 +73,30 @@ native_funs![for vm,
         let mut input = String::new();
         std::io::stdin().read_line(&mut input).map_err(|err| vm.throw(err));
         Ok(Slot::new_ref(vm.alloc_string(input.trim_suffix('\n').as_bytes())?.as_mut_ptr()))
+    }
+    Concat() {
+        let str = unsafe { HeapObject::from_raw(vm.stack.peek().expect("self argument").read_ptr()) };
+        let bytes = unsafe { HeapArray::from_raw(*str.field_ptr().cast()) };
+
+        let other = unsafe { HeapObject::from_raw(vm.stack.read(vm.stack.top() - 2).expect("other argument").read_ptr()) };
+        let other_bytes = unsafe { HeapArray::from_raw(*other.field_ptr().cast()) };
+
+        let mut new_str = vm.alloc_string_zeroed(bytes.len() + other_bytes.len())?;
+        let mut new_bytes = unsafe { HeapArray::from_raw(*new_str.field_ptr().cast()) };
+
+        // pop from stack here in case allocating the new string GCs
+        let other = unsafe { HeapObject::from_raw(vm.stack.pop().expect("other argument").read_ptr()) };
+        let other_bytes = unsafe { HeapArray::from_raw(*other.field_ptr().cast()) };
+
+        let str = unsafe { HeapObject::from_raw(vm.stack.pop().expect("self argument").read_ptr()) };
+        let bytes = unsafe { HeapArray::from_raw(*str.field_ptr().cast()) };
+
+        unsafe {
+            ptr::copy_nonoverlapping(bytes.element_ptr(), new_bytes.element_ptr_mut(), bytes.len());
+            ptr::copy_nonoverlapping(other_bytes.element_ptr(), new_bytes.element_ptr_mut().add(bytes.len()), other_bytes.len());
+        };
+
+        Ok(Slot::new_ref(new_str.as_mut_ptr()))
     }
 ];
 
