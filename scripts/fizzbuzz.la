@@ -2,6 +2,7 @@ primitive byte;
 primitive int;
 
 native fun int.to_str(self: int) -> String;
+native fun int.from_str(str: String) -> int;
 
 @std(string)
 struct String {
@@ -18,11 +19,10 @@ native fun write(x: [byte]);
 native fun flush();
 native fun input_int() -> int;
 
-val index: int = 1;
-
 print("Enter max:");
-val max = input_int();
+val max = int.from_str(input());
 
+val index = 1;
 while (index <= max) {
   fizzbuzz(index);
   index = index + 1;

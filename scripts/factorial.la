@@ -2,6 +2,7 @@ primitive byte;
 primitive int;
 
 native fun int.to_str(self: int) -> String;
+native fun int.from_str(str: String) -> int;
 
 @std(string)
 struct String {
@@ -16,7 +17,7 @@ fun print(str: String) {
 
 native fun write(x: [byte]);
 native fun flush();
-native fun input_int() -> int;
+native fun input() -> String;
 
 fun factorial(num: int) -> int {
   if (num == 0 || num == 1) {
@@ -27,7 +28,7 @@ fun factorial(num: int) -> int {
 }
 
 print("Enter number:");
-val num = input_int();
+val num = int.from_str(input());
 print("Factorial is:");
 print(factorial(num).to_str());
 

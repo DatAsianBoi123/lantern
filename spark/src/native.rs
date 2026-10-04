@@ -3,7 +3,7 @@ use crate::{primitive::{BYTE_PRIMITIVE, FLOAT_PRIMITIVE, INT_PRIMITIVE}, ty::{Bu
 macro_rules! define_natives {
     (for $tcx:pat, $(#[$meta:meta])* $vis:vis enum $ident:ident {
         $(
-        $variant:ident = $([$base_pat:pat = $base:expr])? $name:literal ($($pat:pat = $ty:expr),*) -> $ret_pat:pat $( = $ret:expr )?,
+        $variant:ident = $([$base_pat:pat = $base:expr])? $name:literal ($($pat:pat = $ty:expr),* $(,)?) -> $ret_pat:pat $( = $ret:expr )?,
         )*
     }) => {
         $(#[$meta])*
@@ -21,7 +21,7 @@ macro_rules! define_natives {
                 tcx: &$crate::ty::TypeContext<'t>,
             ) -> Result<Self, FromDefError> {
                 let $tcx = tcx;
-                match (base, name) {
+                match (base.as_deref(), name) {
                     $(
                         (base, $name) $( if let Some($base_pat) = base && $base )? => {
                             let mut args_iter = args.iter().copied();
@@ -56,10 +56,17 @@ define_natives! { for tcx,
         Gc = "gc"() -> LanternType::Null,
         FloatToStr = [ty = ty.is_primitive_type(&FLOAT_PRIMITIVE)]"to_str"(ty = ty.is_primitive_type(&FLOAT_PRIMITIVE))
             -> ty = tcx.builtin(BuiltinType::String).eq_ty(ty),
+        FloatFromStr = [ty = ty.is_primitive_type(&FLOAT_PRIMITIVE)]"from_str"(ty = tcx.builtin(BuiltinType::String).eq_ty(ty))
+            -> ty = ty.is_primitive_type(&FLOAT_PRIMITIVE),
         IntToStr = [ty = ty.is_primitive_type(&INT_PRIMITIVE)]"to_str"(ty = ty.is_primitive_type(&INT_PRIMITIVE))
             -> ty = tcx.builtin(BuiltinType::String).eq_ty(ty),
-        InputFloat = "input_float"() -> ty = ty.is_primitive_type(&FLOAT_PRIMITIVE),
-        InputInt = "input_int"() -> ty = ty.is_primitive_type(&INT_PRIMITIVE),
+        IntFromStr = [ty = ty.is_primitive_type(&INT_PRIMITIVE)]"from_str"(ty = tcx.builtin(BuiltinType::String).eq_ty(ty))
+            -> ty = ty.is_primitive_type(&INT_PRIMITIVE),
+        Input = "input"() -> ty = tcx.builtin(BuiltinType::String).eq_ty(ty),
+        Concat = [ty = tcx.builtin(BuiltinType::String).eq_ty(ty)]"concat"(
+            ty = tcx.builtin(BuiltinType::String).eq_ty(ty),
+            ty = tcx.builtin(BuiltinType::String).eq_ty(ty),
+        ) -> ty = tcx.builtin(BuiltinType::String).eq_ty(ty),
     }
 }
 

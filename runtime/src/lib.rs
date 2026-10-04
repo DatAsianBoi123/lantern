@@ -1,4 +1,4 @@
-use std::{error::Error, fmt::{Display, Formatter}};
+use std::{error::Error, fmt::{Display, Formatter}, ptr};
 
 use error::RuntimeError;
 use flame::{GeneratedFunction, instruction::Instruction};
@@ -362,7 +362,7 @@ impl VM {
                         let index = unsafe { index_slot.read_usize() };
                         // unsafe is needed here since Rust won't allow two mutable references to
                         // self.stack
-                        unsafe { std::ptr::write(index_slot, self.stack[bottom - 1]); };
+                        unsafe { ptr::write(index_slot, self.stack[bottom - 1]); };
                         if let FunctionKind::Instructions(_, locals) = self.funs[index].kind {
                             self.stack.reserve(locals - num_args - 1)?;
                         }

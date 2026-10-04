@@ -1,4 +1,5 @@
-use std::io::Write;
+use core::str;
+use std::{io::Write, ptr};
 
 use crate::{Slot, heap::HeapArray};
 
@@ -48,19 +49,30 @@ native_funs![for vm,
         let float = unsafe { float.read_float() };
         Ok(Slot::new_ref(vm.alloc_string(float.to_string().as_bytes())?.as_mut_ptr()))
     }
+    FloatFromStr(str) {
+        let mut str = unsafe { HeapObject::from_raw(str.read_ptr()) };
+        let bytes = unsafe { HeapArray::from_raw(str.field_ptr_mut()) };
+
+        let slice = unsafe { std::slice::from_raw_parts(bytes.as_ptr(), bytes.len()) };
+        let float = unsafe { str::from_utf8_unchecked(slice).parse().map_err(|_| vm.throw("not a float"))? };
+        Ok(Slot::new_float(float))
+    }
     IntToStr(int) {
         let int = unsafe { int.read_int() };
         Ok(Slot::new_ref(vm.alloc_string(int.to_string().as_bytes())?.as_mut_ptr()))
     }
-    InputFloat() {
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input).map_err(|err| vm.throw(err));
-        Ok(Slot::new_float(input.trim().parse::<f64>().map_err(|_| vm.throw("not a float"))?))
+    IntFromStr(str) {
+        let mut str = unsafe { HeapObject::from_raw(str.read_ptr()) };
+        let bytes = unsafe { HeapArray::from_raw(str.field_ptr_mut()) };
+
+        let slice = unsafe { std::slice::from_raw_parts(bytes.as_ptr(), bytes.len()) };
+        let int = unsafe { str::from_utf8_unchecked(slice).parse().map_err(|_| vm.throw("not a float"))? };
+        Ok(Slot::new_int(int))
     }
-    InputInt() {
+    Input() {
         let mut input = String::new();
         std::io::stdin().read_line(&mut input).map_err(|err| vm.throw(err));
-        Ok(Slot::new_int(input.trim().parse::<i64>().map_err(|_| vm.throw("not an integer"))?))
+        Ok(Slot::new_ref(vm.alloc_string(input.trim_suffix('\n').as_bytes())?.as_mut_ptr()))
     }
 ];
 
