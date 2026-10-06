@@ -51,9 +51,9 @@ native_funs![for vm,
     }
     FloatFromStr(str) {
         let mut str = unsafe { HeapObject::from_raw(str.read_ptr()) };
-        let bytes = unsafe { HeapArray::from_raw(str.field_ptr_mut()) };
+        let bytes = unsafe { HeapArray::from_raw(*str.field_ptr_mut().cast()) };
 
-        let slice = unsafe { std::slice::from_raw_parts(bytes.as_ptr(), bytes.len()) };
+        let slice = unsafe { std::slice::from_raw_parts(bytes.element_ptr(), bytes.len()) };
         let float = unsafe { str::from_utf8_unchecked(slice).parse().map_err(|_| vm.throw("not a float"))? };
         Ok(Slot::new_float(float))
     }
@@ -63,10 +63,10 @@ native_funs![for vm,
     }
     IntFromStr(str) {
         let mut str = unsafe { HeapObject::from_raw(str.read_ptr()) };
-        let bytes = unsafe { HeapArray::from_raw(str.field_ptr_mut()) };
+        let bytes = unsafe { HeapArray::from_raw(*str.field_ptr_mut().cast()) };
 
-        let slice = unsafe { std::slice::from_raw_parts(bytes.as_ptr(), bytes.len()) };
-        let int = unsafe { str::from_utf8_unchecked(slice).parse().map_err(|_| vm.throw("not a float"))? };
+        let slice = unsafe { std::slice::from_raw_parts(bytes.element_ptr(), bytes.len()) };
+        let int = unsafe { str::from_utf8_unchecked(slice).parse().map_err(|_| vm.throw("not an int"))? };
         Ok(Slot::new_int(int))
     }
     Input() {
