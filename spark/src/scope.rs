@@ -28,7 +28,7 @@ impl<'a, 't> Scope<'a, 't> {
             associated: HashMap::new(),
             kind: ScopeKind::Module,
             in_loop: false,
-            expected_ret: tcx.null(),
+            expected_ret: tcx.none(),
             diverges: false,
             next_local_index: 0,
             max_locals: 0,

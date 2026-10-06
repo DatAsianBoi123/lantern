@@ -51,9 +51,9 @@ macro_rules! define_natives {
 define_natives! { for tcx,
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum NativeFun {
-        Write = "write"(LanternType::Array(inner) = inner.is_primitive_type(&BYTE_PRIMITIVE)) -> LanternType::Null,
-        Flush = "flush"() -> LanternType::Null,
-        Gc = "gc"() -> LanternType::Null,
+        Write = "write"(LanternType::Array(inner) = inner.is_primitive_type(&BYTE_PRIMITIVE)) -> LanternType::None,
+        Flush = "flush"() -> LanternType::None,
+        Gc = "gc"() -> LanternType::None,
         FloatToStr = [ty = ty.is_primitive_type(&FLOAT_PRIMITIVE)]"to_str"(ty = ty.is_primitive_type(&FLOAT_PRIMITIVE))
             -> ty = tcx.builtin(BuiltinType::String).eq_ty(ty),
         FloatFromStr = [ty = ty.is_primitive_type(&FLOAT_PRIMITIVE)]"from_str"(ty = tcx.builtin(BuiltinType::String).eq_ty(ty))

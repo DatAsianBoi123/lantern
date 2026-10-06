@@ -55,7 +55,7 @@ pub enum LanternType<'t> {
         args: Vec<TypeId<'t>>,
         ret: TypeId<'t>,
     },
-    Null,
+    None,
     Error,
 }
 
@@ -68,7 +68,7 @@ impl SymbolDisplay for LanternType<'_> {
             Self::Function { args, ret, .. } => {
                 format!("fun({}) -> {}", args.iter().map(|ty| ty.display(symbol_table)).collect::<Vec<_>>().join(", "), ret.display(symbol_table))
             }
-            Self::Null => "null".to_string(),
+            Self::None => "none".to_string(),
             Self::Error => "<error>".to_string(),
         }
     }
@@ -82,7 +82,7 @@ impl<'t> LanternType<'t> {
                 let args = args.iter().map(|r#type| Self::resolve(r#type, scope, tcx)).collect::<Result<_, _>>()?;
                 let ret = ret.as_ref()
                     .map(|(_, r#type)| Self::resolve(r#type, scope, tcx))
-                    .unwrap_or(Ok(tcx.null()))?;
+                    .unwrap_or(Ok(tcx.none()))?;
                 Self::Function { args, ret }
             }
             Type::Path(path) => {
@@ -118,8 +118,8 @@ impl<'t> LanternType<'t> {
             Self::Primitive(LanternPrimitive { size, .. }) => *size,
             Self::Array(..) => 8,
             Self::Function { .. } => 8,
-            // null is a ptr
-            Self::Null => 8,
+            // none is a ptr
+            Self::None => 8,
             Self::Error => 8,
         }
     }
@@ -130,8 +130,8 @@ impl<'t> LanternType<'t> {
             Self::Primitive(LanternPrimitive { align, .. }) => *align,
             Self::Array(..) => 8,
             Self::Function { .. } => 8,
-            // null is a ptr
-            Self::Null => 8,
+            // none is a ptr
+            Self::None => 8,
             Self::Error => 8,
         }
     }
@@ -157,8 +157,8 @@ impl<'t> TypeContext<'t> {
         self.intern(LanternType::Error)
     }
 
-    pub fn null(&self) -> TypeId<'t> {
-        self.intern(LanternType::Null)
+    pub fn none(&self) -> TypeId<'t> {
+        self.intern(LanternType::None)
     }
 
     pub fn primitive(&self, primitive: &'static LanternPrimitive) -> TypeId<'t> {

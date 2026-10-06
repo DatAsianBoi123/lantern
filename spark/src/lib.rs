@@ -75,7 +75,7 @@ impl<'a, 't> Lighter<'a, 't> {
                 parse::Stmt::Item(Item::Fun(ItemFun { name, args, ret, block, .. })) => {
                     let ret = ret
                         .map(|(_, ret)| self.sink.emit_or(LanternType::resolve(&ret, scope, &self.tcx), self.tcx.error()))
-                        .unwrap_or(self.tcx.null());
+                        .unwrap_or(self.tcx.none());
 
                     let fun_def = match &name.base {
                         Some(base) if let Ok(ty) = LanternType::resolve(base, scope, &self.tcx)
@@ -159,7 +159,7 @@ impl<'a, 't> Lighter<'a, 't> {
                         .map(|expr| expr.span())
                         .unwrap_or(ret.span());
                     let expr = expr.map(|expr| self.lower_expr(expr, scope));
-                    let ty = expr.as_ref().map(|expr| expr.ty).unwrap_or(self.tcx.null());
+                    let ty = expr.as_ref().map(|expr| expr.ty).unwrap_or(self.tcx.none());
                     if !ty.is_error_or_eq(scope.expected_ret) {
                         self.emit(TypeMismatch {
                             expected: scope.expected_ret,
@@ -194,10 +194,10 @@ impl<'a, 't> Lighter<'a, 't> {
 
         match scope.kind() {
             ScopeKind::Function(_, span) if !scope.diverges => {
-                if !self.tcx.null().is_error_or_eq(scope.expected_ret) {
+                if !self.tcx.none().is_error_or_eq(scope.expected_ret) {
                     self.emit(TypeMismatch {
                         expected: scope.expected_ret,
-                        got: self.tcx.null(),
+                        got: self.tcx.none(),
                         span: *span,
                     });
                 }
@@ -403,7 +403,7 @@ impl<'a, 't> Lighter<'a, 't> {
                 if diverges {
                     scope.diverges = true;
                 }
-                Expr::new(ExprKind::Block(stmts), self.tcx.null(), span)
+                Expr::new(ExprKind::Block(stmts), self.tcx.none(), span)
             }
             pe::Expr::Array(ExprArray { open_bracket, elements, closed_bracket, ty }) => {
                 let mut ty = ty.map(|ty| self.sink.emit_or(LanternType::resolve(&ty, scope, &self.tcx), self.tcx.error()));
@@ -496,7 +496,7 @@ impl<'a, 't> Lighter<'a, 't> {
                                 span: rhs_span,
                             });
                         }
-                        return Expr::new(ExprKind::Assign(Box::new(lhs), Box::new(rhs)), self.tcx.null(), rhs_span);
+                        return Expr::new(ExprKind::Assign(Box::new(lhs), Box::new(rhs)), self.tcx.none(), rhs_span);
                     }
                     BinaryOperator::AddAssign(_)
                     | BinaryOperator::SubAssign(_)
@@ -510,7 +510,7 @@ impl<'a, 't> Lighter<'a, 't> {
                             (LanternType::Primitive(lhs_primitive), LanternType::Primitive(_))
                                 if let Some(op) = lhs_primitive.ops.get_bin_op(op) =>
                             {
-                                return Expr::new(ExprKind::BinaryAssign(Box::new(lhs), op, Box::new(rhs)), self.tcx.null(), rhs_span);
+                                return Expr::new(ExprKind::BinaryAssign(Box::new(lhs), op, Box::new(rhs)), self.tcx.none(), rhs_span);
                             }
                             _ => {
                                 self.emit(NoBinOp {
@@ -655,7 +655,7 @@ impl<'a, 't> Lighter<'a, 't> {
 
                         let ret = ret.as_ref()
                             .map(|(_, ty)| self.sink.emit_or(LanternType::resolve(ty, scope, &self.tcx), self.tcx.error()))
-                            .unwrap_or(self.tcx.null());
+                            .unwrap_or(self.tcx.none());
 
                         let fun = LanternFunction::new(self.globals.funs.len(), args, ret, &self.tcx);
                         match &name.base {
@@ -705,7 +705,7 @@ impl<'a, 't> Lighter<'a, 't> {
 
                         let ret_ty = ret.as_ref()
                             .map(|(_, ty)| self.sink.emit_or(LanternType::resolve(ty, scope, &self.tcx), self.tcx.error()))
-                            .unwrap_or(self.tcx.null());
+                            .unwrap_or(self.tcx.none());
 
                         if has_err || *ret_ty == LanternType::Error || base.is_some_and(|ty| *ty == LanternType::Error) {
                             return;
