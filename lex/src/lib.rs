@@ -347,6 +347,7 @@ define_puncts! {
         Colon = ':',
         Period = '.',
         Bang = '!',
+        Question = '?',
 
         Plus = '+',
         Hyphen = '-',
@@ -497,6 +498,7 @@ impl<'a, 's> Lexer<'a, 's> {
                 Ok(punct)
             }
             '!' => Ok(punct!(start => Bang)),
+            '?' => Ok(punct!(start => Question)),
 
             '+' if self.peek_is('=') => {
                 let punct = punct!(start => PlusEq);
