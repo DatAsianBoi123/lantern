@@ -29,6 +29,9 @@ fun factorial(num: int) -> int {
 
 print("Enter number:");
 val num = int.from_str(input());
+if (num < 0) {
+  throw "cannot take the factorial of a negative number";
+}
 print("Factorial is:");
 print(factorial(num).to_str());
 
