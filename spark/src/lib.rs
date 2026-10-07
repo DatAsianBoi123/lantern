@@ -1,5 +1,5 @@
 use arena::Arena;
-use diagnostic::{DiagnosticError, DiagnosticSink, Span, error, symbol::{SymbolDisplay, SymbolTable}};
+use diagnostic::{DiagnosticError, DiagnosticSink, Span, error, symbol::{SymbolDisplay, SymbolTable}, warning};
 use parse::{FunArg, Item, ItemFun, ItemNativeFun, ItemPrimitive, ItemStruct, LanternFile, MatchPattern, MatchStmt, ReturnStmt, StructField, ValDeclaration, WhileStmt, expr::{self as pe, BinaryOperator, ExprArray, ExprBinary, ExprBlock, ExprField, ExprFunCall, ExprIndex, ExprMethodCall, ExprParen, ExprStruct, ExprUnary}, lex::{self, TokenKind}};
 
 use crate::{def::{LanternFunction, LanternStruct, LanternStructField}, diagnostics::*, expr::{Expr, ExprKind, Literal, LogicalOperation}, native::{FromDefError, NativeFun}, scope::{Globals, Scope, ScopeKind}, stmt::{IfBranch, IfStmt, Stmt}, ty::{BuiltinType, LanternType, TypeContext, TypeId}};
@@ -197,6 +197,7 @@ impl<'a, 't> Lighter<'a, 't> {
                 }
                 parse::Stmt::ValDeclaration(ValDeclaration { ident, r#type, .. }) => {
                     // TODO: ensure uninitialized vars are initialized before usage
+                    self.sink.emit(warning!(ident.span() => "unitialized variables are not fully supported, use at your own risk"));
                     let ty = r#type
                         .map(|(_, ty)| self.sink.emit_or(LanternType::resolve(&ty, scope, &self.tcx), self.tcx.error()))
                         .unwrap_or_else(|| {
