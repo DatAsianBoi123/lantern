@@ -2,7 +2,7 @@ use diagnostic::{Diagnostic, FileId, Span, error, symbol::{SymbolDisplay, Symbol
 use lex::{ArrowRight, At, Break, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Continue, Else, Equals, Fun, Ident, If, Keyword, Native, OpenBrace, OpenBracket, OpenParen, Period, Primitive, Punct, Return, Semi, Struct, Throw, Token, TokenKind, Using, Val, While};
 use macros::Parse;
 
-use crate::{expr::{Expr, ExprBlock}, stream::{parse_punctuated, TokenStream}};
+use crate::{expr::{Expr, ExprBlock}, stream::{TokenStream, parse_punctuated, parse_repetition}};
 
 pub use lex;
 
@@ -48,6 +48,8 @@ pub enum Stmt {
     Item(Item),
     #[parse(using(If))]
     IfStmt(IfStmt),
+    #[parse(using(Match))]
+    MatchStmt(MatchStmt),
     #[parse(using(While))]
     WhileStmt(WhileStmt),
     #[parse(using(Val))]
@@ -245,6 +247,31 @@ pub struct IfStmt {
 }
 
 #[derive(Parse, Debug, Clone, PartialEq)]
+pub struct MatchStmt {
+    pub r#match: Match,
+    pub open_paren: OpenParen,
+    pub expr: Expr,
+    pub closed_paren: ClosedParen,
+    pub open_brace: OpenBrace,
+    #[parse(with(parse_repetition::<MatchArm, ClosedBrace>))]
+    pub arms: Vec<MatchArm>,
+    pub closed_brace: ClosedBrace,
+}
+
+#[derive(Parse, Debug, Clone, PartialEq)]
+pub struct MatchArm {
+    pub pat: MatchPattern,
+    pub arrow: FatArrowRight,
+    pub block: ExprBlock,
+}
+
+#[derive(Parse, Debug, Clone, PartialEq)]
+pub enum MatchPattern {
+    Ident(Ident),
+    None(Question),
+}
+
+#[derive(Parse, Debug, Clone, PartialEq)]
 pub struct WhileStmt {
     pub r#while: While,
     pub open_paren: OpenParen,
@@ -336,6 +363,7 @@ pub struct AnnotationArgs {
 
 #[derive(Parse, Debug, Clone, PartialEq, Eq)]
 pub enum Type {
+    Optional(Question, #[parse(boxed(Type))] Box<Type>),
     Array(OpenBracket, #[parse(boxed(Type))] Box<Type>, ClosedBracket),
     #[parse(using(Fun))]
     Fun(FunType),
@@ -346,6 +374,7 @@ pub enum Type {
 impl Type {
     pub fn span(&self) -> Span {
         match self {
+            Self::Optional(question, ty) => question.span().containing(ty.span()),
             Self::Array(open_bracket, _, closed_bracket) => open_bracket.span().containing(closed_bracket.span()),
             Self::Fun(fun_type) => fun_type.span(),
             Self::Path(path) => path.span(),
@@ -356,6 +385,7 @@ impl Type {
 impl SymbolDisplay for Type {
     fn display(&self, symbol_table: &SymbolTable) -> String {
         match self {
+            Self::Optional(_, ty) => format!("?{}", ty.display(symbol_table)),
             Self::Array(_, inner, _) => format!("[{}]", inner.display(symbol_table)),
             Self::Fun(FunType { args, ret, .. }) => {
                 let mut string = format!("fun({})", args.iter().map(|arg| arg.display(symbol_table)).collect::<Vec<_>>().join(", "));

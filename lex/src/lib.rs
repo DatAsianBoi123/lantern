@@ -325,6 +325,7 @@ define_keywords! {
     pub enum Keyword {
         Val = "val",
         If = "if",
+        Match = "match",
         Else = "else",
         While = "while",
         Fun = "fun",
@@ -374,6 +375,7 @@ define_puncts! {
         Or = "||",
 
         ArrowRight = "->",
+        FatArrowRight = "=>",
 
         OpenParen = '(',
         ClosedParen = ')',
@@ -545,6 +547,11 @@ impl<'a, 's> Lexer<'a, 's> {
             '%' => Ok(punct!(start => Percent)),
             '=' if self.peek_is('=') => {
                 let punct = punct!(start => EqualsEquals);
+                self.next_char();
+                Ok(punct)
+            }
+            '=' if self.peek_is('>') => {
+                let punct = punct!(start => FatArrowRight);
                 self.next_char();
                 Ok(punct)
             }

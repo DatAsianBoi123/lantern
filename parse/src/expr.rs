@@ -1,7 +1,7 @@
 use std::fmt::{Display, Formatter};
 
 use diagnostic::{Span, error};
-use lex::{And, Asterisk, AsteriskEq, Bang, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Equals, EqualsEquals, Greater, GreaterEq, Hyphen, HyphenEq, Less, LessEq, Literal, NotEquals, OpenBrace, OpenBracket, OpenParen, Or, Percent, PercentEq, Period, Plus, PlusEq, Punct, Slash, SlashEq, Token, TokenKind};
+use lex::{And, Asterisk, AsteriskEq, Bang, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Equals, EqualsEquals, Greater, GreaterEq, Hyphen, HyphenEq, Less, LessEq, Literal, NotEquals, OpenBrace, OpenBracket, OpenParen, Or, Percent, PercentEq, Period, Plus, PlusEq, Punct, Question, Slash, SlashEq, Token, TokenKind};
 use macros::Parse;
 
 use crate::{Ident, ParseTokens, Result, Stmt, Type, stream::{TokenStream, parse_punctuated, parse_repetition}};
@@ -10,6 +10,8 @@ use crate::{Ident, ParseTokens, Result, Stmt, Type, stream::{TokenStream, parse_
 enum PrimaryExpr {
     Literal(Literal),
     Identifier(Ident),
+    OptionalNone(OptionalNone),
+    OptionalSome(OptionalSome),
     Struct(ExprStruct),
     Paren(ExprParen),
     Block(ExprBlock),
@@ -18,11 +20,10 @@ enum PrimaryExpr {
 
 impl ParseTokens for PrimaryExpr {
     fn parse(stream: &mut TokenStream) -> Result<Self> {
-        match stream.peek()? {
-            Token::Literal(_) => Ok(Self::Literal(stream.parse()?)),
-            Token::Ident(_) => {
+        match stream.next_token()? {
+            Token::Literal(literal) => Ok(Self::Literal(literal)),
+            Token::Ident(ident) => {
                 // either Ident or Struct
-                let Token::Ident(ident) = stream.next_token()? else { unreachable!() };
                 match stream.peek()? {
                     // Struct
                     Token::Punct(Punct::OpenBrace(_)) => {
@@ -37,6 +38,26 @@ impl ParseTokens for PrimaryExpr {
                     _ => Ok(Self::Identifier(ident)),
                 }
             },
+            Token::Punct(Punct::Question(question)) => {
+                match stream.next_token()? {
+                    Token::Punct(Punct::Period(period)) => {
+                        Ok(Self::OptionalNone(OptionalNone {
+                            question,
+                            period,
+                            ty: stream.parse()?,
+                        }))
+                    },
+                    Token::Punct(Punct::OpenParen(open_paren)) => {
+                        Ok(Self::OptionalSome(OptionalSome {
+                            question,
+                            open_paren,
+                            expr: Box::new(stream.parse()?),
+                            closed_paren: stream.parse()?,
+                        }))
+                    },
+                    token => Err(error!(token.span() => "expected `.` or `(`")),
+                }
+            },
             Token::Punct(Punct::OpenParen(_)) => Ok(Self::Paren(stream.parse()?)),
             Token::Punct(Punct::OpenBrace(_)) => Ok(Self::Block(stream.parse()?)),
             Token::Punct(Punct::OpenBracket(_)) => Ok(Self::Array(stream.parse()?)),
@@ -49,6 +70,8 @@ impl ParseTokens for PrimaryExpr {
 pub enum Expr {
     Literal(Literal),
     Identifier(Ident),
+    OptionalNone(OptionalNone),
+    OptionalSome(OptionalSome),
     Field(ExprField),
     FunCall(ExprFunCall),
     MethodCall(ExprMethodCall),
@@ -66,6 +89,8 @@ impl From<PrimaryExpr> for Expr {
         match value {
             PrimaryExpr::Literal(literal) => Self::Literal(literal),
             PrimaryExpr::Identifier(ident) => Self::Identifier(ident),
+            PrimaryExpr::OptionalNone(ty) => Self::OptionalNone(ty),
+            PrimaryExpr::OptionalSome(expr) => Self::OptionalSome(expr),
             PrimaryExpr::Struct(expr_struct) => Self::Struct(expr_struct),
             PrimaryExpr::Paren(expr) => Self::Paren(expr),
             PrimaryExpr::Block(block) => Self::Block(block),
@@ -79,6 +104,8 @@ impl Expr {
         match self {
             Expr::Literal(literal) => literal.span(),
             Expr::Identifier(ident) => ident.span(),
+            Expr::OptionalNone(OptionalNone { question, ty, .. }) => question.span().containing(ty.span()),
+            Expr::OptionalSome(OptionalSome { question, closed_paren, .. }) => question.span().containing(closed_paren.span()),
             Expr::Field(ExprField { expr, ident }) => expr.span().containing(ident.span()),
             Expr::FunCall(ExprFunCall { expr, closed_paren, .. }) => expr.span().containing(closed_paren.span()),
             Expr::MethodCall(ExprMethodCall { expr, closed_paren, .. }) => expr.span().containing(closed_paren.span()),
@@ -168,6 +195,21 @@ impl ParseTokens for Expr {
     fn parse(stream: &mut TokenStream) -> Result<Self> {
         Self::parse_all(stream, 0)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OptionalNone {
+    pub question: Question,
+    pub period: Period,
+    pub ty: Type,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct OptionalSome {
+    pub question: Question,
+    pub open_paren: OpenParen,
+    pub expr: Box<Expr>,
+    pub closed_paren: ClosedParen,
 }
 
 #[derive(Debug, Clone, PartialEq)]
