@@ -323,10 +323,11 @@ impl TokenKind for Eof {
 define_keywords! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum Keyword {
+        LNone = "None",
         Val = "val",
         If = "if",
-        Match = "match",
         Else = "else",
+        Match = "match",
         While = "while",
         Fun = "fun",
         Using = "using",
