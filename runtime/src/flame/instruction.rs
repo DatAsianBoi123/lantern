@@ -13,6 +13,9 @@ macro_rules! inst {
     (PUSHF $f: expr) => {
         $crate::flame::instruction::Instruction::Pushf64($f)
     };
+    (PUSHNULL) => {
+        $crate::flame::instruction::Instruction::PushNull
+    };
     (POP) => {
         $crate::flame::instruction::Instruction::Pop
     };
@@ -90,6 +93,9 @@ macro_rules! inst {
     };
     (ICOMP_NEQ) => {
         $crate::flame::instruction::Instruction::ICompareNeq
+    };
+    (IS_NULL) => {
+        $crate::flame::instruction::Instruction::IsNull
     };
     (NOT) => {
         $crate::flame::instruction::Instruction::Not
@@ -218,6 +224,7 @@ pub enum Instruction {
     Pushusize(usize),
     Pushi64(i64),
     Pushf64(f64),
+    PushNull,
     Pop,
     Dup(usize),
     /// POP     f64: rhs
@@ -254,6 +261,7 @@ pub enum Instruction {
     ICompareEq,
     FCompareNeq,
     ICompareNeq,
+    IsNull,
     /// POP     bool: value
     /// PUSH    bool: !value
     Not,
@@ -292,6 +300,7 @@ impl Display for Instruction {
             Self::Pushusize(usize) => write!(f, "{:20}{usize}", "PUSHU"),
             Self::Pushi64(i64) => write!(f, "{:20}{i64}", "PUSHI"),
             Self::Pushf64(f64) => write!(f, "{:20}{f64}", "PUSHF"),
+            Self::PushNull => write!(f, "PUSHNULL"),
             Self::Pop => write!(f, "POP"),
             Self::Dup(depth) => write!(f, "{:20}{depth}", "DUP"),
             Self::Addf => write!(f, "ADDF"),
@@ -318,6 +327,7 @@ impl Display for Instruction {
             Self::ICompareEq => write!(f, "ICOMP_EQ"),
             Self::FCompareNeq => write!(f, "FCOMP_NEQ"),
             Self::ICompareNeq => write!(f, "ICOMP_NEQ"),
+            Self::IsNull => write!(f, "IS_NULL"),
             Self::Not => write!(f, "NOT"),
             Self::Throw => write!(f, "THRW"),
             Self::AllocObj(index) => write!(f, "{:20}{index}", "ALLOC_OBJ"),

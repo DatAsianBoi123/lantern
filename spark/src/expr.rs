@@ -51,12 +51,13 @@ pub enum ExprKind<'t> {
 
 impl ExprKind<'_> {
     pub fn is_place(&self) -> bool {
-        matches!(self, Self::Local(_) | Self::Field(..) | Self::Index(_, _))
+        matches!(self, Self::Error | Self::Local(_) | Self::Field(..) | Self::Index(_, _))
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Literal {
+    None,
     Int(i64),
     Float(f64),
     True,

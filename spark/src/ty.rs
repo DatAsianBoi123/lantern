@@ -25,8 +25,14 @@ impl<'t> TypeId<'t> {
         ptr::eq(self.0, ty)
     }
 
-    pub fn is_error_or_eq(self, other: Self) -> bool {
-        *self == LanternType::Error || *other == LanternType::Error || self == other
+    pub fn is_applicable(self, other: Self) -> bool {
+        match (&*self, &*other) {
+            (LanternType::Error, _)
+            | (_, LanternType::Error)
+            | (LanternType::None, LanternType::Optional(_)) => true,
+            (ty, LanternType::Optional(inner)) if inner.eq_ty(ty) => true,
+            (l, r) => l == r,
+        }
     }
 }
 
@@ -55,6 +61,7 @@ pub enum LanternType<'t> {
         args: Vec<TypeId<'t>>,
         ret: TypeId<'t>,
     },
+    Optional(TypeId<'t>),
     None,
     Error,
 }
@@ -62,12 +69,13 @@ pub enum LanternType<'t> {
 impl SymbolDisplay for LanternType<'_> {
     fn display(&self, symbol_table: &SymbolTable) -> String {
         match self {
-            Self::Struct(LanternStruct { name, .. }) => symbol_table.resolve(*name).to_string(),
+            Self::Struct(LanternStruct { name, .. }) => name.display(symbol_table),
             Self::Primitive(LanternPrimitive { name, .. }) => (*name).to_string(),
             Self::Array(id) => format!("[{}]", id.display(symbol_table)),
             Self::Function { args, ret, .. } => {
                 format!("fun({}) -> {}", args.iter().map(|ty| ty.display(symbol_table)).collect::<Vec<_>>().join(", "), ret.display(symbol_table))
             }
+            Self::Optional(ty) => format!("?{}", ty.display(symbol_table)),
             Self::None => "none".to_string(),
             Self::Error => "<error>".to_string(),
         }
@@ -77,7 +85,20 @@ impl SymbolDisplay for LanternType<'_> {
 impl<'t> LanternType<'t> {
     pub fn resolve(ty: &Type, scope: &Scope<'_, 't>, tcx: &TypeContext<'t>) -> Result<TypeId<'t>, Diagnostic> {
         let ty = match ty {
-            Type::Array(_, inner, _) => Self::Array(Self::resolve(inner, scope, tcx)?),
+            Type::Optional(_, ty) => {
+                let inner = Self::resolve(ty, scope, tcx)?;
+                if matches!(*inner, LanternType::Optional(_)) {
+                    return Err(error!(ty.span() => "optionals cannot be nested"));
+                }
+                Self::Optional(inner)
+            }
+            Type::Array(_, inner, _) => {
+                let inner = Self::resolve(inner, scope, tcx)?;
+                if inner.needs_tag() {
+                    return Err(error!(ty.span() => "optional primitives are currently not supported as array elements"))
+                }
+                Self::Array(inner)
+            },
             Type::Fun(FunType { args, ret, .. }) => {
                 let args = args.iter().map(|r#type| Self::resolve(r#type, scope, tcx)).collect::<Result<_, _>>()?;
                 let ret = ret.as_ref()
@@ -101,7 +122,15 @@ impl<'t> LanternType<'t> {
     }
 
     pub fn is_ref(&self) -> bool {
-        matches!(self, Self::Struct(_) | Self::Array(..))
+        match self {
+            Self::Struct(_) | Self::Array(..) => true,
+            Self::Optional(inner) => inner.is_ref(),
+            _ => false,
+        }
+    }
+
+    pub fn needs_tag(&self) -> bool {
+        matches!(self, Self::Optional(inner) if !inner.is_ref())
     }
 
     pub fn is_primitive_type(&self, primitive: &'static LanternPrimitive) -> bool {
@@ -118,6 +147,7 @@ impl<'t> LanternType<'t> {
             Self::Primitive(LanternPrimitive { size, .. }) => *size,
             Self::Array(..) => 8,
             Self::Function { .. } => 8,
+            Self::Optional(ty) => ty.size(),
             // none is a ptr
             Self::None => 8,
             Self::Error => 8,
@@ -130,6 +160,7 @@ impl<'t> LanternType<'t> {
             Self::Primitive(LanternPrimitive { align, .. }) => *align,
             Self::Array(..) => 8,
             Self::Function { .. } => 8,
+            Self::Optional(ty) => ty.alignment(),
             // none is a ptr
             Self::None => 8,
             Self::Error => 8,

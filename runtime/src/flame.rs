@@ -1,6 +1,6 @@
 use diagnostic::Span;
 use instruction::{Instruction, InstructionSet};
-use spark::{Spark, SparkFunction, expr::{Expr, ExprKind, LogicalOperation}, scope::GlobalVariables, stmt::{IfBranch, IfStmt, Stmt}, ty::{BuiltinType, TypeId}};
+use spark::{Spark, SparkFunction, expr::{Expr, ExprKind, Literal, LogicalOperation}, scope::GlobalVariables, stmt::{IfBranch, IfStmt, Stmt}, ty::{BuiltinType, TypeId}};
 
 use crate::{Slot, VM, error::{RuntimeError, StacktraceLocation}, heap::{HeapArray, HeapObject, TypeInfo}, inst};
 
@@ -83,6 +83,22 @@ impl FlameGen {
                         self.patch(index, inst!(GOTO self.ip()));
                     }
                 }
+                Stmt::Match { expr, some_local, some_arm, none_arm } => {
+                    self.compile_expr(expr);
+                    inst!(self.instructions; IS_NULL);
+                    let none_arm_goto = self.placeholder();
+
+                    inst!(self.instructions; STORE_LOCAL *some_local);
+                    inst!(self.instructions; POP);
+                    self.compile_stmts(some_arm);
+                    let exit = self.placeholder();
+
+                    self.patch(none_arm_goto, inst!(POP_GOTO_IF_TRUE self.ip()));
+                    inst!(self.instructions; POP);
+                    self.compile_stmts(none_arm);
+
+                    self.patch(exit, inst!(GOTO self.ip()));
+                }
                 Stmt::While { cond, stmts } => {
                     let head = self.ip();
                     self.loops.push(LoopScope::new(head));
@@ -104,15 +120,18 @@ impl FlameGen {
                     if let Some(init) = init {
                         self.compile_expr(init);
                     } else {
-                        inst!(self.instructions; PUSHU 0);
+                        inst!(self.instructions; PUSHNULL);
                     }
-                    inst!(self.instructions; STORE_LOCAL *id);
+                    inst! { self.instructions;
+                        [STORE_LOCAL *id]
+                        [POP]
+                    };
                 }
                 Stmt::Return(expr) => {
                     if let Some(expr) = expr {
                         self.compile_expr(expr);
                     } else {
-                        inst!(self.instructions; PUSHU 0);
+                        inst!(self.instructions; PUSHNULL);
                     }
                     inst!(self.instructions; RET);
                 }
@@ -156,10 +175,11 @@ impl FlameGen {
 
     fn compile_expr(&mut self, expr: &Expr) {
         match &expr.kind {
-            ExprKind::Literal(spark::expr::Literal::Int(int)) => inst!(with self => expr.span; PUSHI *int),
-            ExprKind::Literal(spark::expr::Literal::Float(float)) => inst!(with self => expr.span; PUSHF *float),
-            ExprKind::Literal(spark::expr::Literal::True) => inst!(with self => expr.span; PUSHU crate::bool_to_slot(true)),
-            ExprKind::Literal(spark::expr::Literal::False) => inst!(with self => expr.span; PUSHU crate::bool_to_slot(false)),
+            ExprKind::Literal(Literal::None) => inst!(with self => expr.span; PUSHNULL),
+            ExprKind::Literal(Literal::Int(int)) => inst!(with self => expr.span; PUSHI *int),
+            ExprKind::Literal(Literal::Float(float)) => inst!(with self => expr.span; PUSHF *float),
+            ExprKind::Literal(Literal::True) => inst!(with self => expr.span; PUSHU crate::bool_to_slot(true)),
+            ExprKind::Literal(Literal::False) => inst!(with self => expr.span; PUSHU crate::bool_to_slot(false)),
             ExprKind::Static(id) => inst!(with self => expr.span; PUSHU *id),
             ExprKind::Global(id) => inst!(with self => expr.span; LOAD_GLOBAL *id),
             ExprKind::Local(id) => inst!(with self => expr.span; LOAD_LOCAL *id),

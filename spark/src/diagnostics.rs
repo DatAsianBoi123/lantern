@@ -1,4 +1,4 @@
-use diagnostic::{Diagnostic, DiagnosticError, Span, error, symbol::{Symbol, SymbolDisplay, SymbolTable}};
+use diagnostic::{Diagnostic, DiagnosticError, Span, error, symbol::{Symbol, SymbolDisplay, SymbolTable}, warning};
 use parse::{FunName, Path, expr::{BinaryOperator, UnaryOperator}, lex::{Break, Continue, Ident, TokenKind}};
 
 use crate::ty::TypeId;
@@ -356,3 +356,33 @@ impl DiagnosticError for BuiltinAlreadyDeclared {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CannotMatch<'t> {
+    pub ty: TypeId<'t>,
+    pub span: Span,
+}
+
+impl DiagnosticError for CannotMatch<'_> {
+    fn into_diagnostic(self, symbol_table: &SymbolTable) -> Diagnostic {
+        error!(self.span => "cannot match on {}", self.ty.display(symbol_table))
+    }
+}
+
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnreachableArm(pub Span);
+
+impl DiagnosticError for UnreachableArm {
+    fn into_diagnostic(self, _: &SymbolTable) -> Diagnostic {
+        warning!(self.0 => "match arm is unreachable")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NonExhaustiveMatch(pub Span);
+
+impl DiagnosticError for NonExhaustiveMatch {
+    fn into_diagnostic(self, _: &SymbolTable) -> Diagnostic {
+        error!(self.0 => "match statement is not exhaustive")
+    }
+}

@@ -1,6 +1,6 @@
 use arena::Arena;
-use diagnostic::{DiagnosticError, DiagnosticSink, Span, symbol::{SymbolDisplay, SymbolTable}};
-use parse::{FunArg, Item, ItemFun, ItemNativeFun, ItemPrimitive, ItemStruct, LanternFile, ReturnStmt, StructField, ValDeclaration, WhileStmt, expr::{self as pe, BinaryOperator, ExprArray, ExprBinary, ExprBlock, ExprField, ExprFunCall, ExprIndex, ExprMethodCall, ExprParen, ExprStruct, ExprUnary}, lex::{self, TokenKind}};
+use diagnostic::{DiagnosticError, DiagnosticSink, Span, error, symbol::{SymbolDisplay, SymbolTable}};
+use parse::{FunArg, Item, ItemFun, ItemNativeFun, ItemPrimitive, ItemStruct, LanternFile, MatchPattern, MatchStmt, ReturnStmt, StructField, ValDeclaration, WhileStmt, expr::{self as pe, BinaryOperator, ExprArray, ExprBinary, ExprBlock, ExprField, ExprFunCall, ExprIndex, ExprMethodCall, ExprParen, ExprStruct, ExprUnary}, lex::{self, TokenKind}};
 
 use crate::{def::{LanternFunction, LanternStruct, LanternStructField}, diagnostics::*, expr::{Expr, ExprKind, Literal, LogicalOperation}, native::{FromDefError, NativeFun}, scope::{Globals, Scope, ScopeKind}, stmt::{IfBranch, IfStmt, Stmt}, ty::{BuiltinType, LanternType, TypeContext, TypeId}};
 
@@ -74,7 +74,7 @@ impl<'a, 't> Lighter<'a, 't> {
             match stmt {
                 parse::Stmt::Item(Item::Fun(ItemFun { name, args, ret, block, .. })) => {
                     let ret = ret
-                        .map(|(_, ret)| self.sink.emit_or(LanternType::resolve(&ret, scope, &self.tcx), self.tcx.error()))
+                        .map(|(_, ret)| LanternType::resolve(&ret, scope, &self.tcx).unwrap_or(self.tcx.error()))
                         .unwrap_or(self.tcx.none());
 
                     let fun_def = match &name.base {
@@ -102,10 +102,64 @@ impl<'a, 't> Lighter<'a, 't> {
                 }
                 parse::Stmt::Item(_) => {}
                 parse::Stmt::IfStmt(if_stmt) => spark_stmts.push(Stmt::If(self.check_if(if_stmt, scope))),
+                parse::Stmt::MatchStmt(MatchStmt { expr, arms, .. }) => {
+                    let span = expr.span();
+                    let expr = self.lower_expr(expr, scope);
+                    let inner = match *expr.ty {
+                        LanternType::Optional(inner) => inner,
+                        LanternType::Error => self.tcx.error(),
+                        _ => {
+                            self.emit(CannotMatch { ty: expr.ty, span });
+                            self.tcx.error()
+                        }
+                    };
+
+                    let mut some_arm = None;
+                    let mut none_arm = None;
+                    let mut diverges = true;
+
+                    for arm in arms {
+                        match arm.pat {
+                            MatchPattern::Ident(ident) => {
+                                if some_arm.is_some() {
+                                    self.emit(UnreachableArm(arm.span()));
+                                }
+
+                                let mut block_scope = scope.child_block();
+                                let some_local = block_scope.insert_variable(ident.0, inner).expect("scope initially has no locals");
+                                let stmts = self.lower_stmts(arm.block.stmts, &mut block_scope);
+                                diverges = diverges && block_scope.diverges;
+                                scope.max_locals = scope.max_locals.max(block_scope.max_locals);
+
+                                some_arm.get_or_insert((stmts, some_local));
+                            }
+                            MatchPattern::None(_) => {
+                                if none_arm.is_some() {
+                                    self.emit(UnreachableArm(arm.span()));
+                                }
+
+                                let (stmts, none_diverges) = self.check_block(arm.block, scope);
+                                diverges = diverges && none_diverges;
+
+                                none_arm.get_or_insert(stmts);
+                            }
+                        }
+                    }
+
+                    if diverges {
+                        scope.diverges = true;
+                    }
+
+                    if let (Some((some_arm, some_local)), Some(none_arm)) = (some_arm, none_arm) {
+                        spark_stmts.push(Stmt::Match { expr, some_local, some_arm, none_arm });
+                    } else {
+                        self.emit(NonExhaustiveMatch(span));
+                    }
+                }
                 parse::Stmt::WhileStmt(WhileStmt { condition, block, .. }) => {
                     let cond_span = condition.span();
                     let cond = self.lower_expr(condition, scope);
-                    if !cond.ty.is_error_or_eq(self.tcx.primitive(&primitive::BOOL_PRIMITIVE)) {
+                    if !cond.ty.is_applicable(self.tcx.primitive(&primitive::BOOL_PRIMITIVE)) {
                         self.emit(TypeMismatch {
                             expected: self.tcx.primitive(&primitive::BOOL_PRIMITIVE),
                             got: cond.ty,
@@ -126,7 +180,7 @@ impl<'a, 't> Lighter<'a, 't> {
                     let ty = r#type
                         .map(|(_, ty)| {
                             let ty = self.sink.emit_or(LanternType::resolve(&ty, scope, &self.tcx), self.tcx.error());
-                            if !init.ty.is_error_or_eq(ty) {
+                            if !init.ty.is_applicable(ty) {
                                 self.emit(TypeMismatch {
                                     expected: ty,
                                     got: init.ty,
@@ -160,7 +214,8 @@ impl<'a, 't> Lighter<'a, 't> {
                         .unwrap_or(ret.span());
                     let expr = expr.map(|expr| self.lower_expr(expr, scope));
                     let ty = expr.as_ref().map(|expr| expr.ty).unwrap_or(self.tcx.none());
-                    if !ty.is_error_or_eq(scope.expected_ret) {
+
+                    if !ty.is_applicable(scope.expected_ret) {
                         self.emit(TypeMismatch {
                             expected: scope.expected_ret,
                             got: ty,
@@ -178,7 +233,7 @@ impl<'a, 't> Lighter<'a, 't> {
                 parse::Stmt::Throw(_, expr, _) => {
                     let expr_span = expr.span();
                     let expr = self.lower_expr(expr, scope);
-                    if !expr.ty.is_error_or_eq(self.tcx.builtin(BuiltinType::String)) {
+                    if !expr.ty.is_applicable(self.tcx.builtin(BuiltinType::String)) {
                         self.emit(TypeMismatch {
                             expected: self.tcx.builtin(BuiltinType::String),
                             got: expr.ty,
@@ -194,7 +249,7 @@ impl<'a, 't> Lighter<'a, 't> {
 
         match scope.kind() {
             ScopeKind::Function(_, span) if !scope.diverges => {
-                if !self.tcx.none().is_error_or_eq(scope.expected_ret) {
+                if !self.tcx.none().is_applicable(scope.expected_ret) {
                     self.emit(TypeMismatch {
                         expected: scope.expected_ret,
                         got: self.tcx.none(),
@@ -212,6 +267,9 @@ impl<'a, 't> Lighter<'a, 't> {
 
     pub fn lower_expr(&mut self, expr: pe::Expr, scope: &mut Scope<'_, 't>) -> Expr<'t> {
         match expr {
+            pe::Expr::Literal(lex::Literal::None(span)) => {
+                Expr::new(ExprKind::Literal(Literal::None), self.tcx.none(), span)
+            }
             pe::Expr::Literal(lex::Literal::Integer(int, span)) => {
                 Expr::new(ExprKind::Literal(Literal::Int(int)), self.tcx.primitive(&primitive::INT_PRIMITIVE), span)
             }
@@ -369,7 +427,7 @@ impl<'a, 't> Lighter<'a, 't> {
                         Some(struct_field) => {
                             let span = field.expr.span();
                             let field_expr = self.lower_expr(field.expr, scope);
-                            if !field_expr.ty.is_error_or_eq(struct_field.ty) {
+                            if !field_expr.ty.is_applicable(struct_field.ty) {
                                 self.emit(TypeMismatch {
                                     expected: struct_field.ty,
                                     got: field_expr.ty,
@@ -413,7 +471,7 @@ impl<'a, 't> Lighter<'a, 't> {
                     let span = element.span();
                     let element_expr = self.lower_expr(element, scope);
                     let ty = *ty.get_or_insert(element_expr.ty);
-                    if !element_expr.ty.is_error_or_eq(ty) {
+                    if !element_expr.ty.is_applicable(ty) {
                         self.emit(TypeMismatch {
                             expected: ty,
                             got: element_expr.ty,
@@ -425,6 +483,10 @@ impl<'a, 't> Lighter<'a, 't> {
 
                 match ty {
                     Some(ty) if *ty == LanternType::Error => Expr::error(&self.tcx, closed_bracket.span()),
+                    Some(ty) if ty.needs_tag() => {
+                        error!(in self.sink; open_bracket.span().containing(closed_bracket.span()) => "optional primitives are currently not supported as array elements");
+                        Expr::error(&self.tcx, closed_bracket.span())
+                    }
                     Some(ty) => Expr::new(ExprKind::Array(ty, element_exprs), self.tcx.intern(LanternType::Array(ty)), closed_bracket.span()),
                     None => {
                         self.emit(TypeRequiredForEmptyArray(open_bracket.span().containing(closed_bracket.span())));
@@ -447,7 +509,7 @@ impl<'a, 't> Lighter<'a, 't> {
 
                 let index_span = index.span();
                 let index = self.lower_expr(*index, scope);
-                if !index.ty.is_error_or_eq(self.tcx.primitive(&primitive::INT_PRIMITIVE)) {
+                if !index.ty.is_applicable(self.tcx.primitive(&primitive::INT_PRIMITIVE)) {
                     self.emit(TypeMismatch {
                         expected: self.tcx.primitive(&primitive::INT_PRIMITIVE),
                         got: index.ty,
@@ -489,7 +551,7 @@ impl<'a, 't> Lighter<'a, 't> {
                         if !lhs.kind.is_place() {
                             self.emit(BadAssignment(lhs_span));
                         }
-                        if !lhs.ty.is_error_or_eq(rhs.ty) {
+                        if !rhs.ty.is_applicable(lhs.ty) {
                             self.emit(TypeMismatch {
                                 expected: lhs.ty,
                                 got: rhs.ty,
@@ -532,7 +594,7 @@ impl<'a, 't> Lighter<'a, 't> {
                     self.emit(TypeMismatch {
                         expected: lhs.ty,
                         got: rhs.ty,
-                        span: op.span(),
+                        span: rhs_span,
                     });
                     return Expr::error(&self.tcx, rhs_span);
                 }
@@ -761,7 +823,11 @@ impl<'a, 't> Lighter<'a, 't> {
                             .map(|StructField { ident, r#type, .. }| {
                                 // type may not have fields initialized, but structs have constant
                                 // size/alignment and primitives are hardcoded
-                                (ident.0, self.sink.emit_or(LanternType::resolve(r#type, scope, &self.tcx), self.tcx.error()))
+                                let ty = self.sink.emit_or(LanternType::resolve(r#type, scope, &self.tcx), self.tcx.error());
+                                if ty.needs_tag() {
+                                    error!(in self.sink; r#type.span() => "optional primitives are currently not supported as struct fields");
+                                }
+                                (ident.0, ty)
                             })
                             .collect();
 
@@ -787,7 +853,7 @@ impl<'a, 't> Lighter<'a, 't> {
 
         let condition_span = condition.span();
         let cond = self.lower_expr(condition, scope);
-        if !cond.ty.is_error_or_eq(self.tcx.primitive(&primitive::BOOL_PRIMITIVE)) {
+        if !cond.ty.is_applicable(self.tcx.primitive(&primitive::BOOL_PRIMITIVE)) {
             self.emit(TypeMismatch {
                 expected: self.tcx.primitive(&primitive::BOOL_PRIMITIVE),
                 got: cond.ty,
@@ -837,7 +903,7 @@ impl<'a, 't> Lighter<'a, 't> {
         for arg in args {
             let span = arg.span();
             let arg_expr = self.lower_expr(arg, scope);
-            if let Some(fun_arg) = fun_args_iter.next() && !arg_expr.ty.is_error_or_eq(*fun_arg) {
+            if let Some(fun_arg) = fun_args_iter.next() && !arg_expr.ty.is_applicable(*fun_arg) {
                 self.emit(TypeMismatch {
                     expected: *fun_arg,
                     got: arg_expr.ty,

@@ -213,11 +213,13 @@ pub enum Literal {
     Float(f64, Span),
     True(Span),
     False(Span),
+    None(Span),
 }
 
 impl Display for Literal {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::None(_) => write!(f, "`none`"),
             Self::String(str, _) => write!(f, "{str:?}"),
             Self::Integer(int, _) => write!(f, "{int}"),
             Self::Float(float, _) => write!(f, "{float}"),
@@ -245,6 +247,7 @@ impl TokenKind for Literal {
 
     fn span(&self) -> Span {
         match self {
+            Self::None(span) => *span,
             Self::String(_, span) => *span,
             Self::Integer(_, span) => *span,
             Self::Float(_, span) => *span,
@@ -323,7 +326,6 @@ impl TokenKind for Eof {
 define_keywords! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum Keyword {
-        LNone = "None",
         Val = "val",
         If = "if",
         Else = "else",
@@ -645,11 +647,13 @@ impl<'a, 's> Lexer<'a, 's> {
                 // `len` length character to its left
                 let word = unsafe { str::from_utf8_unchecked(slice::from_raw_parts::<'a>(str_start.sub(next.len_utf8()), len)) };
 
+                let span = self.span_from(start);
                 match word {
-                    "true" => Ok(Token::Literal(Literal::True(self.span_from(start)))),
-                    "false" => Ok(Token::Literal(Literal::False(self.span_from(start)))),
-                    _ if let Some(keyword) = Keyword::from_str(word, self.span_from(start)) => Ok(Token::Keyword(keyword)),
-                    _ => Ok(Token::Ident(Ident(self.symbol_table.store(word), self.span_from(start)))),
+                    "none" => Ok(Token::Literal(Literal::None(span))),
+                    "true" => Ok(Token::Literal(Literal::True(span))),
+                    "false" => Ok(Token::Literal(Literal::False(span))),
+                    _ if let Some(keyword) = Keyword::from_str(word, span) => Ok(Token::Keyword(keyword)),
+                    _ => Ok(Token::Ident(Ident(self.symbol_table.store(word), span))),
                 }
             }
             next => {

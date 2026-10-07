@@ -2,6 +2,7 @@ sy case match
 
 sy keyword Keyword val fun using native return continue break if else while struct primitive throw match
 sy keyword Boolean true false
+sy keyword Constant none
 
 sy match Identifier /\w\+/
 sy match Function /\w\+\ze\s*(\_.*)/

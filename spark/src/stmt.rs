@@ -3,6 +3,12 @@ use crate::expr::Expr;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt<'t> {
     If(IfStmt<'t>),
+    Match {
+        expr: Expr<'t>,
+        some_local: usize,
+        some_arm: Vec<Stmt<'t>>,
+        none_arm: Vec<Stmt<'t>>,
+    },
     While {
         cond: Expr<'t>,
         stmts: Vec<Stmt<'t>>,

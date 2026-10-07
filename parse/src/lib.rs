@@ -1,5 +1,5 @@
 use diagnostic::{Diagnostic, FileId, Span, error, symbol::{SymbolDisplay, SymbolTable}};
-use lex::{ArrowRight, At, Break, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Continue, Else, Equals, Fun, Ident, If, Keyword, Native, OpenBrace, OpenBracket, OpenParen, Period, Primitive, Punct, Return, Semi, Struct, Throw, Token, TokenKind, Using, Val, While};
+use lex::{ArrowRight, At, Break, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Continue, Else, Equals, FatArrowRight, Fun, Ident, If, Keyword, Match, Native, OpenBrace, OpenBracket, OpenParen, Period, Primitive, Punct, Question, Return, Semi, Struct, Throw, Token, TokenKind, Using, Val, While};
 use macros::Parse;
 
 use crate::{expr::{Expr, ExprBlock}, stream::{TokenStream, parse_punctuated, parse_repetition}};
@@ -199,7 +199,7 @@ pub struct ItemPrimitive {
 pub struct ItemUsing {
     pub using: Using,
     pub path: Path,
-    pub colon: Colon,
+    pub period: Period,
     pub open_brace: OpenBrace,
     #[parse(with(parse_punctuated::<Ident, Comma, ClosedBrace>))] // TODO: allow {}?
     pub items: Vec<Ident>,
@@ -265,10 +265,25 @@ pub struct MatchArm {
     pub block: ExprBlock,
 }
 
+impl MatchArm {
+    pub fn span(&self) -> Span {
+        self.pat.span().containing(self.block.span())
+    }
+}
+
 #[derive(Parse, Debug, Clone, PartialEq)]
 pub enum MatchPattern {
     Ident(Ident),
     None(Question),
+}
+
+impl MatchPattern {
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Ident(ident) => ident.span(),
+            Self::None(question) => question.span(),
+        }
+    }
 }
 
 #[derive(Parse, Debug, Clone, PartialEq)]

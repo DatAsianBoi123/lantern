@@ -52,7 +52,7 @@ impl Index<usize> for LanternStack {
         if let Ok(slot) = self.read(index) {
             slot
         } else {
-            panic!("index out of bounds");
+            panic!("index {index} out of bounds");
         }
     }
 }

@@ -272,6 +272,7 @@ impl VM {
                     Instruction::Pushusize(u64) => self.stack.push_usize(u64)?,
                     Instruction::Pushi64(i64) => self.stack.push_int(i64)?,
                     Instruction::Pushf64(f64) => self.stack.push_float(f64)?,
+                    Instruction::PushNull => self.stack.push_ref(ptr::null_mut())?,
                     Instruction::Pop => { self.stack.pop()?; },
                     Instruction::Dup(depth) => { self.stack.push_slot(self.stack[self.stack.top() - 1 - depth])?; },
                     Instruction::Addf => args!((f64, f64) -> f64 in self.stack, (rhs, lhs) => lhs + rhs),
@@ -304,6 +305,11 @@ impl VM {
                     Instruction::ICompareEq => args!((i64, i64) -> usize in self.stack, (rhs, lhs) => bool_to_slot(lhs == rhs)),
                     Instruction::FCompareNeq => args!((f64, f64) -> usize in self.stack, (rhs, lhs) => bool_to_slot(lhs != rhs)),
                     Instruction::ICompareNeq => args!((i64, i64) -> usize in self.stack, (rhs, lhs) => bool_to_slot(lhs != rhs)),
+                    Instruction::IsNull => {
+                        let slot = self.stack.peek()?;
+                        let is_null = unsafe { matches!(slot.kind(), SlotType::Ref) && slot.read_ptr::<u8>().is_null() };
+                        self.stack.push_usize(bool_to_slot(is_null))?;
+                    },
                     Instruction::Not => args!((usize) -> usize in self.stack, bool => match bool {
                         0 => bool_to_slot(true),
                         1 => bool_to_slot(false),

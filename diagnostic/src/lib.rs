@@ -16,6 +16,16 @@ macro_rules! error {
     };
 }
 
+#[macro_export]
+macro_rules! warning {
+    (in $sink:expr; $span:expr => $($tt:tt)*) => {
+        $sink.emit(warning!($span => $($tt)*))
+    };
+    ($span:expr => $($tt:tt)*) => {
+        ::diagnostic::Diagnostic::new_warning(format!($($tt)*), $span)
+    };
+}
+
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct DiagnosticSink {
     emitted: Vec<Diagnostic>,
