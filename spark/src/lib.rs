@@ -1,8 +1,8 @@
 use arena::Arena;
 use diagnostic::{DiagnosticError, DiagnosticSink, Span, error, symbol::{SymbolDisplay, SymbolTable}, warning};
-use parse::{FunArg, Item, ItemFun, ItemNativeFun, ItemPrimitive, ItemStruct, LanternFile, MatchPattern, MatchStmt, ReturnStmt, StructField, ValDeclaration, WhileStmt, expr::{self as pe, BinaryOperator, ExprArray, ExprBinary, ExprBlock, ExprField, ExprFunCall, ExprIndex, ExprMethodCall, ExprParen, ExprStruct, ExprUnary}, lex::{self, TokenKind}};
+use parse::{FunArg, Item, ItemFun, ItemNativeFun, ItemPrimitive, ItemStruct, LanternFile, MatchPattern, MatchStmt, ReturnStmt, StructField, ValDeclaration, WhileStmt, expr::{self as pe, BinaryOperator, ExprArray, ExprBinary, ExprField, ExprFunCall, ExprIndex, ExprMethodCall, ExprParen, ExprStruct, ExprUnary}, lex::{self, TokenKind}};
 
-use crate::{def::{LanternFunction, LanternStruct, LanternStructField}, diagnostics::*, expr::{Expr, ExprKind, Literal, LogicalOperation}, native::{FromDefError, NativeFun}, scope::{Globals, Scope, ScopeKind}, stmt::{IfBranch, IfStmt, Stmt}, ty::{BuiltinType, LanternType, TypeContext, TypeId}};
+use crate::{def::{LanternFunction, LanternStruct, LanternStructField}, diagnostics::*, expr::{Expr, ExprKind, Literal, LogicalOperation}, native::{FromDefError, NativeFun}, scope::{Globals, Scope, ScopeBehavior, ScopeKind}, stmt::{IfBranch, IfStmt, Stmt}, ty::{BuiltinType, LanternType, TypeContext, TypeId}};
 
 pub mod ty;
 pub mod scope;
@@ -53,32 +53,32 @@ impl<'a, 't> Lighter<'a, 't> {
     }
 
     pub fn lower_module(&mut self, file: LanternFile) -> usize {
-        let mut module_scope = Scope::new_module(&self.tcx);
-        let lowered = self.lower_stmts(file.stmts, &mut module_scope);
+        let (lowered, behavior) = self.lower_stmts(file.stmts, Scope::new_module(&self.tcx));
         let entry = self.globals.funs.len();
         self.globals.funs.push(SparkFunction::Lantern {
             name: "<module>".to_string(),
             stmts: lowered,
-            locals: module_scope.max_locals
+            locals: behavior.locals_used
         });
         entry
     }
 
-    pub fn lower_stmts(&mut self, stmts: Vec<parse::Stmt>, scope: &mut Scope<'_, 't>) -> Vec<Stmt<'t>> {
+    #[must_use]
+    pub fn lower_stmts(&mut self, stmts: Vec<parse::Stmt>, mut scope: Scope<'_, 't>) -> (Vec<Stmt<'t>>, ScopeBehavior) {
         let mut spark_stmts = Vec::new();
 
-        self.resolve_types(&stmts, scope);
-        self.build_types_and_funs(&stmts, scope);
+        self.resolve_types(&stmts, &mut scope);
+        self.build_types_and_funs(&stmts, &mut scope);
 
         for stmt in stmts {
             match stmt {
                 parse::Stmt::Item(Item::Fun(ItemFun { name, args, ret, block, .. })) => {
                     let ret = ret
-                        .map(|(_, ret)| LanternType::resolve(&ret, scope, &self.tcx).unwrap_or(self.tcx.error()))
+                        .map(|(_, ret)| LanternType::resolve(&ret, &scope, &self.tcx).unwrap_or(self.tcx.error()))
                         .unwrap_or(self.tcx.none());
 
                     let fun_def = match &name.base {
-                        Some(base) if let Ok(ty) = LanternType::resolve(base, scope, &self.tcx)
+                        Some(base) if let Ok(ty) = LanternType::resolve(base, &scope, &self.tcx)
                             && let Some(fun) = scope.associated(ty, name.ident.0) =>
                         {
                             fun
@@ -93,18 +93,18 @@ impl<'a, 't> Lighter<'a, 't> {
                             self.emit(DuplicateFunArg(fun_arg.ident));
                         }
                     });
-                    let stmts = self.lower_stmts(block.stmts, &mut fun_scope);
+                    let (stmts, behavior) = self.lower_stmts(block.stmts, fun_scope);
                     self.globals.funs[fun_def.index] = SparkFunction::Lantern {
                         name: name.display(self.symbol_table),
                         stmts,
-                        locals: fun_scope.max_locals,
+                        locals: behavior.locals_used,
                     };
                 }
                 parse::Stmt::Item(_) => {}
-                parse::Stmt::IfStmt(if_stmt) => spark_stmts.push(Stmt::If(self.check_if(if_stmt, scope))),
+                parse::Stmt::IfStmt(if_stmt) => spark_stmts.push(Stmt::If(self.check_if(if_stmt, &mut scope))),
                 parse::Stmt::MatchStmt(MatchStmt { expr, arms, .. }) => {
                     let span = expr.span();
-                    let expr = self.lower_expr(expr, scope);
+                    let expr = self.lower_expr(expr, &mut scope);
                     let inner = match *expr.ty {
                         LanternType::Optional(inner) => inner,
                         LanternType::Error => self.tcx.error(),
@@ -116,7 +116,7 @@ impl<'a, 't> Lighter<'a, 't> {
 
                     let mut some_arm = None;
                     let mut none_arm = None;
-                    let mut diverges = true;
+                    let mut overall_behavior = None;
 
                     for arm in arms {
                         match arm.pat {
@@ -127,9 +127,11 @@ impl<'a, 't> Lighter<'a, 't> {
 
                                 let mut block_scope = scope.child_block();
                                 let some_local = block_scope.insert_variable(ident.0, inner).expect("scope initially has no locals");
-                                let stmts = self.lower_stmts(arm.block.stmts, &mut block_scope);
-                                diverges = diverges && block_scope.diverges;
-                                scope.max_locals = scope.max_locals.max(block_scope.max_locals);
+                                let (stmts, behavior) = self.lower_stmts(arm.block.stmts, block_scope);
+                                overall_behavior = Some(match overall_behavior {
+                                    Some(overall) => behavior.combine_branch(overall),
+                                    None => behavior
+                                });
 
                                 some_arm.get_or_insert((stmts, some_local));
                             }
@@ -138,16 +140,19 @@ impl<'a, 't> Lighter<'a, 't> {
                                     self.emit(UnreachableArm(arm.span()));
                                 }
 
-                                let (stmts, none_diverges) = self.check_block(arm.block, scope);
-                                diverges = diverges && none_diverges;
+                                let (stmts, behavior) = self.lower_stmts(arm.block.stmts, scope.child_block());
+                                overall_behavior = Some(match overall_behavior {
+                                    Some(overall) => behavior.combine_branch(overall),
+                                    None => behavior
+                                });
 
                                 none_arm.get_or_insert(stmts);
                             }
                         }
                     }
 
-                    if diverges {
-                        scope.diverges = true;
+                    if let Some(behavior) = overall_behavior {
+                        scope.inherit(behavior);
                     }
 
                     if let (Some((some_arm, some_local)), Some(none_arm)) = (some_arm, none_arm) {
@@ -158,7 +163,7 @@ impl<'a, 't> Lighter<'a, 't> {
                 }
                 parse::Stmt::WhileStmt(WhileStmt { condition, block, .. }) => {
                     let cond_span = condition.span();
-                    let cond = self.lower_expr(condition, scope);
+                    let cond = self.lower_expr(condition, &mut scope);
                     if !cond.ty.is_applicable(self.tcx.primitive(&primitive::BOOL_PRIMITIVE)) {
                         self.emit(TypeMismatch {
                             expected: self.tcx.primitive(&primitive::BOOL_PRIMITIVE),
@@ -169,17 +174,16 @@ impl<'a, 't> Lighter<'a, 't> {
 
                     // don't check to see if the child scope diverges since it's not guaranteed the
                     // condition is met in the first place
-                    let mut loop_scope = scope.child_loop();
-                    let stmts = self.lower_stmts(block.stmts, &mut loop_scope);
-                    scope.max_locals = scope.max_locals.max(loop_scope.max_locals);
+                    let (stmts, behavior) = self.lower_stmts(block.stmts, scope.child_loop());
+                    scope.inherit_locals(behavior);
                     spark_stmts.push(Stmt::While { cond, stmts });
                 }
                 parse::Stmt::ValDeclaration(ValDeclaration { ident, r#type, init: Some((_, init)), .. }) => {
                     let init_span = init.span();
-                    let init = self.lower_expr(init, scope);
+                    let init = self.lower_expr(init, &mut scope);
                     let ty = r#type
                         .map(|(_, ty)| {
-                            let ty = self.sink.emit_or(LanternType::resolve(&ty, scope, &self.tcx), self.tcx.error());
+                            let ty = self.sink.emit_or(LanternType::resolve(&ty, &scope, &self.tcx), self.tcx.error());
                             if !init.ty.is_applicable(ty) {
                                 self.emit(TypeMismatch {
                                     expected: ty,
@@ -199,7 +203,7 @@ impl<'a, 't> Lighter<'a, 't> {
                     // TODO: ensure uninitialized vars are initialized before usage
                     self.sink.emit(warning!(ident.span() => "unitialized variables are not fully supported, use at your own risk"));
                     let ty = r#type
-                        .map(|(_, ty)| self.sink.emit_or(LanternType::resolve(&ty, scope, &self.tcx), self.tcx.error()))
+                        .map(|(_, ty)| self.sink.emit_or(LanternType::resolve(&ty, &scope, &self.tcx), self.tcx.error()))
                         .unwrap_or_else(|| {
                             self.emit(UninitVarNeedsType(ident));
                             self.tcx.error()
@@ -213,7 +217,7 @@ impl<'a, 't> Lighter<'a, 't> {
                     let span = expr.as_ref()
                         .map(|expr| expr.span())
                         .unwrap_or(ret.span());
-                    let expr = expr.map(|expr| self.lower_expr(expr, scope));
+                    let expr = expr.map(|expr| self.lower_expr(expr, &mut scope));
                     let ty = expr.as_ref().map(|expr| expr.ty).unwrap_or(self.tcx.none());
 
                     if !ty.is_applicable(scope.expected_ret) {
@@ -233,7 +237,7 @@ impl<'a, 't> Lighter<'a, 't> {
                 parse::Stmt::Break(r#break, _) => self.emit(BreakOutsideLoop(r#break)),
                 parse::Stmt::Throw(_, expr, _) => {
                     let expr_span = expr.span();
-                    let expr = self.lower_expr(expr, scope);
+                    let expr = self.lower_expr(expr, &mut scope);
                     if !expr.ty.is_applicable(self.tcx.builtin(BuiltinType::String)) {
                         self.emit(TypeMismatch {
                             expected: self.tcx.builtin(BuiltinType::String),
@@ -244,7 +248,7 @@ impl<'a, 't> Lighter<'a, 't> {
                     scope.diverges = true;
                     spark_stmts.push(Stmt::Throw(expr));
                 }
-                parse::Stmt::Expr(expr, _) => spark_stmts.push(Stmt::Expr(self.lower_expr(expr, scope))),
+                parse::Stmt::Expr(expr, _) => spark_stmts.push(Stmt::Expr(self.lower_expr(expr, &mut scope))),
             }
         }
 
@@ -263,7 +267,7 @@ impl<'a, 't> Lighter<'a, 't> {
             _ => {}
         }
 
-        spark_stmts
+        (spark_stmts, scope.into_behavior())
     }
 
     pub fn lower_expr(&mut self, expr: pe::Expr, scope: &mut Scope<'_, 't>) -> Expr<'t> {
@@ -458,10 +462,8 @@ impl<'a, 't> Lighter<'a, 't> {
             pe::Expr::Paren(ExprParen { expr, .. }) => self.lower_expr(*expr, scope),
             pe::Expr::Block(block) => {
                 let span = block.span();
-                let (stmts, diverges) = self.check_block(block, scope);
-                if diverges {
-                    scope.diverges = true;
-                }
+                let (stmts, behavior) = self.lower_stmts(block.stmts, scope.child_block());
+                scope.inherit(behavior);
                 Expr::new(ExprKind::Block(stmts), self.tcx.none(), span)
             }
             pe::Expr::Array(ExprArray { open_bracket, elements, closed_bracket, ty }) => {
@@ -842,16 +844,16 @@ impl<'a, 't> Lighter<'a, 't> {
     }
 
     fn check_if(&mut self, if_stmt: parse::IfStmt, scope: &mut Scope<'_, 't>) -> IfStmt<'t> {
-        let (if_stmt, diverges) = self.check_if_stmt(if_stmt, scope);
-        if diverges {
-            scope.diverges = true;
-        }
+        let (if_stmt, behavior) = self.check_if_stmt(if_stmt, scope);
+        scope.inherit(behavior);
         if_stmt
     }
 
-    fn check_if_stmt(&mut self, if_stmt: parse::IfStmt, scope: &mut Scope<'_, 't>) -> (IfStmt<'t>, bool) {
-        let parse::IfStmt { condition, block, branch, .. } = if_stmt;
-
+    fn check_if_stmt(
+        &mut self,
+        parse::IfStmt { condition, block, branch, ..}: parse::IfStmt,
+        scope: &mut Scope<'_, 't>,
+    ) -> (IfStmt<'t>, ScopeBehavior) {
         let condition_span = condition.span();
         let cond = self.lower_expr(condition, scope);
         if !cond.ty.is_applicable(self.tcx.primitive(&primitive::BOOL_PRIMITIVE)) {
@@ -862,32 +864,24 @@ impl<'a, 't> Lighter<'a, 't> {
             });
         }
 
-        let (stmts, block_diverges) = self.check_block(block, scope);
+        let (stmts, block_behavior) = self.lower_stmts(block.stmts, scope.child_block());
 
-        let (branch, rest_diverges) = match branch {
+        let (branch, rest_behavior) = match branch {
             Some((_, branch)) => match *branch {
                 parse::IfBranch::ElseIf(if_stmt) => {
-                    let (if_stmt, diverges) = self.check_if_stmt(*if_stmt, scope);
-                    (Some(IfBranch::ElseIf(Box::new(if_stmt))), diverges)
+                    let (if_stmt, behavior) = self.check_if_stmt(*if_stmt, scope);
+                    (Some(IfBranch::ElseIf(Box::new(if_stmt))), behavior)
                 }
                 parse::IfBranch::Else(block) => {
-                    let (stmts, diverges) = self.check_block(block, scope);
-                    (Some(IfBranch::Else(stmts)), diverges)
+                    let (stmts, behavior) = self.lower_stmts(block.stmts, scope.child_block());
+                    (Some(IfBranch::Else(stmts)), behavior)
                 }
-            },
+            }
             // without an `else` the chain can always fall through
-            None => (None, false),
+            None => (None, ScopeBehavior::guaranteed_converges()),
         };
 
-        (IfStmt { cond, stmts, branch }, block_diverges && rest_diverges)
-    }
-
-    fn check_block(&mut self, block: ExprBlock, scope: &mut Scope<'_, 't>) -> (Vec<Stmt<'t>>, bool) {
-        let mut block_scope = scope.child_block();
-        let stmts = self.lower_stmts(block.stmts, &mut block_scope);
-        let diverges = block_scope.diverges;
-        scope.max_locals = scope.max_locals.max(block_scope.max_locals);
-        (stmts, diverges)
+        (IfStmt { cond, stmts, branch }, block_behavior.combine_branch(rest_behavior))
     }
 
     fn check_fun(&mut self, args: Vec<pe::Expr>, fun_args: &[TypeId<'t>], span: Span, scope: &mut Scope<'_, 't>) -> Vec<Expr<'t>> {

@@ -107,6 +107,21 @@ impl<'a, 't> Scope<'a, 't> {
         type_associated.insert(name, fun);
         Some(())
     }
+
+    pub fn inherit(&mut self, behavior: ScopeBehavior) {
+        if behavior.diverges {
+            self.diverges = true;
+        }
+        self.inherit_locals(behavior);
+    }
+
+    pub fn inherit_locals(&mut self, behavior: ScopeBehavior) {
+        self.max_locals = self.max_locals.max(behavior.locals_used);
+    }
+
+    pub fn into_behavior(self) -> ScopeBehavior {
+        ScopeBehavior { diverges: self.diverges, locals_used: self.max_locals }
+    }
 }
 
 impl<'a: 'b, 'b, 't> Scope<'a, 't> {
@@ -161,6 +176,28 @@ pub enum ScopeKind<'a, 't> {
     Module,
     Function(&'a Scope<'a, 't>, Span),
     Block(&'a Scope<'a, 't>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScopeBehavior {
+    pub diverges: bool,
+    pub locals_used: usize,
+}
+
+impl ScopeBehavior {
+    pub fn guaranteed_converges() -> Self {
+        Self {
+            diverges: false,
+            locals_used: 0,
+        }
+    }
+
+    pub fn combine_branch(self, other: Self) -> Self {
+        Self {
+            diverges: self.diverges && other.diverges,
+            locals_used: self.locals_used.max(other.locals_used),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
