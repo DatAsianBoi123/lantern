@@ -201,23 +201,6 @@ impl ScopeBehavior {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LoopContext {
-    pub scopes: Vec<LoopScope>,
-}
-
-impl Default for LoopContext {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl LoopContext {
-    pub fn new() -> Self {
-        Self { scopes: Vec::new() }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoopScope {
     pub head: usize,
     pub breaks: Vec<usize>,
