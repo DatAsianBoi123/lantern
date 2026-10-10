@@ -1,6 +1,6 @@
-primitive byte;
+native byte;
 
-primitive int;
+native int;
 fun int.abs(self: int) -> int {
   if (self < 0) {
     return -self;
@@ -11,14 +11,14 @@ fun int.abs(self: int) -> int {
 native fun int.to_str(self: int) -> String;
 native fun int.from_str(str: String) -> int;
 
-primitive float;
+native float;
 fun float.inverse(self: float) -> float {
   return 1.0 / self;
 }
 native fun float.to_str(self: float) -> String;
 native fun float.from_str(str: String) -> float;
 
-primitive bool;
+native bool;
 
 @std(string)
 struct String {

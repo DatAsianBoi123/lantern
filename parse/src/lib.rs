@@ -1,5 +1,5 @@
 use diagnostic::{Diagnostic, FileId, Span, error, symbol::{SymbolDisplay, SymbolTable}};
-use lex::{ArrowRight, At, Break, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Continue, Else, Equals, FatArrowRight, Fun, Ident, If, Keyword, Match, Native, OpenBrace, OpenBracket, OpenParen, Period, Primitive, Punct, Question, Return, Semi, Struct, Throw, Token, TokenKind, Using, Val, While};
+use lex::{ArrowRight, At, Break, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Continue, Else, Equals, FatArrowRight, Fun, Ident, If, Keyword, Match, Native, OpenBrace, OpenBracket, OpenParen, Period, Punct, Question, Return, Semi, Struct, Throw, Token, TokenKind, Using, Val, While};
 use macros::Parse;
 
 use crate::{expr::{Expr, ExprBlock}, stream::{TokenStream, parse_punctuated, parse_repetition}};
@@ -44,7 +44,7 @@ impl ParseTokens for LanternFile {
 
 #[derive(Parse, Debug, Clone, PartialEq)]
 pub enum Stmt {
-    #[parse(using(Fun, Using, Struct, Native, Primitive, At))]
+    #[parse(using(Fun, Using, Struct, Native, At))]
     Item(Item),
     #[parse(using(If))]
     IfStmt(IfStmt),
@@ -68,7 +68,7 @@ pub enum Item {
     Using(ItemUsing),
     Struct(ItemStruct),
     NativeFun(ItemNativeFun),
-    Primitive(ItemPrimitive),
+    NativeType(ItemNativeType),
 }
 
 impl ParseTokens for Item {
@@ -79,8 +79,23 @@ impl ParseTokens for Item {
             Token::Keyword(Keyword::Using(_)) => stream.parse().map(Self::Using),
             // TODO: annotations on funs as well
             Token::Keyword(Keyword::Struct(_)) | Token::Punct(Punct::At(_)) => stream.parse().map(Self::Struct),
-            Token::Keyword(Keyword::Native(_)) => stream.parse().map(Self::NativeFun),
-            Token::Keyword(Keyword::Primitive(_)) => stream.parse().map(Self::Primitive),
+            Token::Keyword(Keyword::Native(native)) => {
+                let native = *native;
+                let _ = stream.next_token();
+                match stream.peek()? {
+                    Token::Keyword(Keyword::Fun(fun)) => {
+                        let fun = *fun;
+                        let _ = stream.next_token();
+                        Ok(Self::NativeFun(ItemNativeFun { native, fun, sig: stream.parse()?, semi: stream.parse()? }))
+                    }
+                    Token::Ident(ident) => {
+                        let ident = *ident;
+                        let _ = stream.next_token();
+                        Ok(Self::NativeType(ItemNativeType { native, ident, semi: stream.parse()? }))
+                    }
+                    peek => Err(error!(peek.span() => "expected `fun` or IDENT"))
+                }
+            }
             _ => Err(error!(peek.span() => "expected `item`")),
         }
     }
@@ -89,13 +104,7 @@ impl ParseTokens for Item {
 #[derive(Parse, Debug, Clone, PartialEq)]
 pub struct ItemFun {
     pub fun: Fun,
-    pub name: FunName,
-    pub open_paren: OpenParen,
-    #[parse(with(parse_punctuated::<FunArg, Comma, ClosedParen>))]
-    pub args: Vec<FunArg>,
-    pub closed_paren: ClosedParen,
-    #[parse(with_try(ArrowRight, Type))]
-    pub ret: Option<(ArrowRight, Type)>,
+    pub sig: FunSig,
     pub block: ExprBlock,
 }
 
@@ -103,6 +112,12 @@ pub struct ItemFun {
 pub struct ItemNativeFun {
     pub native: Native,
     pub fun: Fun,
+    pub sig: FunSig,
+    pub semi: Semi,
+}
+
+#[derive(Parse, Debug, Clone, PartialEq)]
+pub struct FunSig {
     pub name: FunName,
     pub open_paren: OpenParen,
     #[parse(with(parse_punctuated::<FunArg, Comma, ClosedParen>))]
@@ -110,7 +125,6 @@ pub struct ItemNativeFun {
     pub closed_paren: ClosedParen,
     #[parse(with_try(ArrowRight, Type))]
     pub ret: Option<(ArrowRight, Type)>,
-    pub semi: Semi,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -189,8 +203,8 @@ pub struct FunArg {
 }
 
 #[derive(Parse, Debug, Clone, PartialEq)]
-pub struct ItemPrimitive {
-    pub primitive: Primitive,
+pub struct ItemNativeType {
+    pub native: Native,
     pub ident: Ident,
     pub semi: Semi,
 }

@@ -1,6 +1,6 @@
-primitive int;
-primitive byte;
-primitive bool;
+native int;
+native byte;
+native bool;
 
 native fun int.to_str(self: int) -> String;
 

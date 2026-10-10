@@ -335,7 +335,6 @@ define_keywords! {
         Using = "using",
         Native = "native",
         Struct = "struct",
-        Primitive = "primitive",
         Return = "return",
         Continue = "continue",
         Break = "break",

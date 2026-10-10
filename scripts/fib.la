@@ -1,5 +1,5 @@
-primitive byte;
-primitive int;
+native byte;
+native int;
 
 native fun int.to_str(self: int) -> String;
 

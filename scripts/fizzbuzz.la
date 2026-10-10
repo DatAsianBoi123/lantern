@@ -1,5 +1,5 @@
-primitive byte;
-primitive int;
+native byte;
+native int;
 
 native fun int.to_str(self: int) -> String;
 native fun int.from_str(str: String) -> int;
@@ -17,7 +17,7 @@ fun print(str: String) {
 
 native fun write(x: [byte]);
 native fun flush();
-native fun input_int() -> int;
+native fun input() -> String;
 
 print("Enter max:");
 val max = int.from_str(input());

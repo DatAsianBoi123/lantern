@@ -1,6 +1,6 @@
 use arena::Arena;
 use diagnostic::{DiagnosticError, DiagnosticSink, Span, error, symbol::{SymbolDisplay, SymbolTable}, warning};
-use parse::{FunArg, Item, ItemFun, ItemNativeFun, ItemPrimitive, ItemStruct, LanternFile, MatchPattern, MatchStmt, ReturnStmt, StructField, ValDeclaration, WhileStmt, expr::{self as pe, BinaryOperator, ExprArray, ExprBinary, ExprField, ExprFunCall, ExprIndex, ExprMethodCall, ExprParen, ExprStruct, ExprUnary}, lex::{self, TokenKind}};
+use parse::{FunArg, FunSig, Item, ItemFun, ItemNativeFun, ItemNativeType, ItemStruct, LanternFile, MatchPattern, MatchStmt, ReturnStmt, StructField, ValDeclaration, WhileStmt, expr::{self as pe, BinaryOperator, ExprArray, ExprBinary, ExprField, ExprFunCall, ExprIndex, ExprMethodCall, ExprParen, ExprStruct, ExprUnary}, lex::{self, TokenKind}};
 
 use crate::{def::{LanternFunction, LanternStruct, LanternStructField}, diagnostics::*, expr::{Expr, ExprKind, Literal, LogicalOperation}, native::{FromDefError, NativeFun}, scope::{Globals, Scope, ScopeBehavior, ScopeKind}, stmt::{IfBranch, IfStmt, Stmt}, ty::{BuiltinType, LanternType, TypeContext, TypeId}};
 
@@ -72,7 +72,7 @@ impl<'a, 't> Lighter<'a, 't> {
 
         for stmt in stmts {
             match stmt {
-                parse::Stmt::Item(Item::Fun(ItemFun { name, args, ret, block, .. })) => {
+                parse::Stmt::Item(Item::Fun(ItemFun { sig: FunSig { name, args, ret, .. }, block, .. })) => {
                     let ret = ret
                         .map(|(_, ret)| LanternType::resolve(&ret, &scope, &self.tcx).unwrap_or(self.tcx.error()))
                         .unwrap_or(self.tcx.none());
@@ -691,7 +691,7 @@ impl<'a, 't> Lighter<'a, 't> {
                     let LanternType::Struct(r#struct) = ty.as_ty() else { unreachable!() };
                     self.globals.types.push(&r#struct.data);
                 }
-                Item::Primitive(ItemPrimitive { ident, .. }) => {
+                Item::NativeType(ItemNativeType { ident, .. }) => {
                     if let Some(primitive) = primitive::get_primitive(self.symbol_table.resolve(ident.0)) {
                         if scope.insert_item(ident.0, self.tcx.primitive(primitive)).is_none() {
                             self.emit(PrimitiveAlreadyDeclared(*ident));
@@ -711,7 +711,7 @@ impl<'a, 't> Lighter<'a, 't> {
                 _ => None,
             })
             .for_each(|item| match item {
-                    Item::Fun(ItemFun { name, args, ret, .. }) => {
+                    Item::Fun(ItemFun { sig: FunSig { name, args, ret, .. }, .. }) => {
                         let args = args.iter()
                             .map(|FunArg { ident, r#type, .. }| {
                                 (ident.0, self.sink.emit_or(LanternType::resolve(r#type, scope, &self.tcx), self.tcx.error()))
@@ -752,7 +752,7 @@ impl<'a, 't> Lighter<'a, 't> {
                             locals: 0,
                         });
                     }
-                    Item::NativeFun(ItemNativeFun { name, open_paren, args, closed_paren, ret, semi, .. }) => {
+                    Item::NativeFun(ItemNativeFun { sig: FunSig { name, open_paren, args, closed_paren, ret }, semi, .. }) => {
                         let base = name.base.as_ref()
                             .map(|ty| self.sink.emit_or(LanternType::resolve(ty, scope, &self.tcx), self.tcx.error()));
 

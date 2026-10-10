@@ -1,6 +1,6 @@
-primitive byte;
-primitive int;
-primitive float;
+native byte;
+native int;
+native float;
 
 native fun float.to_str(self: float) -> String;
 

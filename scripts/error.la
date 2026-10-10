@@ -1,5 +1,5 @@
-primitive byte;
-primitive float;
+native byte;
+native float;
 
 @std(string)
 struct String {
