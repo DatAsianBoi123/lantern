@@ -183,7 +183,10 @@ impl FlameGen {
             ExprKind::Static(id) => inst!(with self => expr.span; PUSHU *id),
             ExprKind::Global(id) => inst!(with self => expr.span; LOAD_GLOBAL *id),
             ExprKind::Local(id) => inst!(with self => expr.span; LOAD_LOCAL *id),
-            ExprKind::Block(stmts) => self.compile_stmts(stmts),
+            ExprKind::Block(stmts) => {
+                self.compile_stmts(stmts);
+                inst!(self.instructions; PUSHNULL)
+            }
             ExprKind::Field(obj, offset) => {
                 self.compile_expr(obj);
                 inst! { with self => expr.span;
