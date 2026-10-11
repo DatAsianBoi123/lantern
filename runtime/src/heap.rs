@@ -457,6 +457,7 @@ impl ManagedObject {
 
     /// # Safety
     /// type_info must be valid
+    #[must_use]
     pub unsafe fn allocate(type_info: *const TypeInfo) -> HeapObject {
         let obj_size = match unsafe { &*type_info } {
             TypeInfo::Object { size, .. } => *size,
@@ -494,6 +495,7 @@ impl ManagedArray {
 
     /// # Safety
     /// type_info must be valid
+    #[must_use]
     pub unsafe fn allocate(len: usize, type_info: *const TypeInfo) -> HeapArray {
         let element_size = match unsafe { &*type_info } {
             TypeInfo::Array { element_size, .. } => *element_size,
