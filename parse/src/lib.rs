@@ -1,5 +1,5 @@
 use diagnostic::{Diagnostic, FileId, Span, error, symbol::{SymbolDisplay, SymbolTable}};
-use lex::{ArrowRight, At, Break, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Continue, Else, Equals, FatArrowRight, Fun, Ident, If, Keyword, Match, Native, OpenBrace, OpenBracket, OpenParen, Period, Punct, Question, Return, Semi, Struct, Throw, Token, TokenKind, Using, Val, While};
+use lex::{ArrowRight, At, Break, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Continue, Else, Equals, FatArrowRight, Fun, Ident, If, Keyword, Match, Native, OpenBrace, OpenBracket, OpenParen, Pass, Period, Punct, Question, Return, Semi, Struct, Throw, Token, TokenKind, Using, Val, While};
 use macros::Parse;
 
 use crate::{expr::{Expr, ExprBlock}, stream::{TokenStream, parse_punctuated, parse_repetition}};
@@ -56,6 +56,8 @@ pub enum Stmt {
     ValDeclaration(ValDeclaration),
     #[parse(using(Return))]
     Return(ReturnStmt),
+    #[parse(using(Pass))]
+    Pass(PassStmt),
     Continue(Continue, Semi),
     Break(Break, Semi),
     Throw(Throw, Expr, Semi),
@@ -327,6 +329,30 @@ impl ParseTokens for ReturnStmt {
 
         Ok(Self {
             ret,
+            expr,
+            semi: stream.parse()?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PassStmt {
+    pub pass: Pass,
+    pub expr: Option<Expr>,
+    pub semi: Semi,
+}
+
+impl ParseTokens for PassStmt {
+    fn parse(stream: &mut TokenStream) -> Result<Self> {
+        let pass = stream.parse()?;
+        let expr = if Semi::is_token(stream.peek()?) {
+            None
+        } else {
+            Some(stream.parse()?)
+        };
+
+        Ok(Self {
+            pass,
             expr,
             semi: stream.parse()?,
         })

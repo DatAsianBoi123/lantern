@@ -230,6 +230,7 @@ impl<'a, 't> Lighter<'a, 't> {
                     scope.diverges = true;
                     spark_stmts.push(Stmt::Return(expr));
                 }
+                parse::Stmt::Pass(_) => todo!(),
                 parse::Stmt::Continue(_, _) if scope.in_loop => spark_stmts.push(Stmt::Continue),
                 parse::Stmt::Continue(cont, _) => self.emit(ContinueOutsideLoop(cont)),
                 parse::Stmt::Break(_, _) if scope.in_loop => spark_stmts.push(Stmt::Break),
