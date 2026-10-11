@@ -549,24 +549,16 @@ impl GlobalStorage {
     pub fn allocate(
         vars: GlobalVariables,
         bytes_type_info: &TypeInfo,
-        string_type_info: &TypeInfo,
     ) -> Self {
         let strs = vars.into_strs();
-        // each String contains a HeapObject + HeapArray
-        let mut array = Box::new_uninit_slice(strs.len() * 2);
+        let mut array = Box::new_uninit_slice(strs.len());
         strs.into_iter().enumerate().for_each(|(i, str)| {
             unsafe {
                 let mut bytes = ManagedArray::allocate(str.len(), bytes_type_info);
                 for (i, byte) in str.bytes().enumerate() {
                     bytes.set(i, &raw const byte);
                 }
-                array[i * 2].write(bytes.as_mut_ptr());
-
-                let mut string = ManagedObject::allocate(string_type_info);
-                let field_ptr = string.field_ptr_mut().cast::<*mut u8>();
-                // this pointer won't dangle since GlobalStorage deallocates everything at once
-                field_ptr.write(bytes.as_mut_ptr());
-                array[i * 2 + 1].write(string.as_mut_ptr());
+                array[i].write(bytes.as_mut_ptr());
             }
         });
         Self(unsafe { array.assume_init() })

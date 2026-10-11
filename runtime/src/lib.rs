@@ -123,6 +123,7 @@ pub struct VM {
     globals: GlobalStorage,
     funs: Box<[GeneratedFunction]>,
     types: Box<[TypeInfo]>,
+    #[allow(unused)]
     builtin_type_indices: [usize; BuiltinType::SIZE],
     pub heap: Heap,
 }
@@ -161,7 +162,6 @@ impl VM {
             globals: GlobalStorage::allocate(
                 globals.vars,
                 &types[Self::BYTE_ARR_TYPE_INDEX],
-                &types[builtin_type_indices[BuiltinType::String as usize]],
             ),
             funs: globals.funs.into_boxed_slice(),
             types,
@@ -207,29 +207,16 @@ impl VM {
         &self.stack
     }
 
-    pub fn alloc_string(&mut self, bytes: &[u8]) -> Result<HeapObject, RuntimeError> {
-        let (string, chars) = self.alloc_string_raw(bytes.len())?;
-        unsafe { ptr::copy_nonoverlapping(bytes.as_ptr(), chars, bytes.len()) };
+    pub fn alloc_string(&mut self, bytes: &[u8]) -> Result<HeapArray, RuntimeError> {
+        let mut string = self.alloc_string_zeroed(bytes.len())?;
+        unsafe { ptr::copy_nonoverlapping(bytes.as_ptr(), string.element_ptr_mut(), bytes.len()) };
         Ok(string)
     }
 
-    pub fn alloc_string_zeroed(&mut self, len: usize) -> Result<HeapObject, RuntimeError> {
-        self.alloc_string_raw(len).map(|(obj, _)| obj)
-    }
-
-    fn alloc_string_raw(&mut self, len: usize) -> Result<(HeapObject, *mut u8), RuntimeError> {
+    pub fn alloc_string_zeroed(&mut self, len: usize) -> Result<HeapArray, RuntimeError> {
         let byte_type_info = &self.types[Self::BYTE_ARR_TYPE_INDEX];
-        let mut chars = Self::alloc_array(&mut self.heap, &mut self.stack, len, byte_type_info);
-
-        self.stack.push_ref(chars.as_mut_ptr()).map_err(|err| self.throw(err))?;
-
-        let string_type_info = &self.types[self.builtin_type_indices[BuiltinType::String as usize]];
-        let mut string = Self::alloc_obj(&mut self.heap, &mut self.stack, string_type_info);
-        let field_ptr = string.field_ptr_mut().cast::<*mut u8>();
-        let chars_ptr = unsafe { self.stack.pop().expect("chars pointer").read_ptr() };
-        unsafe { field_ptr.write(chars_ptr) };
-
-        Ok((string, unsafe { HeapArray::from_raw(chars_ptr).element_ptr_mut() }))
+        let str = Self::alloc_array(&mut self.heap, &mut self.stack, len, byte_type_info);
+        Ok(str)
     }
 
     pub fn throw(&mut self, message: impl ToString) -> RuntimeError {
@@ -333,8 +320,7 @@ impl VM {
                         // don't pop since assignment is an expression, value will be popped
                         self.stack[frame.bottom + index] = self.stack.peek()?;
                     },
-                    // global strings are stored as array then object
-                    Instruction::LoadGlobal(index) => self.stack.push_ref(self.globals[index * 2 + 1])?,
+                    Instruction::LoadGlobal(index) => self.stack.push_ref(self.globals[index])?,
                     Instruction::Return => {
                         let ret = self.stack.pop()?;
                         let bottom = self.frames.pop().expect("frame exists").bottom;
@@ -344,9 +330,8 @@ impl VM {
                         return Ok(());
                     },
                     Instruction::Throw => {
-                        let string = unsafe { HeapObject::from_raw(self.stack.pop()?.read_ptr()) };
-                        let bytes = unsafe { HeapArray::from_raw(*string.field_ptr().cast()) };
-                        let message = unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(bytes.element_ptr(), bytes.len())) };
+                        let string = unsafe { HeapArray::from_raw(self.stack.pop()?.read_ptr()) };
+                        let message = unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(string.element_ptr(), string.len())) };
                         return Err(Box::new(UserError(message.to_string())))
                     },
                     Instruction::Invoke(num_args) => {

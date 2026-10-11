@@ -2,14 +2,13 @@ use arena::Arena;
 use diagnostic::{DiagnosticError, DiagnosticSink, Span, error, symbol::{SymbolDisplay, SymbolTable}, warning};
 use parse::{FunArg, FunSig, Item, ItemFun, ItemNativeFun, ItemNativeType, ItemStruct, LanternFile, MatchPattern, MatchStmt, ReturnStmt, StructField, ValDeclaration, WhileStmt, expr::{self as pe, BinaryOperator, ExprArray, ExprBinary, ExprField, ExprFunCall, ExprIndex, ExprMethodCall, ExprParen, ExprStruct, ExprUnary}, lex::{self, TokenKind}};
 
-use crate::{def::{LanternFunction, LanternStruct, LanternStructField}, diagnostics::*, expr::{Expr, ExprKind, Literal, LogicalOperation}, native::{FromDefError, NativeFun}, scope::{Globals, Scope, ScopeBehavior, ScopeKind}, stmt::{IfBranch, IfStmt, Stmt}, ty::{BuiltinType, LanternType, TypeContext, TypeId}};
+use crate::{def::{LanternFunction, LanternStruct, LanternStructField}, diagnostics::*, expr::{Expr, ExprKind, Literal, LogicalOperation}, native::{BOOL_NATIVE, FLOAT_NATIVE, FromDefError, INT_NATIVE, NativeFun, STR_NATIVE}, scope::{Globals, Scope, ScopeBehavior, ScopeKind}, stmt::{IfBranch, IfStmt, Stmt}, ty::{LanternType, TypeContext, TypeId}};
 
 pub mod ty;
 pub mod scope;
 pub mod stmt;
 pub mod expr;
 pub mod def;
-pub mod primitive;
 pub mod native;
 pub mod diagnostics;
 
@@ -164,9 +163,9 @@ impl<'a, 't> Lighter<'a, 't> {
                 parse::Stmt::WhileStmt(WhileStmt { condition, block, .. }) => {
                     let cond_span = condition.span();
                     let cond = self.lower_expr(condition, &mut scope);
-                    if !cond.ty.is_applicable(self.tcx.primitive(&primitive::BOOL_PRIMITIVE)) {
+                    if !cond.ty.is_applicable(self.tcx.primitive(&BOOL_NATIVE)) {
                         self.emit(TypeMismatch {
-                            expected: self.tcx.primitive(&primitive::BOOL_PRIMITIVE),
+                            expected: self.tcx.primitive(&BOOL_NATIVE),
                             got: cond.ty,
                             span: cond_span,
                         });
@@ -238,9 +237,9 @@ impl<'a, 't> Lighter<'a, 't> {
                 parse::Stmt::Throw(_, expr, _) => {
                     let expr_span = expr.span();
                     let expr = self.lower_expr(expr, &mut scope);
-                    if !expr.ty.is_applicable(self.tcx.builtin(BuiltinType::String)) {
+                    if !expr.ty.is_applicable(self.tcx.primitive(&STR_NATIVE)) {
                         self.emit(TypeMismatch {
-                            expected: self.tcx.builtin(BuiltinType::String),
+                            expected: self.tcx.primitive(&STR_NATIVE),
                             got: expr.ty,
                             span: expr_span,
                         });
@@ -276,20 +275,20 @@ impl<'a, 't> Lighter<'a, 't> {
                 Expr::new(ExprKind::Literal(Literal::None), self.tcx.none(), span)
             }
             pe::Expr::Literal(lex::Literal::Integer(int, span)) => {
-                Expr::new(ExprKind::Literal(Literal::Int(int)), self.tcx.primitive(&primitive::INT_PRIMITIVE), span)
+                Expr::new(ExprKind::Literal(Literal::Int(int)), self.tcx.primitive(&INT_NATIVE), span)
             }
             pe::Expr::Literal(lex::Literal::Float(float, span)) => {
-                Expr::new(ExprKind::Literal(Literal::Float(float)), self.tcx.primitive(&primitive::FLOAT_PRIMITIVE), span)
+                Expr::new(ExprKind::Literal(Literal::Float(float)), self.tcx.primitive(&FLOAT_NATIVE), span)
             }
             pe::Expr::Literal(lex::Literal::True(span)) => {
-                Expr::new(ExprKind::Literal(Literal::True), self.tcx.primitive(&primitive::BOOL_PRIMITIVE), span)
+                Expr::new(ExprKind::Literal(Literal::True), self.tcx.primitive(&BOOL_NATIVE), span)
             }
             pe::Expr::Literal(lex::Literal::False(span)) => {
-                Expr::new(ExprKind::Literal(Literal::False), self.tcx.primitive(&primitive::BOOL_PRIMITIVE), span)
+                Expr::new(ExprKind::Literal(Literal::False), self.tcx.primitive(&BOOL_NATIVE), span)
             }
             pe::Expr::Literal(lex::Literal::String(str, span)) => {
                 let global = self.globals.vars.insert_str(str.into_boxed_str());
-                Expr::new(ExprKind::Global(global), self.tcx.builtin(BuiltinType::String), span)
+                Expr::new(ExprKind::Global(global), self.tcx.primitive(&STR_NATIVE), span)
             }
             pe::Expr::Identifier(ident) => {
                 if let Some(var) = scope.variable(ident.0) {
@@ -322,7 +321,7 @@ impl<'a, 't> Lighter<'a, 't> {
                         }
                     }
                     LanternType::Array(_) if self.symbol_table.resolve(ident.0) == "len" => {
-                        return Expr::new(ExprKind::Len(Box::new(base)), self.tcx.primitive(&primitive::INT_PRIMITIVE), ident.span())
+                        return Expr::new(ExprKind::Len(Box::new(base)), self.tcx.primitive(&INT_NATIVE), ident.span())
                     }
                     _ => {}
                 }
@@ -512,9 +511,9 @@ impl<'a, 't> Lighter<'a, 't> {
 
                 let index_span = index.span();
                 let index = self.lower_expr(*index, scope);
-                if !index.ty.is_applicable(self.tcx.primitive(&primitive::INT_PRIMITIVE)) {
+                if !index.ty.is_applicable(self.tcx.primitive(&INT_NATIVE)) {
                     self.emit(TypeMismatch {
-                        expected: self.tcx.primitive(&primitive::INT_PRIMITIVE),
+                        expected: self.tcx.primitive(&INT_NATIVE),
                         got: index.ty,
                         span: index_span,
                     });
@@ -531,7 +530,7 @@ impl<'a, 't> Lighter<'a, 't> {
                 // special cases
                 match op {
                     BinaryOperator::And(_) | BinaryOperator::Or(_) => {
-                        if !lhs.ty.is_primitive_type(&primitive::BOOL_PRIMITIVE) || !rhs.ty.is_primitive_type(&primitive::BOOL_PRIMITIVE) {
+                        if !lhs.ty.is_primitive_type(&BOOL_NATIVE) || !rhs.ty.is_primitive_type(&BOOL_NATIVE) {
                             self.emit(NoBinOp {
                                 lhs: lhs.ty,
                                 op,
@@ -546,7 +545,7 @@ impl<'a, 't> Lighter<'a, 't> {
                         };
                         return Expr::new(
                             ExprKind::Logical(Box::new(lhs), logical, Box::new(rhs)),
-                            self.tcx.primitive(&primitive::BOOL_PRIMITIVE),
+                            self.tcx.primitive(&BOOL_NATIVE),
                             rhs_span
                         );
                     }
@@ -572,7 +571,7 @@ impl<'a, 't> Lighter<'a, 't> {
                             self.emit(BadAssignment(lhs_span));
                         }
                         match (&*lhs.ty, &*rhs.ty) {
-                            (LanternType::Primitive(lhs_primitive), LanternType::Primitive(_))
+                            (LanternType::Native(lhs_primitive), LanternType::Native(_))
                                 if let Some(op) = lhs_primitive.ops.get_bin_op(op) =>
                             {
                                 return Expr::new(ExprKind::BinaryAssign(Box::new(lhs), op, Box::new(rhs)), self.tcx.none(), rhs_span);
@@ -602,12 +601,12 @@ impl<'a, 't> Lighter<'a, 't> {
                     return Expr::error(&self.tcx, rhs_span);
                 }
                 match (&*lhs.ty, &*rhs.ty) {
-                    (LanternType::Primitive(lhs_primitive), LanternType::Primitive(_))
+                    (LanternType::Native(lhs_primitive), LanternType::Native(_))
                         if op.is_comparison() && let Some(op) = lhs_primitive.ops.get_bin_op(op) =>
                     {
-                        Expr::new(ExprKind::Binary(Box::new(lhs), op, Box::new(rhs)), self.tcx.primitive(&primitive::BOOL_PRIMITIVE), rhs_span)
+                        Expr::new(ExprKind::Binary(Box::new(lhs), op, Box::new(rhs)), self.tcx.primitive(&BOOL_NATIVE), rhs_span)
                     }
-                    (LanternType::Primitive(lhs_primitive), LanternType::Primitive(_))
+                    (LanternType::Native(lhs_primitive), LanternType::Native(_))
                         if let Some(op) = lhs_primitive.ops.get_bin_op(op) =>
                     {
                         let ty = lhs.ty;
@@ -627,7 +626,7 @@ impl<'a, 't> Lighter<'a, 't> {
                 let span = expr.span();
                 let base = self.lower_expr(*expr, scope);
                 match &*base.ty {
-                    LanternType::Primitive(primitive) if let Some(op) = primitive.ops.get_un_op(op) => {
+                    LanternType::Native(primitive) if let Some(op) = primitive.ops.get_un_op(op) => {
                         let ty = base.ty;
                         Expr::new(ExprKind::Unary(op, Box::new(base)), ty, span)
                     }
@@ -658,17 +657,7 @@ impl<'a, 't> Lighter<'a, 't> {
                     for annotation in &annotations.annotations {
                         if self.symbol_table.resolve(annotation.ident.0) == "std" {
                             if let Some(args) = &annotation.args && args.args.len() == 1 {
-                                let arg = &args.args[0];
-                                let successful_link = match self.symbol_table.resolve(arg.0) {
-                                    "string" => self.tcx.link_builtin(BuiltinType::String, ty),
-                                    _ => {
-                                        self.emit(UnknownStdType(*arg));
-                                        true
-                                    }
-                                };
-                                if !successful_link {
-                                    self.emit(BuiltinAlreadyDeclared(*ident));
-                                }
+                                self.emit(UnknownStdType(args.args[0]));
                             } else {
                                 self.emit(AnnotationArgMismatch {
                                     expected: 1,
@@ -692,7 +681,7 @@ impl<'a, 't> Lighter<'a, 't> {
                     self.globals.types.push(&r#struct.data);
                 }
                 Item::NativeType(ItemNativeType { ident, .. }) => {
-                    if let Some(primitive) = primitive::get_primitive(self.symbol_table.resolve(ident.0)) {
+                    if let Some(primitive) = native::get_native(self.symbol_table.resolve(ident.0)) {
                         if scope.insert_item(ident.0, self.tcx.primitive(primitive)).is_none() {
                             self.emit(PrimitiveAlreadyDeclared(*ident));
                         }
@@ -856,9 +845,9 @@ impl<'a, 't> Lighter<'a, 't> {
     ) -> (IfStmt<'t>, ScopeBehavior) {
         let condition_span = condition.span();
         let cond = self.lower_expr(condition, scope);
-        if !cond.ty.is_applicable(self.tcx.primitive(&primitive::BOOL_PRIMITIVE)) {
+        if !cond.ty.is_applicable(self.tcx.primitive(&BOOL_NATIVE)) {
             self.emit(TypeMismatch {
-                expected: self.tcx.primitive(&primitive::BOOL_PRIMITIVE),
+                expected: self.tcx.primitive(&BOOL_NATIVE),
                 got: cond.ty,
                 span: condition_span,
             });

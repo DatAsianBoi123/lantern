@@ -4,7 +4,7 @@ use arena::Arena;
 use diagnostic::{Diagnostic, error, symbol::{SymbolDisplay, SymbolTable}};
 use parse::{FunType, Type};
 
-use crate::{def::{LanternPrimitive, LanternStruct}, scope::Scope};
+use crate::{def::{LanternNative, LanternStruct, NativeRepr}, scope::Scope};
 
 #[derive(Debug, Clone, Copy, Hash)]
 pub struct TypeId<'t>(&'t LanternType<'t>);
@@ -16,13 +16,17 @@ impl PartialEq for TypeId<'_> {
     }
 }
 
+impl<'t> PartialEq<&'_ LanternType<'t>> for TypeId<'t> {
+    fn eq(&self, other: &&'_ LanternType<'t>) -> bool {
+        ptr::eq(self.0, *other)
+    }
+}
+
+impl Eq for TypeId<'_> { }
+
 impl<'t> TypeId<'t> {
     pub fn as_ty(&self) -> &'t LanternType<'t> {
         self.0
-    }
-
-    pub fn eq_ty(&self, ty: &LanternType<'t>) -> bool {
-        ptr::eq(self.0, ty)
     }
 
     pub fn is_applicable(self, other: Self) -> bool {
@@ -30,13 +34,11 @@ impl<'t> TypeId<'t> {
             (LanternType::Error, _)
             | (_, LanternType::Error)
             | (LanternType::None, LanternType::Optional(_)) => true,
-            (ty, LanternType::Optional(inner)) if inner.eq_ty(ty) => true,
+            (ty, LanternType::Optional(inner)) if *inner == ty => true,
             (l, r) => l == r,
         }
     }
 }
-
-impl Eq for TypeId<'_> { }
 
 impl SymbolDisplay for TypeId<'_> {
     fn display(&self, symbol_table: &SymbolTable) -> String {
@@ -55,7 +57,7 @@ impl<'t> Deref for TypeId<'t> {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum LanternType<'t> {
     Struct(LanternStruct<'t>),
-    Primitive(&'static LanternPrimitive),
+    Native(&'static LanternNative),
     Array(TypeId<'t>),
     Function {
         args: Vec<TypeId<'t>>,
@@ -70,7 +72,7 @@ impl SymbolDisplay for LanternType<'_> {
     fn display(&self, symbol_table: &SymbolTable) -> String {
         match self {
             Self::Struct(LanternStruct { name, .. }) => name.display(symbol_table),
-            Self::Primitive(LanternPrimitive { name, .. }) => (*name).to_string(),
+            Self::Native(LanternNative { name, .. }) => (*name).to_string(),
             Self::Array(id) => format!("[{}]", id.display(symbol_table)),
             Self::Function { args, ret, .. } => {
                 format!("fun({}) -> {}", args.iter().map(|ty| ty.display(symbol_table)).collect::<Vec<_>>().join(", "), ret.display(symbol_table))
@@ -118,12 +120,12 @@ impl<'t> LanternType<'t> {
     }
 
     pub fn is_primitive(&self) -> bool {
-        matches!(self, Self::Primitive(_) | Self::Function { .. })
+        matches!(self, Self::Native(LanternNative { repr: NativeRepr::Value { .. }, ..}) | Self::Function { .. })
     }
 
     pub fn is_ref(&self) -> bool {
         match self {
-            Self::Struct(_) | Self::Array(..) => true,
+            Self::Struct(_) | Self::Array(..) | Self::Native(LanternNative { repr: NativeRepr::Ref, .. }) => true,
             Self::Optional(inner) => inner.is_ref(),
             _ => false,
         }
@@ -133,8 +135,8 @@ impl<'t> LanternType<'t> {
         matches!(self, Self::Optional(inner) if !inner.is_ref())
     }
 
-    pub fn is_primitive_type(&self, primitive: &'static LanternPrimitive) -> bool {
-        *self == Self::Error || *self == Self::Primitive(primitive)
+    pub fn is_primitive_type(&self, primitive: &'static LanternNative) -> bool {
+        *self == Self::Error || *self == Self::Native(primitive)
     }
 
     pub fn is_array(&self, inner: TypeId<'t>) -> bool {
@@ -144,7 +146,8 @@ impl<'t> LanternType<'t> {
     pub fn size(&self) -> usize {
         match self {
             Self::Struct(_) => 8,
-            Self::Primitive(LanternPrimitive { size, .. }) => *size,
+            Self::Native(LanternNative { repr: NativeRepr::Value { size, .. }, .. }) => *size,
+            Self::Native(_) => 8,
             Self::Array(..) => 8,
             Self::Function { .. } => 8,
             Self::Optional(ty) => ty.size(),
@@ -157,7 +160,8 @@ impl<'t> LanternType<'t> {
     pub fn alignment(&self) -> usize {
         match self {
             Self::Struct(_) => 8,
-            Self::Primitive(LanternPrimitive { align, .. }) => *align,
+            Self::Native(LanternNative { repr: NativeRepr::Value { align, .. }, .. }) => *align,
+            Self::Native(_) => 8,
             Self::Array(..) => 8,
             Self::Function { .. } => 8,
             Self::Optional(ty) => ty.alignment(),
@@ -192,8 +196,8 @@ impl<'t> TypeContext<'t> {
         self.intern(LanternType::None)
     }
 
-    pub fn primitive(&self, primitive: &'static LanternPrimitive) -> TypeId<'t> {
-        self.intern(LanternType::Primitive(primitive))
+    pub fn primitive(&self, primitive: &'static LanternNative) -> TypeId<'t> {
+        self.intern(LanternType::Native(primitive))
     }
 
     pub fn builtin(&self, builtin: BuiltinType) -> TypeId<'t> {
@@ -242,11 +246,9 @@ impl<'t> TypeContext<'t> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BuiltinType {
-    String = 0,
-}
+pub enum BuiltinType { }
 
 impl BuiltinType {
-    pub const SIZE: usize = 1;
+    pub const SIZE: usize = 0;
 }
 

@@ -1,12 +1,8 @@
 native byte;
 native float;
+native str;
 
-@std(string)
-struct String {
-  bytes: [byte],
-}
-
-native fun write(str: [byte]);
+native fun write(str: str);
 native fun flush();
 
 fun div(a: float, b: float) -> float {

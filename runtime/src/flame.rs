@@ -270,6 +270,8 @@ impl FlameGen {
                 for element in elements {
                     self.compile_expr(element);
                 }
+                // BUG: primitive array expects a size and align of 8 regardless of the actual
+                // primitive's size and align
                 let id = if ty.is_ref() { VM::REF_ARR_TYPE_INDEX } else { VM::PRIMITIVE_ARR_TYPE_INDEX };
                 inst!(with self => expr.span; ALLOC_ARR id, elements.len());
             }

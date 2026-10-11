@@ -1,4 +1,4 @@
-use std::{cell::OnceCell, fmt::Formatter, hash};
+use std::{cell::OnceCell, hash::{Hash, Hasher}};
 
 use diagnostic::symbol::Symbol;
 use parse::{expr::{BinaryOperator, UnaryOperator}};
@@ -59,8 +59,8 @@ impl PartialEq for LanternStruct<'_> {
 
 impl Eq for LanternStruct<'_> { }
 
-impl hash::Hash for LanternStruct<'_> {
-    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+impl Hash for LanternStruct<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
         state.write_usize(self.id);
     }
 }
@@ -142,55 +142,52 @@ pub struct LanternStructField<'t> {
     pub ty: TypeId<'t>,
 }
 
-#[derive(Clone)]
-pub struct LanternPrimitive {
+#[derive(Debug, Clone)]
+pub struct LanternNative {
     pub name: &'static str,
     pub id: usize,
-    pub size: usize,
-    pub align: usize,
+    pub repr: NativeRepr,
     pub ops: PrimitiveOps,
 }
 
-impl hash::Hash for LanternPrimitive {
-    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+impl Hash for LanternNative {
+    fn hash<H: Hasher>(&self, state: &mut H) {
         state.write_usize(self.id);
     }
 }
 
-impl std::fmt::Debug for LanternPrimitive {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LanternPrimitive")
-            .field("name", &self.name)
-            .field("id", &self.id)
-            .field("size", &self.size)
-            .field("align", &self.align)
-            .finish_non_exhaustive()
-    }
-}
-
-impl PartialEq for LanternPrimitive {
+impl PartialEq for LanternNative {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
 }
 
-impl Eq for LanternPrimitive { }
+impl Eq for LanternNative { }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeRepr {
+    Value {
+        size: usize,
+        align: usize,
+    },
+    Ref,
+}
 
 #[derive(Default, Debug, Clone, PartialEq)]
 pub struct PrimitiveOps {
-    pub negate_inst: Option<UnaryOperation>,
-    pub not_inst: Option<UnaryOperation>,
-    pub add_inst: Option<BinaryOperation>,
-    pub sub_inst: Option<BinaryOperation>,
-    pub mult_inst: Option<BinaryOperation>,
-    pub div_inst: Option<BinaryOperation>,
-    pub mod_inst: Option<BinaryOperation>,
-    pub lt_inst: Option<BinaryOperation>,
-    pub le_inst: Option<BinaryOperation>,
-    pub ge_inst: Option<BinaryOperation>,
-    pub gt_inst: Option<BinaryOperation>,
-    pub eq_inst: Option<BinaryOperation>,
-    pub neq_inst: Option<BinaryOperation>,
+    pub negate_op: Option<UnaryOperation>,
+    pub not_op: Option<UnaryOperation>,
+    pub add_op: Option<BinaryOperation>,
+    pub sub_op: Option<BinaryOperation>,
+    pub mult_op: Option<BinaryOperation>,
+    pub div_op: Option<BinaryOperation>,
+    pub mod_op: Option<BinaryOperation>,
+    pub lt_op: Option<BinaryOperation>,
+    pub le_op: Option<BinaryOperation>,
+    pub ge_op: Option<BinaryOperation>,
+    pub gt_op: Option<BinaryOperation>,
+    pub eq_op: Option<BinaryOperation>,
+    pub neq_op: Option<BinaryOperation>,
 }
 
 impl PrimitiveOps {
@@ -198,27 +195,45 @@ impl PrimitiveOps {
         Self::default()
     }
 
+    pub const fn none() -> Self {
+        Self {
+            negate_op: None,
+            not_op: None,
+            add_op: None,
+            sub_op: None,
+            mult_op: None,
+            div_op: None,
+            mod_op: None,
+            lt_op: None,
+            le_op: None,
+            ge_op: None,
+            gt_op: None,
+            eq_op: None,
+            neq_op: None,
+        }
+    }
+
     pub fn get_bin_op(&self, op: BinaryOperator) -> Option<BinaryOperation> {
         match op {
-            BinaryOperator::Add(_) | BinaryOperator::AddAssign(_) => self.add_inst,
-            BinaryOperator::Sub(_) | BinaryOperator::SubAssign(_) => self.sub_inst,
-            BinaryOperator::Mult(_) | BinaryOperator::MultAssign(_) => self.mult_inst,
-            BinaryOperator::Div(_) | BinaryOperator::DivAssign(_) => self.div_inst,
-            BinaryOperator::Mod(_) | BinaryOperator::ModAssign(_) => self.mod_inst,
-            BinaryOperator::Lt(_) => self.lt_inst,
-            BinaryOperator::Le(_) => self.le_inst,
-            BinaryOperator::Gt(_) => self.gt_inst,
-            BinaryOperator::Ge(_) => self.ge_inst,
-            BinaryOperator::Eq(_) => self.eq_inst,
-            BinaryOperator::Neq(_) => self.neq_inst,
+            BinaryOperator::Add(_) | BinaryOperator::AddAssign(_) => self.add_op,
+            BinaryOperator::Sub(_) | BinaryOperator::SubAssign(_) => self.sub_op,
+            BinaryOperator::Mult(_) | BinaryOperator::MultAssign(_) => self.mult_op,
+            BinaryOperator::Div(_) | BinaryOperator::DivAssign(_) => self.div_op,
+            BinaryOperator::Mod(_) | BinaryOperator::ModAssign(_) => self.mod_op,
+            BinaryOperator::Lt(_) => self.lt_op,
+            BinaryOperator::Le(_) => self.le_op,
+            BinaryOperator::Gt(_) => self.gt_op,
+            BinaryOperator::Ge(_) => self.ge_op,
+            BinaryOperator::Eq(_) => self.eq_op,
+            BinaryOperator::Neq(_) => self.neq_op,
             _ => None,
         }
     }
 
     pub fn get_un_op(&self, op: UnaryOperator) -> Option<UnaryOperation> {
         match op {
-            UnaryOperator::Not(_) => self.not_inst,
-            UnaryOperator::Negate(_) => self.negate_inst,
+            UnaryOperator::Not(_) => self.not_op,
+            UnaryOperator::Negate(_) => self.negate_op,
         }
     }
 }

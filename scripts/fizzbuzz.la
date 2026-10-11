@@ -1,23 +1,20 @@
 native byte;
 native int;
 
-native fun int.to_str(self: int) -> String;
-native fun int.from_str(str: String) -> int;
+native fun int.to_str(self: int) -> str;
+native fun int.from_str(str: str) -> int;
 
-@std(string)
-struct String {
-  bytes: [byte],
-}
+native str;
 
-fun print(str: String) {
-  write(str.bytes);
-  write("\n".bytes);
+fun print(str: str) {
+  write(str);
+  write("\n");
   flush();
 }
 
-native fun write(x: [byte]);
+native fun write(str: str);
 native fun flush();
-native fun input() -> String;
+native fun input() -> str;
 
 print("Enter max:");
 val max = int.from_str(input());

@@ -1,7 +1,7 @@
 use core::str;
 use std::{io::Write, ptr};
 
-use crate::{Slot, heap::{HeapArray, HeapObject}};
+use crate::{Slot, heap::HeapArray};
 
 macro_rules! native_funs {
     (for $vm: pat, $( $native: ident( $($pat: pat),* $(,)? ) $expr: block )*) => {
@@ -28,11 +28,11 @@ macro_rules! native_funs {
 }
 
 native_funs![for vm,
-    Write(bytes) {
-        let byte_ptr = unsafe { HeapArray::from_raw(bytes.read_ptr()) };
+    Write(str) {
+        let bytes = unsafe { HeapArray::from_raw(str.read_ptr()) };
         let mut stdout = std::io::stdout();
         unsafe {
-            let bytes = std::slice::from_raw_parts(byte_ptr.element_ptr(), byte_ptr.len());
+            let bytes = std::slice::from_raw_parts(bytes.element_ptr(), bytes.len());
             stdout.write_all(bytes).map_err(|err| vm.throw(err));
         }
         Ok(Slot::new_usize(0))
@@ -50,10 +50,9 @@ native_funs![for vm,
         Ok(Slot::new_ref(vm.alloc_string(float.to_string().as_bytes())?.as_mut_ptr()))
     }
     FloatFromStr(str) {
-        let mut str = unsafe { HeapObject::from_raw(str.read_ptr()) };
-        let bytes = unsafe { HeapArray::from_raw(*str.field_ptr_mut().cast()) };
+        let str = unsafe { HeapArray::from_raw(str.read_ptr()) };
 
-        let slice = unsafe { std::slice::from_raw_parts(bytes.element_ptr(), bytes.len()) };
+        let slice = unsafe { std::slice::from_raw_parts(str.element_ptr(), str.len()) };
         let float = unsafe { str::from_utf8_unchecked(slice).parse().map_err(|_| vm.throw("not a float"))? };
         Ok(Slot::new_float(float))
     }
@@ -62,10 +61,9 @@ native_funs![for vm,
         Ok(Slot::new_ref(vm.alloc_string(int.to_string().as_bytes())?.as_mut_ptr()))
     }
     IntFromStr(str) {
-        let mut str = unsafe { HeapObject::from_raw(str.read_ptr()) };
-        let bytes = unsafe { HeapArray::from_raw(*str.field_ptr_mut().cast()) };
+        let str = unsafe { HeapArray::from_raw(str.read_ptr()) };
 
-        let slice = unsafe { std::slice::from_raw_parts(bytes.element_ptr(), bytes.len()) };
+        let slice = unsafe { std::slice::from_raw_parts(str.element_ptr(), str.len()) };
         let int = unsafe { str::from_utf8_unchecked(slice).parse().map_err(|_| vm.throw("not an int"))? };
         Ok(Slot::new_int(int))
     }
@@ -75,25 +73,18 @@ native_funs![for vm,
         Ok(Slot::new_ref(vm.alloc_string(input.trim_suffix('\n').as_bytes())?.as_mut_ptr()))
     }
     Concat() {
-        let str = unsafe { HeapObject::from_raw(vm.stack.peek().expect("self argument").read_ptr()) };
-        let bytes = unsafe { HeapArray::from_raw(*str.field_ptr().cast()) };
+        let other = unsafe { HeapArray::from_raw(vm.stack.peek().expect("other argument").read_ptr()) };
+        let str = unsafe { HeapArray::from_raw(vm.stack.read(vm.stack.top() - 2).expect("self argument").read_ptr()) };
 
-        let other = unsafe { HeapObject::from_raw(vm.stack.read(vm.stack.top() - 2).expect("other argument").read_ptr()) };
-        let other_bytes = unsafe { HeapArray::from_raw(*other.field_ptr().cast()) };
-
-        let mut new_str = vm.alloc_string_zeroed(bytes.len() + other_bytes.len())?;
-        let mut new_bytes = unsafe { HeapArray::from_raw(*new_str.field_ptr().cast()) };
+        let mut new_str = vm.alloc_string_zeroed(str.len() + other.len())?;
 
         // pop from stack here in case allocating the new string GCs
-        let other = unsafe { HeapObject::from_raw(vm.stack.pop().expect("other argument").read_ptr()) };
-        let other_bytes = unsafe { HeapArray::from_raw(*other.field_ptr().cast()) };
-
-        let str = unsafe { HeapObject::from_raw(vm.stack.pop().expect("self argument").read_ptr()) };
-        let bytes = unsafe { HeapArray::from_raw(*str.field_ptr().cast()) };
+        let other = unsafe { HeapArray::from_raw(vm.stack.pop().expect("other argument").read_ptr()) };
+        let str = unsafe { HeapArray::from_raw(vm.stack.pop().expect("self argument").read_ptr()) };
 
         unsafe {
-            ptr::copy_nonoverlapping(bytes.element_ptr(), new_bytes.element_ptr_mut(), bytes.len());
-            ptr::copy_nonoverlapping(other_bytes.element_ptr(), new_bytes.element_ptr_mut().add(bytes.len()), other_bytes.len());
+            ptr::copy_nonoverlapping(str.element_ptr(), new_str.element_ptr_mut(), str.len());
+            ptr::copy_nonoverlapping(other.element_ptr(), new_str.element_ptr_mut().add(str.len()), other.len());
         };
 
         Ok(Slot::new_ref(new_str.as_mut_ptr()))

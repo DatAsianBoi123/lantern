@@ -1,26 +1,22 @@
 native int;
 native byte;
 native bool;
+native str;
 
-native fun int.to_str(self: int) -> String;
+native fun int.to_str(self: int) -> str;
 
-@std(string)
-struct String {
-  bytes: [byte],
-}
-
-native fun write(bytes: [byte]);
+native fun write(str: str);
 native fun flush();
 native fun gc();
 
-fun print(str: String) {
-  write(str.bytes);
+fun print(str: str) {
+  write(str);
   flush();
 }
 
-fun println(str: String) {
-  write(str.bytes);
-  write("\n".bytes);
+fun println(str: str) {
+  write(str);
+  write("\n");
   flush();
 }
 

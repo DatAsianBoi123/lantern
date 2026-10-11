@@ -8,37 +8,28 @@ fun int.abs(self: int) -> int {
     return self;
   }
 }
-native fun int.to_str(self: int) -> String;
-native fun int.from_str(str: String) -> int;
+native fun int.to_str(self: int) -> str;
+native fun int.from_str(str: str) -> int;
 
 native float;
 fun float.inverse(self: float) -> float {
   return 1.0 / self;
 }
-native fun float.to_str(self: float) -> String;
-native fun float.from_str(str: String) -> float;
+native fun float.to_str(self: float) -> str;
+native fun float.from_str(str: str) -> float;
 
 native bool;
 
-@std(string)
-struct String {
-  bytes: [byte],
-}
-fun String.char_len(self: String) -> int {
-  return self.bytes.len;
-}
-fun String.char_at(self: String, at: int) -> byte {
-  return self.bytes[at];
-}
-native fun String.concat(self: String, str: String) -> String;
+native str;
+native fun str.concat(self: str, str: str) -> str;
 
-fun println(str: String) {
-  write(str.bytes);
-  write("\n".bytes);
+fun println(str: str) {
+  write(str);
+  write("\n");
   flush();
 }
 
-native fun write(bytes: [byte]);
+native fun write(str: str);
 native fun flush();
-native fun input() -> String;
+native fun input() -> str;
 

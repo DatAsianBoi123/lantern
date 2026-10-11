@@ -1,28 +1,23 @@
 native byte;
 native int;
 native float;
+native fun float.to_str(self: float) -> str;
 
-native fun float.to_str(self: float) -> String;
+native str;
+native fun str.concat(self: str, str: str) -> str;
 
-@std(string)
-struct String {
-  bytes: [byte],
-}
-
-native fun String.concat(self: String, str: String) -> String;
-
-fun print(str: String) {
-  write(str.bytes);
-  write("\n".bytes);
+fun print(str: str) {
+  write(str);
+  write("\n");
   flush();
 }
 
-native fun write(x: [byte]);
+native fun write(str: str);
 native fun flush();
 native fun gc();
 
 struct Position {
-  name: String,
+  name: str,
   x: float,
   y: float,
 }
@@ -45,5 +40,6 @@ print("");
 
 my_pos.x = my_pos.x * 2.0;
 my_pos.y = 5.28;
+my_pos.name = "ho ho ho";
 my_pos.print();
 
