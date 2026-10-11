@@ -1,6 +1,6 @@
 sy case match
 
-sy keyword Keyword val fun using native return continue break if else while struct throw match
+sy keyword Keyword val fun using native return continue break if else while struct throw match pass
 sy keyword Boolean true false
 sy keyword Constant none
 
