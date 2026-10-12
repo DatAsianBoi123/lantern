@@ -11,7 +11,6 @@ pub struct Scope<'a, 't> {
     variables: HashMap<Symbol, LanternVariable<'t>>,
     associated: HashMap<TypeId<'t>, HashMap<Symbol, LanternFunction<'t>>>,
     kind: ScopeKind<'a, 't>,
-    pub in_loop: bool,
     pub expected_ret: TypeId<'t>,
     pub diverges: bool,
     // TODO: reusing locals makes GC collect garbage data
@@ -27,7 +26,6 @@ impl<'a, 't> Scope<'a, 't> {
             variables: HashMap::new(),
             associated: HashMap::new(),
             kind: ScopeKind::Module,
-            in_loop: false,
             expected_ret: tcx.none(),
             diverges: false,
             next_local_index: 0,
@@ -39,10 +37,18 @@ impl<'a, 't> Scope<'a, 't> {
         &self.kind
     }
 
+    pub fn in_loop(&self) -> bool {
+        if let ScopeKind::Block { in_loop, .. } = self.kind {
+            in_loop
+        } else {
+            false
+        }
+    }
+
     pub fn item(&self, name: Symbol) -> Option<TypeId<'t>> {
         match self.kind {
             ScopeKind::Module => self.items.get(&name).copied(),
-            ScopeKind::Block(parent) | ScopeKind::Function(parent, _) => {
+            ScopeKind::Block { parent, .. } | ScopeKind::Function(parent, _) => {
                 self.items.get(&name)
                     .copied()
                     .or_else(|| parent.item(name))
@@ -59,7 +65,7 @@ impl<'a, 't> Scope<'a, 't> {
     pub fn function(&self, name: Symbol) -> Option<&LanternFunction<'t>> {
         match self.kind {
             ScopeKind::Module => self.functions.get(&name),
-            ScopeKind::Block(parent) | ScopeKind::Function(parent, _) => {
+            ScopeKind::Block { parent, .. } | ScopeKind::Function(parent, _) => {
                 self.functions.get(&name)
                     .or_else(|| parent.function(name))
             }
@@ -75,7 +81,7 @@ impl<'a, 't> Scope<'a, 't> {
     pub fn variable(&self, name: Symbol) -> Option<LanternVariable<'t>> {
         match self.kind {
             ScopeKind::Module | ScopeKind::Function(..) => self.variables.get(&name).copied(),
-            ScopeKind::Block(parent) => {
+            ScopeKind::Block { parent, .. } => {
                 self.variables.get(&name)
                     .copied()
                     .or_else(|| parent.variable(name))
@@ -94,7 +100,7 @@ impl<'a, 't> Scope<'a, 't> {
     pub fn associated(&self, ty: TypeId<'t>, name: Symbol) -> Option<&LanternFunction<'t>> {
         match self.kind {
             ScopeKind::Module => self.associated.get(&ty).and_then(|associated| associated.get(&name)),
-            ScopeKind::Block(parent) | ScopeKind::Function(parent, _) => {
+            ScopeKind::Block { parent, .. } | ScopeKind::Function(parent, _) => {
                 self.associated.get(&ty).and_then(|type_associated| type_associated.get(&name))
                     .or_else(|| parent.associated(ty, name))
             }
@@ -131,8 +137,7 @@ impl<'a: 'b, 'b, 't> Scope<'a, 't> {
             functions: HashMap::new(),
             variables: HashMap::new(),
             associated: HashMap::new(),
-            kind: ScopeKind::Block(self),
-            in_loop: self.in_loop,
+            kind: ScopeKind::Block { parent: self, in_loop: self.in_loop() },
             expected_ret: self.expected_ret,
             diverges: false,
             next_local_index: self.next_local_index,
@@ -147,7 +152,6 @@ impl<'a: 'b, 'b, 't> Scope<'a, 't> {
             variables: HashMap::new(),
             associated: HashMap::new(),
             kind: ScopeKind::Function(self, span),
-            in_loop: false,
             expected_ret,
             diverges: false,
             next_local_index: 0,
@@ -161,8 +165,7 @@ impl<'a: 'b, 'b, 't> Scope<'a, 't> {
             functions: HashMap::new(),
             variables: HashMap::new(),
             associated: HashMap::new(),
-            kind: ScopeKind::Block(self),
-            in_loop: true,
+            kind: ScopeKind::Block { parent: self, in_loop: true },
             expected_ret: self.expected_ret,
             diverges: false,
             next_local_index: self.next_local_index,
@@ -175,7 +178,10 @@ impl<'a: 'b, 'b, 't> Scope<'a, 't> {
 pub enum ScopeKind<'a, 't> {
     Module,
     Function(&'a Scope<'a, 't>, Span),
-    Block(&'a Scope<'a, 't>),
+    Block {
+        parent: &'a Scope<'a, 't>,
+        in_loop: bool,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
