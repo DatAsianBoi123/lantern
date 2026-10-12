@@ -464,7 +464,7 @@ impl VM {
                             return Ok(());
                         }
                     },
-                    Instruction::Error => panic!("corrupted codegen, please repot this!"),
+                    Instruction::Error => panic!("corrupted codegen, please report this!"),
                 }
 
                 frame.inst_ptr += 1;
