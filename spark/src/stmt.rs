@@ -15,6 +15,7 @@ pub enum Stmt<'t> {
     },
     Val(usize, Option<Expr<'t>>),
     Return(Option<Expr<'t>>),
+    Pass(Expr<'t>),
     Continue,
     Break,
     Throw(Expr<'t>),

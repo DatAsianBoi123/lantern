@@ -30,6 +30,7 @@ struct FlameGen {
     instructions: InstructionSet,
     line_table: Vec<LineMap>,
     loops: Vec<LoopScope>,
+    passes: Vec<Vec<usize>>,
     type_offset: usize,
 }
 
@@ -41,6 +42,7 @@ impl FlameGen {
                     instructions: InstructionSet::new(),
                     line_table: Vec::new(),
                     loops: Vec::new(),
+                    passes: Vec::new(),
                     type_offset,
                 };
                 r#gen.compile_stmts(&stmts);
@@ -135,6 +137,11 @@ impl FlameGen {
                     }
                     inst!(self.instructions; RET);
                 }
+                Stmt::Pass(expr) => {
+                    self.compile_expr(expr);
+                    let placeholder = self.placeholder();
+                    self.passes.last_mut().expect("in a block expression").push(placeholder);
+                }
                 // TODO: span data
                 Stmt::Continue => {
                     let head = self.loops.last().expect("`continue` in a loop").head;
@@ -184,8 +191,13 @@ impl FlameGen {
             ExprKind::Global(id) => inst!(with self => expr.span; LOAD_GLOBAL *id),
             ExprKind::Local(id) => inst!(with self => expr.span; LOAD_LOCAL *id),
             ExprKind::Block(stmts) => {
+                self.passes.push(Vec::new());
                 self.compile_stmts(stmts);
-                inst!(self.instructions; PUSHNULL)
+                inst!(self.instructions; PUSHNULL);
+                let passes = self.passes.pop().expect("in block expression");
+                for ip in passes {
+                    self.patch(ip, inst!(GOTO self.ip()));
+                }
             }
             ExprKind::Field(obj, offset) => {
                 self.compile_expr(obj);

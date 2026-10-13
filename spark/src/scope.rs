@@ -37,11 +37,31 @@ impl<'a, 't> Scope<'a, 't> {
         &self.kind
     }
 
+    pub fn kind_mut(&mut self) -> &mut ScopeKind<'a, 't> {
+        &mut self.kind
+    }
+
     pub fn in_loop(&self) -> bool {
         if let ScopeKind::Block { in_loop, .. } = self.kind {
             in_loop
         } else {
             false
+        }
+    }
+
+    pub fn in_expr(&self) -> bool {
+        if let ScopeKind::Block { in_expr, .. } = self.kind {
+            in_expr
+        } else {
+            false
+        }
+    }
+
+    pub fn pass(&self) -> PassBehavior<'t> {
+        if let ScopeKind::Block { pass, .. } = self.kind {
+            pass
+        } else {
+            PassBehavior::Converges
         }
     }
 
@@ -114,19 +134,29 @@ impl<'a, 't> Scope<'a, 't> {
         Some(())
     }
 
-    pub fn inherit(&mut self, behavior: ScopeBehavior) {
-        if behavior.diverges {
-            self.diverges = true;
+    pub fn inherit(&mut self, behavior: ScopeBehavior<'t>) {
+        self.diverges = self.diverges || behavior.diverges;
+        if let ScopeKind::Block { in_expr, pass, .. } = &mut self.kind && *in_expr {
+            *pass = pass.or(behavior.pass);
         }
-        self.inherit_locals(behavior);
-    }
-
-    pub fn inherit_locals(&mut self, behavior: ScopeBehavior) {
         self.max_locals = self.max_locals.max(behavior.locals_used);
     }
 
-    pub fn into_behavior(self) -> ScopeBehavior {
-        ScopeBehavior { diverges: self.diverges, locals_used: self.max_locals }
+    pub fn inherit_locals(&mut self, behavior: ScopeBehavior<'t>) {
+        if let ScopeKind::Block { in_expr, pass, .. } = &mut self.kind && *in_expr {
+            *pass = pass.or_ty(behavior.pass);
+        }
+        self.max_locals = self.max_locals.max(behavior.locals_used);
+    }
+
+    pub fn into_behavior(self) -> ScopeBehavior<'t> {
+        let pass = if let ScopeKind::Block { pass, .. } = self.kind {
+            pass
+        } else {
+            // pass has no meaning outside a block
+            PassBehavior::Converges
+        };
+        ScopeBehavior { diverges: self.diverges, pass, locals_used: self.max_locals }
     }
 }
 
@@ -137,7 +167,31 @@ impl<'a: 'b, 'b, 't> Scope<'a, 't> {
             functions: HashMap::new(),
             variables: HashMap::new(),
             associated: HashMap::new(),
-            kind: ScopeKind::Block { parent: self, in_loop: self.in_loop() },
+            kind: ScopeKind::Block {
+                parent: self,
+                in_loop: self.in_loop(),
+                in_expr: self.in_expr(),
+                pass: self.pass(),
+            },
+            expected_ret: self.expected_ret,
+            diverges: false,
+            next_local_index: self.next_local_index,
+            max_locals: self.max_locals,
+        }
+    }
+
+    pub fn child_block_expr(&'a self) -> Scope<'b, 't> {
+        Self {
+            items: HashMap::new(),
+            functions: HashMap::new(),
+            variables: HashMap::new(),
+            associated: HashMap::new(),
+            kind: ScopeKind::Block {
+                parent: self,
+                in_loop: self.in_loop(),
+                in_expr: true,
+                pass: PassBehavior::Converges,
+            },
             expected_ret: self.expected_ret,
             diverges: false,
             next_local_index: self.next_local_index,
@@ -165,7 +219,12 @@ impl<'a: 'b, 'b, 't> Scope<'a, 't> {
             functions: HashMap::new(),
             variables: HashMap::new(),
             associated: HashMap::new(),
-            kind: ScopeKind::Block { parent: self, in_loop: true },
+            kind: ScopeKind::Block {
+                parent: self,
+                in_loop: true,
+                in_expr: self.in_expr(),
+                pass: self.pass(),
+            },
             expected_ret: self.expected_ret,
             diverges: false,
             next_local_index: self.next_local_index,
@@ -181,27 +240,103 @@ pub enum ScopeKind<'a, 't> {
     Block {
         parent: &'a Scope<'a, 't>,
         in_loop: bool,
+        in_expr: bool,
+        pass: PassBehavior<'t>,
     },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ScopeBehavior {
+pub struct ScopeBehavior<'t> {
     pub diverges: bool,
+    pub pass: PassBehavior<'t>,
     pub locals_used: usize,
 }
 
-impl ScopeBehavior {
-    pub fn guaranteed_converges() -> Self {
+impl ScopeBehavior<'_> {
+    pub fn guaranteed_converges(self) -> Self {
         Self {
             diverges: false,
+            pass: self.pass.downgrade(),
             locals_used: 0,
+        }
+    }
+
+    pub fn strip_pass(self) -> Self {
+        Self {
+            pass: PassBehavior::Converges,
+            ..self
         }
     }
 
     pub fn combine_branch(self, other: Self) -> Self {
         Self {
             diverges: self.diverges && other.diverges,
+            pass: self.pass.and(other.pass),
             locals_used: self.locals_used.max(other.locals_used),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PassBehavior<'t> {
+    Passes(TypeId<'t>),
+    KnownType(TypeId<'t>),
+    Converges,
+}
+
+impl<'t> PassBehavior<'t> {
+    pub fn ty(&self) -> Option<TypeId<'t>> {
+        match self {
+            Self::Passes(ty) | Self::KnownType(ty) => Some(*ty),
+            Self::Converges => None,
+        }
+    }
+
+    pub fn passes(&self) -> bool {
+        matches!(self, Self::Passes(_))
+    }
+
+    pub fn upgrade(self, ty: TypeId<'t>) -> Self {
+        match self {
+            Self::Passes(_) => self,
+            Self::KnownType(ty) => Self::Passes(ty),
+            _ => Self::Passes(ty),
+        }
+    }
+
+    pub fn downgrade(self) -> Self {
+        match self {
+            Self::Passes(ty) => Self::KnownType(ty),
+            _ => self,
+        }
+    }
+
+    pub fn and(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Passes(_), Self::Passes(_)) => self,
+            (Self::Passes(ty), _) => Self::KnownType(ty),
+            (Self::KnownType(_), _) => self,
+            (Self::Converges, Self::Passes(ty)) => Self::KnownType(ty),
+            (Self::Converges, Self::KnownType(_)) => other,
+            (Self::Converges, Self::Converges) => self,
+        }
+    }
+
+    pub fn or(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Passes(_), _) => self,
+            (Self::KnownType(ty), Self::Passes(_)) => Self::Passes(ty),
+            (Self::KnownType(_), _) => self,
+            (Self::Converges, _) => other,
+        }
+    }
+
+    pub fn or_ty(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Passes(_) | Self::KnownType(_), _) => self,
+            (_, Self::Passes(ty)) => Self::KnownType(ty),
+            (_, Self::KnownType(_)) => other,
+            (Self::Converges, _) => self,
         }
     }
 }

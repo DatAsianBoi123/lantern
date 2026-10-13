@@ -18,6 +18,14 @@ impl<'t> Expr<'t> {
         }
     }
 
+    pub fn none(tcx: &TypeContext<'t>, span: Span) -> Self {
+        Self {
+            kind: ExprKind::Literal(Literal::None),
+            ty: tcx.none(),
+            span,
+        }
+    }
+
     pub fn error(tcx: &TypeContext<'t>, span: Span) -> Self {
         Self {
             kind: ExprKind::Error,

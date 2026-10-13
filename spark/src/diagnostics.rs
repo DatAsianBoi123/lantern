@@ -1,5 +1,5 @@
 use diagnostic::{Diagnostic, DiagnosticError, Span, error, symbol::{Symbol, SymbolDisplay, SymbolTable}, warning};
-use parse::{FunName, Path, expr::{BinaryOperator, UnaryOperator}, lex::{Break, Continue, Ident, TokenKind}};
+use parse::{FunName, Path, expr::{BinaryOperator, UnaryOperator}, lex::{Break, Continue, Ident, Pass, TokenKind}};
 
 use crate::ty::TypeId;
 
@@ -386,3 +386,13 @@ impl DiagnosticError for NonExhaustiveMatch {
         error!(self.0 => "match statement is not exhaustive")
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PassOutsideBlock(pub Pass);
+
+impl DiagnosticError for PassOutsideBlock {
+    fn into_diagnostic(self, _: &SymbolTable) -> Diagnostic where Self: Sized {
+        error!(self.0.span() => "{} not allowed here", self.0)
+    }
+}
+
