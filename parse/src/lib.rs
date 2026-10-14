@@ -1,5 +1,5 @@
 use diagnostic::{Diagnostic, FileId, Span, error, symbol::{SymbolDisplay, SymbolTable}};
-use lex::{ArrowRight, At, Break, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Continue, Else, Equals, FatArrowRight, Fun, Ident, If, Keyword, Match, Native, OpenBrace, OpenBracket, OpenParen, Pass, Period, Punct, Question, Return, Semi, Struct, Throw, Token, TokenKind, Using, Val, While};
+use lex::{ArrowRight, At, Break, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Continue, Else, Equals, FatArrowRight, Fun, Ident, If, Keyword, Match, Native, OpenBrace, OpenBracket, OpenParen, Pass, Period, Pub, Punct, Question, Return, Semi, Struct, Throw, Token, TokenKind, Using, Val, While};
 use macros::Parse;
 
 use crate::{expr::{Expr, ExprBlock}, stream::{TokenStream, parse_punctuated, parse_repetition}};
@@ -44,7 +44,7 @@ impl ParseTokens for LanternFile {
 
 #[derive(Parse, Debug, Clone, PartialEq)]
 pub enum Stmt {
-    #[parse(using(Fun, Using, Struct, Native, At))]
+    #[parse(using(Pub, Fun, Using, Struct, Native, At))]
     Item(Item),
     #[parse(using(If))]
     IfStmt(IfStmt),
@@ -75,12 +75,21 @@ pub enum Item {
 
 impl ParseTokens for Item {
     fn parse(stream: &mut TokenStream) -> Result<Self> {
+        match stream.peek()? {
+            Token::Keyword(Keyword::Using(_)) => stream.parse().map(Self::Using),
+            Token::Punct(Punct::At(_)) => stream.parse().map(Self::Struct),
+            _ => Self::parse_with_vis(stream.parse()?, stream),
+        }
+    }
+}
+
+impl Item {
+    pub fn parse_with_vis(vis: Visibility, stream: &mut TokenStream) -> Result<Self> {
         let peek = stream.peek()?;
         match peek {
-            Token::Keyword(Keyword::Fun(_)) => stream.parse().map(Self::Fun),
-            Token::Keyword(Keyword::Using(_)) => stream.parse().map(Self::Using),
-            // TODO: annotations on funs as well
-            Token::Keyword(Keyword::Struct(_)) | Token::Punct(Punct::At(_)) => stream.parse().map(Self::Struct),
+            Token::Keyword(Keyword::Fun(_)) => ItemFun::parse_with_vis(vis, stream).map(Self::Fun),
+            Token::Keyword(Keyword::Using(_)) => Err(error!(peek.span() => "`using` cannot have a visibility")),
+            Token::Keyword(Keyword::Struct(_)) => ItemStruct::parse_with_vis(vis, stream).map(Self::Struct),
             Token::Keyword(Keyword::Native(native)) => {
                 let native = *native;
                 let _ = stream.next_token();
@@ -88,12 +97,12 @@ impl ParseTokens for Item {
                     Token::Keyword(Keyword::Fun(fun)) => {
                         let fun = *fun;
                         let _ = stream.next_token();
-                        Ok(Self::NativeFun(ItemNativeFun { native, fun, sig: stream.parse()?, semi: stream.parse()? }))
+                        Ok(Self::NativeFun(ItemNativeFun { vis, native, fun, sig: stream.parse()?, semi: stream.parse()? }))
                     }
                     Token::Ident(ident) => {
                         let ident = *ident;
                         let _ = stream.next_token();
-                        Ok(Self::NativeType(ItemNativeType { native, ident, semi: stream.parse()? }))
+                        Ok(Self::NativeType(ItemNativeType { vis, native, ident, semi: stream.parse()? }))
                     }
                     peek => Err(error!(peek.span() => "expected `fun` or IDENT"))
                 }
@@ -103,19 +112,56 @@ impl ParseTokens for Item {
     }
 }
 
-#[derive(Parse, Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ItemFun {
+    pub vis: Visibility,
     pub fun: Fun,
     pub sig: FunSig,
     pub block: ExprBlock,
 }
 
-#[derive(Parse, Debug, Clone, PartialEq)]
+impl ParseTokens for ItemFun {
+    fn parse(stream: &mut TokenStream) -> Result<Self> {
+        Self::parse_with_vis(stream.parse()?, stream)
+    }
+}
+
+impl ItemFun {
+    pub fn parse_with_vis(vis: Visibility, stream: &mut TokenStream) -> Result<Self> {
+        Ok(Self {
+            vis,
+            fun: stream.parse()?,
+            sig: stream.parse()?,
+            block: stream.parse()?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct ItemNativeFun {
+    pub vis: Visibility,
     pub native: Native,
     pub fun: Fun,
     pub sig: FunSig,
     pub semi: Semi,
+}
+
+impl ParseTokens for ItemNativeFun {
+    fn parse(stream: &mut TokenStream) -> Result<Self> {
+        Self::parse_with_vis(stream.parse()?, stream)
+    }
+}
+
+impl ItemNativeFun {
+    pub fn parse_with_vis(vis: Visibility, stream: &mut TokenStream) -> Result<Self> {
+        Ok(Self {
+            vis,
+            native: stream.parse()?,
+            fun: stream.parse()?,
+            sig: stream.parse()?,
+            semi: stream.parse()?,
+        })
+    }
 }
 
 #[derive(Parse, Debug, Clone, PartialEq)]
@@ -204,11 +250,29 @@ pub struct FunArg {
     pub r#type: Type,
 }
 
-#[derive(Parse, Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ItemNativeType {
+    pub vis: Visibility,
     pub native: Native,
     pub ident: Ident,
     pub semi: Semi,
+}
+
+impl ParseTokens for ItemNativeType {
+    fn parse(stream: &mut TokenStream) -> Result<Self> {
+        Self::parse_with_vis(stream.parse()?, stream)
+    }
+}
+
+impl ItemNativeType {
+    pub fn parse_with_vis(vis: Visibility, stream: &mut TokenStream) -> Result<Self> {
+        Ok(Self {
+            vis,
+            native: stream.parse()?,
+            ident: stream.parse()?,
+            semi: stream.parse()?,
+        })
+    }
 }
 
 #[derive(Parse, Debug, Clone, PartialEq, Eq)]
@@ -222,19 +286,43 @@ pub struct ItemUsing {
     pub closed_brace: ClosedBrace,
 }
 
-#[derive(Parse, Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ItemStruct {
     pub annotations: AnnotationList,
+    pub vis: Visibility,
     pub r#struct: Struct,
     pub ident: Ident,
     pub open_brace: OpenBrace,
-    #[parse(with(parse_punctuated::<StructField, Comma, ClosedBrace>))]
     pub fields: Vec<StructField>,
     pub closed_brace: ClosedBrace,
 }
 
+impl ParseTokens for ItemStruct {
+    fn parse(stream: &mut TokenStream) -> Result<Self> {
+        let annotations = stream.parse()?;
+        let mut this = Self::parse_with_vis(stream.parse()?, stream)?;
+        this.annotations = annotations;
+        Ok(this)
+    }
+}
+
+impl ItemStruct {
+    pub fn parse_with_vis(vis: Visibility, stream: &mut TokenStream) -> Result<Self> {
+        Ok(Self {
+            annotations: AnnotationList { annotations: Vec::new() },
+            vis,
+            r#struct: stream.parse()?,
+            ident: stream.parse()?,
+            open_brace: stream.parse()?,
+            fields: parse_punctuated::<_, Comma, ClosedBrace>(stream)?,
+            closed_brace: stream.parse()?,
+        })
+    }
+}
+
 #[derive(Parse, Debug, Clone, PartialEq, Eq)]
 pub struct StructField {
+    pub vis: Visibility,
     pub ident: Ident,
     pub colon: Colon,
     pub r#type: Type,
@@ -414,6 +502,12 @@ pub struct AnnotationArgs {
     #[parse(with(parse_punctuated::<Ident, Comma, ClosedParen>))]
     pub args: Vec<Ident>,
     pub closed_paren: ClosedParen,
+}
+
+#[derive(Parse, Debug, Clone, PartialEq, Eq)]
+pub enum Visibility {
+    Public(Pub),
+    None,
 }
 
 #[derive(Parse, Debug, Clone, PartialEq, Eq)]
