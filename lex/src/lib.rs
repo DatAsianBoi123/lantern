@@ -340,6 +340,7 @@ define_keywords! {
         Continue = "continue",
         Break = "break",
         Throw = "throw",
+        Pub = "pub",
     }
 }
 
