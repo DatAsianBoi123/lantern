@@ -63,10 +63,10 @@ impl<'a, 't> Lighter<'a, 't> {
     }
 
     #[must_use]
-    pub fn lower_stmts(&mut self, stmts: Vec<parse::Stmt>, mut scope: Scope<'_, 't>) -> (Vec<Stmt<'t>>, ScopeBehavior<'t>) {
+    pub fn lower_stmts(&mut self, mut stmts: Vec<parse::Stmt>, mut scope: Scope<'_, 't>) -> (Vec<Stmt<'t>>, ScopeBehavior<'t>) {
         let mut spark_stmts = Vec::new();
 
-        self.resolve_types(&stmts, &mut scope);
+        self.resolve_types(&mut stmts, &mut scope);
         self.build_types_and_funs(&stmts, &mut scope);
 
         for stmt in stmts {
@@ -674,15 +674,12 @@ impl<'a, 't> Lighter<'a, 't> {
         }
     }
 
-    fn resolve_types(&mut self, stmts: &[parse::Stmt], scope: &mut Scope<'_, 't>) {
-        stmts.iter()
-            .filter_map(|stmt| match stmt {
-                parse::Stmt::Item(item) => Some(item),
-                _ => None,
-            })
-            .for_each(|item| match item {
-                Item::Using(_) => todo!(),
-                Item::Struct(ItemStruct { annotations, ident, .. }) => {
+    fn resolve_types(&mut self, stmts: &mut Vec<parse::Stmt>, scope: &mut Scope<'_, 't>) {
+        // use retain to delete duplicate items
+        stmts.retain(|stmt| {
+            match stmt {
+                parse::Stmt::Item(Item::Using(_)) => todo!(),
+                parse::Stmt::Item(Item::Struct(ItemStruct { annotations, ident, .. })) => {
                     let r#struct = LanternStruct::new(ident.0, self.globals.types.len());
 
                     let ty = self.tcx.intern(LanternType::Struct(r#struct));
@@ -703,26 +700,29 @@ impl<'a, 't> Lighter<'a, 't> {
                     }
 
                     if scope.insert_item(ident.0, ty).is_none() {
-                        // BUG: duplicate items get diagnostics on all except the first, while the
-                        // actual struct is built on the last
                         self.emit(StructAlreadyDeclared(*ident));
-                        return;
+                        return false;
                     }
 
                     let LanternType::Struct(r#struct) = ty.as_ty() else { unreachable!() };
                     self.globals.types.push(&r#struct.data);
+                    true
                 }
-                Item::NativeType(ItemNativeType { ident, .. }) => {
+                parse::Stmt::Item(Item::NativeType(ItemNativeType { ident, .. })) => {
                     if let Some(primitive) = native::get_native(self.symbol_table.resolve(ident.0)) {
                         if scope.insert_item(ident.0, self.tcx.primitive(primitive)).is_none() {
                             self.emit(PrimitiveAlreadyDeclared(*ident));
+                            return false;
                         }
+                        true
                     } else {
                         self.emit(UnknownPrimitive(*ident));
+                        false
                     }
                 }
-                _ => {},
-            });
+                _ => true,
+            }
+        });
     }
 
     fn build_types_and_funs(&mut self, stmts: &[parse::Stmt], scope: &mut Scope<'_, 't>) {
