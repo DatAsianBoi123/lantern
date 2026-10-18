@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use diagnostic::{Diagnostic, DiagnosticError, Span, error, symbol::{Symbol, SymbolDisplay, SymbolTable}, warning};
 use parse::{FunName, Path, expr::{BinaryOperator, UnaryOperator}, lex::{Break, Continue, Ident, Pass, TokenKind}};
 
@@ -391,8 +393,25 @@ impl DiagnosticError for NonExhaustiveMatch {
 pub struct PassOutsideBlock(pub Pass);
 
 impl DiagnosticError for PassOutsideBlock {
-    fn into_diagnostic(self, _: &SymbolTable) -> Diagnostic where Self: Sized {
+    fn into_diagnostic(self, _: &SymbolTable) -> Diagnostic {
         error!(self.0.span() => "{} not allowed here", self.0)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleNotFound(pub PathBuf, pub Span);
+
+impl DiagnosticError for ModuleNotFound {
+    fn into_diagnostic(self, _: &SymbolTable) -> Diagnostic {
+        error!(self.1 => "module {} not found", self.0.to_string_lossy())
+    }
+}
+
+pub struct InvalidTextError(pub PathBuf, pub Span);
+
+impl DiagnosticError for InvalidTextError {
+    fn into_diagnostic(self, _: &SymbolTable) -> Diagnostic {
+        error!(self.1 => "module {} contains invalid UTF-8", self.0.to_string_lossy())
     }
 }
 

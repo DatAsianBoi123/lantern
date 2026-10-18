@@ -1,35 +1,35 @@
-native byte;
+pub native byte;
 
-native int;
-fun int.abs(self: int) -> int {
+pub native int;
+pub fun int.abs(self: int) -> int {
   if (self < 0) {
     return -self;
   } else {
     return self;
   }
 }
-native fun int.to_str(self: int) -> str;
-native fun int.from_str(str: str) -> int;
+pub native fun int.to_str(self: int) -> str;
+pub native fun int.from_str(str: str) -> int;
 
-native float;
-fun float.inverse(self: float) -> float {
+pub native float;
+pub fun float.inverse(self: float) -> float {
   return 1.0 / self;
 }
-native fun float.to_str(self: float) -> str;
-native fun float.from_str(str: str) -> float;
+pub native fun float.to_str(self: float) -> str;
+pub native fun float.from_str(str: str) -> float;
 
-native bool;
+pub native bool;
 
-native str;
-native fun str.concat(self: str, str: str) -> str;
+pub native str;
+pub native fun str.concat(self: str, str: str) -> str;
 
-fun println(str: str) {
+pub fun println(str: str) {
   write(str);
   write("\n");
   flush();
 }
 
-native fun write(str: str);
-native fun flush();
-native fun input() -> str;
+pub native fun write(str: str);
+pub native fun flush();
+pub native fun input() -> str;
 

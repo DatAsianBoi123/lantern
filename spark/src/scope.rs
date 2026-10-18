@@ -65,6 +65,11 @@ impl<'a, 't> Scope<'a, 't> {
         }
     }
 
+    pub fn import_all(&mut self, exports: &ModuleExports<'t>) {
+        self.items.extend(exports.types.iter().map(|(name, ty)| (*name, *ty)));
+        self.functions.extend(exports.funs.iter().map(|(name, fun)| (*name, fun.clone())));
+    }
+
     pub fn item(&self, name: Symbol) -> Option<TypeId<'t>> {
         match self.kind {
             ScopeKind::Module => self.items.get(&name).copied(),
@@ -342,6 +347,18 @@ impl<'t> PassBehavior<'t> {
             (_, Self::KnownType(_)) => other,
             (Self::Converges, _) => self,
         }
+    }
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+pub struct ModuleExports<'t> {
+    pub types: HashMap<Symbol, TypeId<'t>>,
+    pub funs: HashMap<Symbol, LanternFunction<'t>>,
+}
+
+impl ModuleExports<'_> {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 

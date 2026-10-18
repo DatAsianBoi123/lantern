@@ -52,7 +52,7 @@ fn main() -> ExitCode {
     }
 
     let type_arena = Arena::new(64);
-    let (spark, sink) = spark::lower(lantern_file, &type_arena, &symbol_table);
+    let (spark, sink) = spark::lower(lantern_file, &type_arena, &mut symbol_table, &mut source_map);
     let errors = sink.display_errors(&source_map);
     if !errors.is_empty() {
         eprintln!("{}", errors);

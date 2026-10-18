@@ -1,8 +1,10 @@
-use arena::Arena;
-use diagnostic::{DiagnosticError, DiagnosticSink, Span, error, symbol::{SymbolDisplay, SymbolTable}, warning};
-use parse::{FunArg, FunSig, Item, ItemFun, ItemNativeFun, ItemNativeType, ItemStruct, LanternFile, MatchPattern, MatchStmt, PassStmt, ReturnStmt, StructField, ValDeclaration, WhileStmt, expr::{self as pe, BinaryOperator, ExprArray, ExprBinary, ExprField, ExprFunCall, ExprIndex, ExprMethodCall, ExprParen, ExprStruct, ExprUnary}, lex::{self, TokenKind}};
+use std::{collections::HashMap, fs::File, io::Read};
 
-use crate::{def::{LanternFunction, LanternStruct, LanternStructField}, diagnostics::*, expr::{Expr, ExprKind, Literal, LogicalOperation}, native::{BOOL_NATIVE, FLOAT_NATIVE, FromDefError, INT_NATIVE, NativeFun, STR_NATIVE}, scope::{Globals, PassBehavior, Scope, ScopeBehavior, ScopeKind}, stmt::{IfBranch, IfStmt, Stmt}, ty::{LanternType, TypeContext, TypeId}};
+use arena::Arena;
+use diagnostic::{DiagnosticError, DiagnosticSink, FileId, SourceMap, Span, error, symbol::{SymbolDisplay, SymbolTable}, warning};
+use parse::{FunArg, FunSig, Item, ItemFun, ItemNativeFun, ItemNativeType, ItemStruct, ItemUsing, LanternFile, MatchPattern, MatchStmt, PassStmt, ReturnStmt, Stmt as PStmt, StructField, UsingItems, ValDeclaration, WhileStmt, expr::{BinaryOperator, Expr as PExpr, ExprArray, ExprBinary, ExprField, ExprFunCall, ExprIndex, ExprMethodCall, ExprParen, ExprStruct, ExprUnary}, lex::{self, TokenKind}};
+
+use crate::{def::{LanternFunction, LanternStruct, LanternStructField}, diagnostics::*, expr::{Expr, ExprKind, Literal, LogicalOperation}, native::{BOOL_NATIVE, FLOAT_NATIVE, FromDefError, INT_NATIVE, NativeFun, STR_NATIVE}, scope::{Globals, ModuleExports, PassBehavior, Scope, ScopeBehavior, ScopeKind}, stmt::{IfBranch, IfStmt, Stmt}, ty::{LanternType, TypeContext, TypeId}};
 
 pub mod ty;
 pub mod scope;
@@ -12,8 +14,13 @@ pub mod def;
 pub mod native;
 pub mod diagnostics;
 
-pub fn lower<'t>(file: LanternFile, arena: &'t Arena<LanternType<'t>>, symbol_table: &SymbolTable) -> (Option<Spark<'t>>, DiagnosticSink) {
-    let mut lighter = Lighter::new(symbol_table, arena);
+pub fn lower<'a, 't>(
+    file: LanternFile,
+    arena: &'t Arena<LanternType<'t>>,
+    symbol_table: &'a mut SymbolTable,
+    source_map: &'a mut SourceMap,
+) -> (Option<Spark<'t>>, DiagnosticSink) {
+    let mut lighter = Lighter::new(symbol_table, source_map, arena);
     lighter.lower_module(file);
     lighter.compile()
 }
@@ -26,20 +33,24 @@ pub struct Spark<'t> {
 }
 
 #[derive(Debug)]
-pub struct Lighter<'a, 't> {
+pub struct Lighter<'a, 's, 't> {
     globals: Globals<'t>,
     sink: DiagnosticSink,
-    symbol_table: &'a mut SymbolTable,
+    symbol_table: &'s mut SymbolTable,
+    source_map: &'a mut SourceMap,
     tcx: TypeContext<'t>,
+    exports: HashMap<FileId, ModuleExports<'t>>,
 }
 
-impl<'a, 't> Lighter<'a, 't> {
-    pub fn new(symbol_table: &'a SymbolTable, arena: &'t Arena<LanternType<'t>>) -> Self {
+impl<'a, 's, 't> Lighter<'a, 's, 't> {
+    pub fn new(symbol_table: &'s mut SymbolTable, source_map: &'a mut SourceMap, arena: &'t Arena<LanternType<'t>>) -> Self {
         Self {
             globals: Globals::new(),
             sink: DiagnosticSink::new(),
             symbol_table,
+            source_map,
             tcx: TypeContext::new(arena),
+            exports: HashMap::new(),
         }
     }
 
@@ -66,7 +77,9 @@ impl<'a, 't> Lighter<'a, 't> {
     pub fn lower_stmts(&mut self, mut stmts: Vec<PStmt>, mut scope: Scope<'_, 't>) -> (Vec<Stmt<'t>>, ScopeBehavior<'t>) {
         let mut spark_stmts = Vec::new();
 
+        // TODO: optimize looping through all statements every pass
         self.resolve_types(&mut stmts, &mut scope);
+        self.resolve_usings(&mut stmts, &mut scope);
         self.build_types_and_funs(&stmts, &mut scope);
 
         for stmt in stmts {
@@ -338,6 +351,7 @@ impl<'a, 't> Lighter<'a, 't> {
                 match *base.ty {
                     LanternType::Struct(ref r#struct) => {
                         if let Some(LanternStructField { offset, ty, .. }) = r#struct.find_field(ident.0) {
+                            // TODO: check if the field is accessible
                             return Expr::new(ExprKind::Field(Box::new(base), offset), ty, ident.span())
                         }
                     }
@@ -671,10 +685,10 @@ impl<'a, 't> Lighter<'a, 't> {
     }
 
     fn resolve_types(&mut self, stmts: &mut Vec<PStmt>, scope: &mut Scope<'_, 't>) -> ModuleExports<'t> {
+        let mut exports = ModuleExports::new();
         // use retain to delete duplicate items
         stmts.retain(|stmt| {
             match stmt {
-                PStmt::Item(Item::Using(_)) => todo!(),
                 PStmt::Item(Item::Struct(ItemStruct { vis, annotations, ident, .. })) => {
                     let r#struct = LanternStruct::new(ident.0, self.globals.types.len());
 
@@ -701,15 +715,23 @@ impl<'a, 't> Lighter<'a, 't> {
 
                     let ty = self.tcx.intern(LanternType::Struct(r#struct));
                     scope.insert_item(ident.0, ty);
+                    if vis.is_public() {
+                        exports.types.insert(ident.0, ty);
+                    }
+
                     let LanternType::Struct(r#struct) = ty.as_ty() else { unreachable!() };
                     self.globals.types.push(&r#struct.data);
                     true
                 }
                 PStmt::Item(Item::NativeType(ItemNativeType { vis, ident, .. })) => {
                     if let Some(primitive) = native::get_native(self.symbol_table.resolve(ident.0)) {
-                        if scope.insert_item(ident.0, self.tcx.primitive(primitive)).is_none() {
+                        let ty = self.tcx.primitive(primitive);
+                        if scope.insert_item(ident.0, ty).is_none() {
                             self.emit(PrimitiveAlreadyDeclared(*ident));
                             return false;
+                        }
+                        if vis.is_public() {
+                            exports.types.insert(ident.0, ty);
                         }
                         true
                     } else {
@@ -720,6 +742,56 @@ impl<'a, 't> Lighter<'a, 't> {
                 _ => true,
             }
         });
+
+        exports
+    }
+
+    fn resolve_usings(&mut self, stmts: &mut Vec<PStmt>, scope: &mut Scope<'_, 't>) {
+        for stmt in stmts {
+            if let PStmt::Item(Item::Using(ItemUsing { path, items, .. })) = stmt {
+                if !matches!(items, UsingItems::Glob) {
+                    error!(in self.sink; path.span() => "non-glob imports are currently not supported");
+                    continue;
+                }
+                let path_span = path.span();
+                let mut path_buf = self.source_map.root().to_path_buf();
+                for item in &path.items {
+                    path_buf.push(self.symbol_table.resolve(item.0));
+                }
+                path_buf.set_extension("la");
+                let file_id = match self.source_map.find_id(&path_buf) {
+                    Some(file_id) => file_id,
+                    None => {
+                        let Ok(mut file) = File::open(&path_buf) else {
+                            self.emit(ModuleNotFound(path_buf, path_span));
+                            continue;
+                        };
+                        let mut contents = String::new();
+                        if file.read_to_string(&mut contents).is_err() {
+                            self.emit(InvalidTextError(path_buf, path_span));
+                            continue;
+                        }
+                        self.source_map.add_source(path_buf, contents)
+                    }
+                };
+                if !self.exports.contains_key(&file_id) {
+                    let mut lantern_file = match parse::parse(file_id, &self.source_map.get_source(file_id).1, self.symbol_table) {
+                        Ok(lantern_file) => lantern_file,
+                        Err(diagnostic) => {
+                            self.sink.emit(diagnostic);
+                            return;
+                        }
+                    };
+                    let mut module_scope = Scope::new_module(&self.tcx);
+                    let exports = self.resolve_types(&mut lantern_file.stmts, &mut module_scope);
+                    self.exports.insert(file_id, exports);
+                    self.resolve_usings(&mut lantern_file.stmts, &mut module_scope);
+                    self.build_types_and_funs(&lantern_file.stmts, &mut module_scope);
+                    // TODO: lower function bodies
+                }
+                scope.import_all(self.exports.get(&file_id).unwrap());
+            }
+        }
     }
 
     fn build_types_and_funs(&mut self, stmts: &[PStmt], scope: &mut Scope<'_, 't>) {
