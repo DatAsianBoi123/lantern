@@ -29,12 +29,12 @@ pub struct Spark<'t> {
 pub struct Lighter<'a, 't> {
     globals: Globals<'t>,
     sink: DiagnosticSink,
-    symbol_table: &'a SymbolTable<'a>,
+    symbol_table: &'a mut SymbolTable,
     tcx: TypeContext<'t>,
 }
 
 impl<'a, 't> Lighter<'a, 't> {
-    pub fn new(symbol_table: &'a SymbolTable<'a>, arena: &'t Arena<LanternType<'t>>) -> Self {
+    pub fn new(symbol_table: &'a SymbolTable, arena: &'t Arena<LanternType<'t>>) -> Self {
         Self {
             globals: Globals::new(),
             sink: DiagnosticSink::new(),
