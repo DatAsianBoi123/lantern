@@ -675,7 +675,7 @@ impl<'a, 't> Lighter<'a, 't> {
         stmts.retain(|stmt| {
             match stmt {
                 PStmt::Item(Item::Using(_)) => todo!(),
-                PStmt::Item(Item::Struct(ItemStruct { annotations, ident, .. })) => {
+                PStmt::Item(Item::Struct(ItemStruct { vis, annotations, ident, .. })) => {
                     let r#struct = LanternStruct::new(ident.0, self.globals.types.len());
 
                     for annotation in &annotations.annotations {
@@ -841,14 +841,14 @@ impl<'a, 't> Lighter<'a, 't> {
                     }
                     Item::Struct(ItemStruct { ident, fields, .. }) => {
                         let fields = fields.iter()
-                            .map(|StructField { ident, r#type, .. }| {
+                            .map(|StructField { vis, ident, r#type, .. }| {
                                 // type may not have fields initialized, but structs have constant
                                 // size/alignment and primitives are hardcoded
                                 let ty = self.sink.emit_or(LanternType::resolve(r#type, scope, &self.tcx), self.tcx.error());
                                 if ty.needs_tag() {
                                     error!(in self.sink; r#type.span() => "optional primitives are currently not supported as struct fields");
                                 }
-                                (ident.0, ty)
+                                (*vis, ident.0, ty)
                             })
                             .collect();
 

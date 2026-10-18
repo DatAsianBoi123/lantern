@@ -1,7 +1,7 @@
 use std::{cell::OnceCell, hash::{Hash, Hasher}};
 
 use diagnostic::symbol::Symbol;
-use parse::{expr::{BinaryOperator, UnaryOperator}};
+use parse::{Visibility, expr::{BinaryOperator, UnaryOperator}};
 
 use crate::{expr::{BinaryOperation, UnaryOperation}, ty::{LanternType, TypeContext, TypeId}};
 
@@ -74,7 +74,7 @@ impl<'t> LanternStruct<'t> {
         }
     }
 
-    pub fn init(&self, fields: Box<[(Symbol, TypeId<'t>)]>) {
+    pub fn init(&self, fields: Box<[(Visibility, Symbol, TypeId<'t>)]>) {
         if self.data.set(LanternStructData::new(fields)).is_err() {
             panic!("double-init on lantern struct")
         }
@@ -99,17 +99,17 @@ pub struct LanternStructData<'t> {
 }
 
 impl<'t> LanternStructData<'t> {
-    pub fn new(fields: Box<[(Symbol, TypeId<'t>)]>) -> Self {
+    pub fn new(fields: Box<[(Visibility, Symbol, TypeId<'t>)]>) -> Self {
         let alignment = fields.iter()
-            .map(|(_, ty)| ty.alignment())
+            .map(|(_, _, ty)| ty.alignment())
             .max()
             .unwrap_or(1);
 
         let mut size = 0usize;
         let fields = fields.into_iter()
-            .map(|(name, ty)| {
+            .map(|(vis, name, ty)| {
                 size = size.next_multiple_of(ty.alignment());
-                let field = LanternStructField { name, offset: size, ty };
+                let field = LanternStructField { vis, name, offset: size, ty };
                 size += ty.size();
                 field
             })
@@ -137,6 +137,7 @@ impl<'t> LanternStructData<'t> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LanternStructField<'t> {
+    pub vis: Visibility,
     pub name: Symbol,
     pub offset: usize,
     pub ty: TypeId<'t>,
