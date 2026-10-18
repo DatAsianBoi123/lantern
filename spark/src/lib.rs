@@ -682,7 +682,6 @@ impl<'a, 't> Lighter<'a, 't> {
                 parse::Stmt::Item(Item::Struct(ItemStruct { annotations, ident, .. })) => {
                     let r#struct = LanternStruct::new(ident.0, self.globals.types.len());
 
-                    let ty = self.tcx.intern(LanternType::Struct(r#struct));
                     for annotation in &annotations.annotations {
                         if self.symbol_table.resolve(annotation.ident.0) == "std" {
                             if let Some(args) = &annotation.args && args.args.len() == 1 {
@@ -699,11 +698,13 @@ impl<'a, 't> Lighter<'a, 't> {
                         }
                     }
 
-                    if scope.insert_item(ident.0, ty).is_none() {
+                    if scope.is_duplicate_item(ident.0) {
                         self.emit(StructAlreadyDeclared(*ident));
                         return false;
                     }
 
+                    let ty = self.tcx.intern(LanternType::Struct(r#struct));
+                    scope.insert_item(ident.0, ty);
                     let LanternType::Struct(r#struct) = ty.as_ty() else { unreachable!() };
                     self.globals.types.push(&r#struct.data);
                     true
