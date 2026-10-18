@@ -76,8 +76,12 @@ impl<'a, 't> Scope<'a, 't> {
         }
     }
 
+    pub fn is_duplicate_item(&mut self, name: Symbol) -> bool {
+        self.items.contains_key(&name)
+    }
+
     pub fn insert_item(&mut self, name: Symbol, item: TypeId<'t>) -> Option<()> {
-        if self.items.contains_key(&name) { return None; };
+        if self.is_duplicate_item(name) { return None; };
         self.items.insert(name, item);
         Some(())
     }
