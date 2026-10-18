@@ -57,13 +57,13 @@ impl<'a, 't> Lighter<'a, 't> {
         self.globals.funs.push(SparkFunction::Lantern {
             name: "<module>".to_string(),
             stmts: lowered,
-            locals: behavior.locals_used
+            locals: behavior.locals_used,
         });
         entry
     }
 
     #[must_use]
-    pub fn lower_stmts(&mut self, mut stmts: Vec<parse::Stmt>, mut scope: Scope<'_, 't>) -> (Vec<Stmt<'t>>, ScopeBehavior<'t>) {
+    pub fn lower_stmts(&mut self, mut stmts: Vec<PStmt>, mut scope: Scope<'_, 't>) -> (Vec<Stmt<'t>>, ScopeBehavior<'t>) {
         let mut spark_stmts = Vec::new();
 
         self.resolve_types(&mut stmts, &mut scope);
@@ -71,11 +71,7 @@ impl<'a, 't> Lighter<'a, 't> {
 
         for stmt in stmts {
             match stmt {
-                parse::Stmt::Item(Item::Fun(ItemFun { sig: FunSig { name, args, ret, .. }, block, .. })) => {
-                    let ret = ret
-                        .map(|(_, ret)| LanternType::resolve(&ret, &scope, &self.tcx).unwrap_or(self.tcx.error()))
-                        .unwrap_or(self.tcx.none());
-
+                PStmt::Item(Item::Fun(ItemFun { sig: FunSig { name, args, .. }, block, .. })) => {
                     let fun_def = match &name.base {
                         Some(base) if let Ok(ty) = LanternType::resolve(base, &scope, &self.tcx)
                             && let Some(fun) = scope.associated(ty, name.ident.0) =>
@@ -86,7 +82,7 @@ impl<'a, 't> Lighter<'a, 't> {
                         _ => continue,
                     };
 
-                    let mut fun_scope = scope.child_function(block.closed_brace.span(), ret);
+                    let mut fun_scope = scope.child_function(block.closed_brace.span(), fun_def.ret);
                     fun_def.args.iter().zip(args).for_each(|((arg_name, ty), fun_arg)| {
                         if fun_scope.insert_variable(*arg_name, *ty).is_none() {
                             self.emit(DuplicateFunArg(fun_arg.ident));
@@ -99,9 +95,9 @@ impl<'a, 't> Lighter<'a, 't> {
                         locals: behavior.locals_used,
                     };
                 }
-                parse::Stmt::Item(_) => {}
-                parse::Stmt::IfStmt(if_stmt) => spark_stmts.push(Stmt::If(self.check_if(if_stmt, &mut scope))),
-                parse::Stmt::MatchStmt(MatchStmt { expr, arms, .. }) => {
+                PStmt::Item(_) => {}
+                PStmt::IfStmt(if_stmt) => spark_stmts.push(Stmt::If(self.check_if(if_stmt, &mut scope))),
+                PStmt::MatchStmt(MatchStmt { expr, arms, .. }) => {
                     let span = expr.span();
                     let expr = self.lower_expr(expr, &mut scope);
                     let inner = match *expr.ty {
@@ -162,7 +158,7 @@ impl<'a, 't> Lighter<'a, 't> {
                         self.emit(NonExhaustiveMatch(span));
                     }
                 }
-                parse::Stmt::WhileStmt(WhileStmt { condition, block, .. }) => {
+                PStmt::WhileStmt(WhileStmt { condition, block, .. }) => {
                     let cond_span = condition.span();
                     let cond = self.lower_expr(condition, &mut scope);
                     if !cond.ty.is_applicable(self.tcx.primitive(&BOOL_NATIVE)) {
@@ -179,7 +175,7 @@ impl<'a, 't> Lighter<'a, 't> {
                     scope.inherit_locals(behavior);
                     spark_stmts.push(Stmt::While { cond, stmts });
                 }
-                parse::Stmt::ValDeclaration(ValDeclaration { ident, r#type, init: Some((_, init)), .. }) => {
+                PStmt::ValDeclaration(ValDeclaration { ident, r#type, init: Some((_, init)), .. }) => {
                     let init_span = init.span();
                     let init = self.lower_expr(init, &mut scope);
                     let ty = r#type
@@ -200,7 +196,7 @@ impl<'a, 't> Lighter<'a, 't> {
                         None => self.emit(LocalAlreadyDeclared(ident)),
                     }
                 }
-                parse::Stmt::ValDeclaration(ValDeclaration { ident, r#type, .. }) => {
+                PStmt::ValDeclaration(ValDeclaration { ident, r#type, .. }) => {
                     // TODO: ensure uninitialized vars are initialized before usage
                     self.sink.emit(warning!(ident.span() => "unitialized variables are not fully supported, use at your own risk"));
                     let ty = r#type
@@ -214,7 +210,7 @@ impl<'a, 't> Lighter<'a, 't> {
                         None => self.emit(LocalAlreadyDeclared(ident)),
                     }
                 }
-                parse::Stmt::Return(ReturnStmt { ret, expr, .. }) => {
+                PStmt::Return(ReturnStmt { ret, expr, .. }) => {
                     let span = expr.as_ref()
                         .map(|expr| expr.span())
                         .unwrap_or(ret.span());
@@ -233,7 +229,7 @@ impl<'a, 't> Lighter<'a, 't> {
                     scope.diverges = true;
                     spark_stmts.push(Stmt::Return(Some(expr)));
                 }
-                parse::Stmt::Pass(PassStmt { pass, expr, .. }) => {
+                PStmt::Pass(PassStmt { pass, expr, .. }) => {
                     let span = expr.as_ref()
                         .map(|expr| expr.span())
                         .unwrap_or(pass.span());
@@ -255,11 +251,11 @@ impl<'a, 't> Lighter<'a, 't> {
                         self.emit(PassOutsideBlock(pass));
                     }
                 }
-                parse::Stmt::Continue(_, _) if scope.in_loop() => spark_stmts.push(Stmt::Continue),
-                parse::Stmt::Continue(cont, _) => self.emit(ContinueOutsideLoop(cont)),
-                parse::Stmt::Break(_, _) if scope.in_loop() => spark_stmts.push(Stmt::Break),
-                parse::Stmt::Break(r#break, _) => self.emit(BreakOutsideLoop(r#break)),
-                parse::Stmt::Throw(_, expr, _) => {
+                PStmt::Continue(_, _) if scope.in_loop() => spark_stmts.push(Stmt::Continue),
+                PStmt::Continue(cont, _) => self.emit(ContinueOutsideLoop(cont)),
+                PStmt::Break(_, _) if scope.in_loop() => spark_stmts.push(Stmt::Break),
+                PStmt::Break(r#break, _) => self.emit(BreakOutsideLoop(r#break)),
+                PStmt::Throw(_, expr, _) => {
                     let expr_span = expr.span();
                     let expr = self.lower_expr(expr, &mut scope);
                     if !expr.ty.is_applicable(self.tcx.primitive(&STR_NATIVE)) {
@@ -272,7 +268,7 @@ impl<'a, 't> Lighter<'a, 't> {
                     scope.diverges = true;
                     spark_stmts.push(Stmt::Throw(expr));
                 }
-                parse::Stmt::Expr(expr, _) => spark_stmts.push(Stmt::Expr(self.lower_expr(expr, &mut scope))),
+                PStmt::Expr(expr, _) => spark_stmts.push(Stmt::Expr(self.lower_expr(expr, &mut scope))),
             }
         }
 
@@ -294,28 +290,28 @@ impl<'a, 't> Lighter<'a, 't> {
         (spark_stmts, scope.into_behavior())
     }
 
-    pub fn lower_expr(&mut self, expr: pe::Expr, scope: &mut Scope<'_, 't>) -> Expr<'t> {
+    pub fn lower_expr(&mut self, expr: PExpr, scope: &mut Scope<'_, 't>) -> Expr<'t> {
         match expr {
-            pe::Expr::Literal(lex::Literal::None(span)) => {
+            PExpr::Literal(lex::Literal::None(span)) => {
                 Expr::none(&self.tcx, span)
             }
-            pe::Expr::Literal(lex::Literal::Integer(int, span)) => {
+            PExpr::Literal(lex::Literal::Integer(int, span)) => {
                 Expr::new(ExprKind::Literal(Literal::Int(int)), self.tcx.primitive(&INT_NATIVE), span)
             }
-            pe::Expr::Literal(lex::Literal::Float(float, span)) => {
+            PExpr::Literal(lex::Literal::Float(float, span)) => {
                 Expr::new(ExprKind::Literal(Literal::Float(float)), self.tcx.primitive(&FLOAT_NATIVE), span)
             }
-            pe::Expr::Literal(lex::Literal::True(span)) => {
+            PExpr::Literal(lex::Literal::True(span)) => {
                 Expr::new(ExprKind::Literal(Literal::True), self.tcx.primitive(&BOOL_NATIVE), span)
             }
-            pe::Expr::Literal(lex::Literal::False(span)) => {
+            PExpr::Literal(lex::Literal::False(span)) => {
                 Expr::new(ExprKind::Literal(Literal::False), self.tcx.primitive(&BOOL_NATIVE), span)
             }
-            pe::Expr::Literal(lex::Literal::String(str, span)) => {
+            PExpr::Literal(lex::Literal::String(str, span)) => {
                 let global = self.globals.vars.insert_str(str.into_boxed_str());
                 Expr::new(ExprKind::Global(global), self.tcx.primitive(&STR_NATIVE), span)
             }
-            pe::Expr::Identifier(ident) => {
+            PExpr::Identifier(ident) => {
                 if let Some(var) = scope.variable(ident.0) {
                     Expr::new(ExprKind::Local(var.index), var.ty, ident.span())
                 } else if let Some(fun) = scope.function(ident.0) {
@@ -325,7 +321,7 @@ impl<'a, 't> Lighter<'a, 't> {
                     Expr::error(&self.tcx, ident.span())
                 }
             }
-            pe::Expr::Field(ExprField { expr, ident }) => {
+            PExpr::Field(ExprField { expr, ident }) => {
                 // Struct.static_function
                 if let Some(ty) = self.item_static(&expr, scope) {
                     let Some(associated) = scope.associated(ty, ident.0) else {
@@ -358,7 +354,7 @@ impl<'a, 't> Lighter<'a, 't> {
                 }
                 Expr::error(&self.tcx, ident.span())
             }
-            pe::Expr::FunCall(ExprFunCall { expr, args, closed_paren, .. }) => {
+            PExpr::FunCall(ExprFunCall { expr, args, closed_paren, .. }) => {
                 let span = expr.span();
                 let fun = self.lower_expr(*expr, scope);
 
@@ -381,7 +377,7 @@ impl<'a, 't> Lighter<'a, 't> {
                     }
                 }
             }
-            pe::Expr::MethodCall(ExprMethodCall { expr, ident, args, closed_paren, .. }) => {
+            PExpr::MethodCall(ExprMethodCall { expr, ident, args, closed_paren, .. }) => {
                 let (fun, recv) = match self.item_static(&expr, scope) {
                     Some(ty) => {
                         let Some(associated) = scope.associated(ty, ident.0) else {
@@ -439,7 +435,7 @@ impl<'a, 't> Lighter<'a, 't> {
                     Expr::new(ExprKind::Call(Box::new(fun_expr), arg_exprs), fun_ret, closed_paren.span())
                 }
             }
-            pe::Expr::Struct(ExprStruct { ident, fields, closed_brace, .. }) => {
+            PExpr::Struct(ExprStruct { ident, fields, closed_brace, .. }) => {
                 let Some(item) = scope.item(ident.0) else {
                     self.emit(UnknownIdent { ident });
                     return Expr::error(&self.tcx, closed_brace.span());
@@ -483,8 +479,8 @@ impl<'a, 't> Lighter<'a, 't> {
 
                 Expr::new(ExprKind::Struct(r#struct.id, field_exprs), item, closed_brace.span())
             }
-            pe::Expr::Paren(ExprParen { expr, .. }) => self.lower_expr(*expr, scope),
-            pe::Expr::Block(block) => {
+            PExpr::Paren(ExprParen { expr, .. }) => self.lower_expr(*expr, scope),
+            PExpr::Block(block) => {
                 let span = block.span();
                 let (stmts, behavior) = self.lower_stmts(block.stmts, scope.child_block_expr());
                 if let PassBehavior::KnownType(ty) = behavior.pass && !self.tcx.none().is_applicable(ty) {
@@ -497,7 +493,7 @@ impl<'a, 't> Lighter<'a, 't> {
                 scope.inherit(behavior.strip_pass());
                 Expr::new(ExprKind::Block(stmts), behavior.pass.ty().unwrap_or(self.tcx.none()), span)
             }
-            pe::Expr::Array(ExprArray { open_bracket, elements, closed_bracket, ty }) => {
+            PExpr::Array(ExprArray { open_bracket, elements, closed_bracket, ty }) => {
                 let mut ty = ty.map(|ty| self.sink.emit_or(LanternType::resolve(&ty, scope, &self.tcx), self.tcx.error()));
 
                 let mut element_exprs = Vec::new();
@@ -528,7 +524,7 @@ impl<'a, 't> Lighter<'a, 't> {
                     }
                 }
             }
-            pe::Expr::Index(ExprIndex { expr, index, closed_bracket, .. }) => {
+            PExpr::Index(ExprIndex { expr, index, closed_bracket, .. }) => {
                 let expr_span = expr.span();
                 let base = self.lower_expr(*expr, scope);
 
@@ -553,7 +549,7 @@ impl<'a, 't> Lighter<'a, 't> {
 
                 Expr::new(ExprKind::Index(Box::new(base), Box::new(index)), inner, closed_bracket.span())
             }
-            pe::Expr::Binary(ExprBinary { lhs, op, rhs }) => {
+            PExpr::Binary(ExprBinary { lhs, op, rhs }) => {
                 let lhs_span = lhs.span();
                 let rhs_span = rhs.span();
                 let lhs = self.lower_expr(*lhs, scope);
@@ -654,7 +650,7 @@ impl<'a, 't> Lighter<'a, 't> {
                     }
                 }
             }
-            pe::Expr::Unary(ExprUnary { op, expr }) => {
+            PExpr::Unary(ExprUnary { op, expr }) => {
                 let span = expr.span();
                 let base = self.lower_expr(*expr, scope);
                 match &*base.ty {
@@ -674,12 +670,12 @@ impl<'a, 't> Lighter<'a, 't> {
         }
     }
 
-    fn resolve_types(&mut self, stmts: &mut Vec<parse::Stmt>, scope: &mut Scope<'_, 't>) {
+    fn resolve_types(&mut self, stmts: &mut Vec<PStmt>, scope: &mut Scope<'_, 't>) -> ModuleExports<'t> {
         // use retain to delete duplicate items
         stmts.retain(|stmt| {
             match stmt {
-                parse::Stmt::Item(Item::Using(_)) => todo!(),
-                parse::Stmt::Item(Item::Struct(ItemStruct { annotations, ident, .. })) => {
+                PStmt::Item(Item::Using(_)) => todo!(),
+                PStmt::Item(Item::Struct(ItemStruct { annotations, ident, .. })) => {
                     let r#struct = LanternStruct::new(ident.0, self.globals.types.len());
 
                     for annotation in &annotations.annotations {
@@ -709,7 +705,7 @@ impl<'a, 't> Lighter<'a, 't> {
                     self.globals.types.push(&r#struct.data);
                     true
                 }
-                parse::Stmt::Item(Item::NativeType(ItemNativeType { ident, .. })) => {
+                PStmt::Item(Item::NativeType(ItemNativeType { vis, ident, .. })) => {
                     if let Some(primitive) = native::get_native(self.symbol_table.resolve(ident.0)) {
                         if scope.insert_item(ident.0, self.tcx.primitive(primitive)).is_none() {
                             self.emit(PrimitiveAlreadyDeclared(*ident));
@@ -726,10 +722,10 @@ impl<'a, 't> Lighter<'a, 't> {
         });
     }
 
-    fn build_types_and_funs(&mut self, stmts: &[parse::Stmt], scope: &mut Scope<'_, 't>) {
+    fn build_types_and_funs(&mut self, stmts: &[PStmt], scope: &mut Scope<'_, 't>) {
         stmts.iter()
             .filter_map(|stmt| match stmt {
-                parse::Stmt::Item(item) => Some(item),
+                PStmt::Item(item) => Some(item),
                 _ => None,
             })
             .for_each(|item| match item {
@@ -907,7 +903,7 @@ impl<'a, 't> Lighter<'a, 't> {
         (IfStmt { cond, stmts, branch }, block_behavior.combine_branch(rest_behavior))
     }
 
-    fn check_fun(&mut self, args: Vec<pe::Expr>, fun_args: &[TypeId<'t>], span: Span, scope: &mut Scope<'_, 't>) -> Vec<Expr<'t>> {
+    fn check_fun(&mut self, args: Vec<PExpr>, fun_args: &[TypeId<'t>], span: Span, scope: &mut Scope<'_, 't>) -> Vec<Expr<'t>> {
         if fun_args.len() != args.len() {
             self.emit(FunctionArgMismatch {
                 expected: fun_args.len(),
@@ -933,9 +929,9 @@ impl<'a, 't> Lighter<'a, 't> {
         arg_exprs
     }
 
-    fn item_static(&self, expr: &pe::Expr, scope: &Scope<'_, 't>) -> Option<TypeId<'t>> {
+    fn item_static(&self, expr: &PExpr, scope: &Scope<'_, 't>) -> Option<TypeId<'t>> {
         match expr {
-            pe::Expr::Identifier(ident) if let Some(item) = scope.item(ident.0) && scope.variable(ident.0).is_none() => Some(item),
+            PExpr::Identifier(ident) if let Some(item) = scope.item(ident.0) && scope.variable(ident.0).is_none() => Some(item),
             _ => None,
         }
     }
