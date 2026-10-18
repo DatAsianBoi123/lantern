@@ -142,13 +142,12 @@ impl FlameGen {
                     let placeholder = self.placeholder();
                     self.passes.last_mut().expect("in a block expression").push(placeholder);
                 }
-                // TODO: span data
-                Stmt::Continue => {
+                Stmt::Continue(span) => {
                     let head = self.loops.last().expect("`continue` in a loop").head;
-                    inst!(self.instructions; GOTO head);
+                    inst!(with self => span; GOTO head);
                 }
-                // TODO: span data
-                Stmt::Break => {
+                Stmt::Break(span) => {
+                    inst!(with self => span);
                     let index = self.placeholder();
                     self.loops.last_mut().expect("`break` in a loop").breaks.push(index);
                 }
@@ -272,9 +271,8 @@ impl FlameGen {
                 }
                 inst!(with self => expr.span; INV_MET args.len());
             }
-            ExprKind::Struct(id, fields) => {
-                // TODO: better span information here
-                inst!(self.instructions; ALLOC_OBJ (*id + self.type_offset));
+            ExprKind::Struct(id, fields, span) => {
+                inst!(with self => span; ALLOC_OBJ (*id + self.type_offset));
                 for (field, offset) in fields {
                     inst!(with self => field.span; PUSHU (HeapObject::field_offset() + *offset));
                     self.compile_expr(field);

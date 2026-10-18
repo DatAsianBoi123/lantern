@@ -264,9 +264,9 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
                         self.emit(PassOutsideBlock(pass));
                     }
                 }
-                PStmt::Continue(_, _) if scope.in_loop() => spark_stmts.push(Stmt::Continue),
+                PStmt::Continue(cont, _) if scope.in_loop() => spark_stmts.push(Stmt::Continue(cont.span())),
                 PStmt::Continue(cont, _) => self.emit(ContinueOutsideLoop(cont)),
-                PStmt::Break(_, _) if scope.in_loop() => spark_stmts.push(Stmt::Break),
+                PStmt::Break(r#break, _) if scope.in_loop() => spark_stmts.push(Stmt::Break(r#break.span())),
                 PStmt::Break(r#break, _) => self.emit(BreakOutsideLoop(r#break)),
                 PStmt::Throw(_, expr, _) => {
                     let expr_span = expr.span();
@@ -321,7 +321,7 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
                 Expr::new(ExprKind::Literal(Literal::False), self.tcx.primitive(&BOOL_NATIVE), span)
             }
             PExpr::Literal(lex::Literal::String(str, span)) => {
-                let global = self.globals.vars.insert_str(str.into_boxed_str());
+                let global = self.globals.vars.insert_str(&str);
                 Expr::new(ExprKind::Global(global), self.tcx.primitive(&STR_NATIVE), span)
             }
             PExpr::Identifier(ident) => {
@@ -491,7 +491,7 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
                         .for_each(|field| self.emit(MissingField { field: field.name, span: ident.span() }));
                 }
 
-                Expr::new(ExprKind::Struct(r#struct.id, field_exprs), item, closed_brace.span())
+                Expr::new(ExprKind::Struct(r#struct.id, field_exprs, ident.span()), item, closed_brace.span())
             }
             PExpr::Paren(ExprParen { expr, .. }) => self.lower_expr(*expr, scope),
             PExpr::Block(block) => {

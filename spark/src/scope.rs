@@ -1,4 +1,4 @@
-use std::{cell::OnceCell, collections::HashMap};
+use std::{cell::OnceCell, collections::HashMap, rc::Rc};
 
 use diagnostic::{Span, symbol::Symbol};
 
@@ -392,9 +392,8 @@ impl Globals<'_> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GlobalVariables {
-    // PERF: don't store two clones of string
-    map: HashMap<Box<str>, usize>,
-    strs: Vec<Box<str>>,
+    map: HashMap<Rc<str>, usize>,
+    strs: Vec<Rc<str>>,
 }
 
 impl GlobalVariables {
@@ -402,17 +401,19 @@ impl GlobalVariables {
         Self { map: HashMap::new(), strs: Vec::new() }
     }
 
-    pub fn insert_str(&mut self, str: Box<str>) -> usize {
-        *self.map.entry(str.clone())
-            .or_insert_with(|| {
-                let id = self.strs.len();
-                self.strs.push(str);
-                id
-            })
+    pub fn insert_str(&mut self, str: &str) -> usize {
+        if let Some(index) = self.map.get(str) {
+            return *index;
+        }
+        let id = self.strs.len();
+        let str = Rc::from(str);
+        self.strs.push(Rc::clone(&str));
+        self.map.insert(str, id);
+        id
     }
 
-    pub fn into_strs(self) -> Vec<Box<str>> {
-        self.strs
+    pub fn strs(&self) -> &Vec<Rc<str>> {
+        &self.strs
     }
 }
 

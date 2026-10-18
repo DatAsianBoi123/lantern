@@ -205,7 +205,6 @@ pub struct ObjectHeader {
 pub enum TypeInfo {
     Object {
         size: usize,
-        // PERF: use a bitfield to store refs
         ref_offets: Box<[usize]>,
     },
     Array {
@@ -552,9 +551,9 @@ impl GlobalStorage {
         vars: GlobalVariables,
         bytes_type_info: &TypeInfo,
     ) -> Self {
-        let strs = vars.into_strs();
+        let strs = vars.strs();
         let mut array = Box::new_uninit_slice(strs.len());
-        strs.into_iter().enumerate().for_each(|(i, str)| {
+        strs.iter().enumerate().for_each(|(i, str)| {
             unsafe {
                 let mut bytes = ManagedArray::allocate(str.len(), bytes_type_info);
                 for (i, byte) in str.bytes().enumerate() {

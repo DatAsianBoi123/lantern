@@ -52,7 +52,7 @@ pub enum ExprKind<'t> {
     Assign(Box<Expr<'t>>, Box<Expr<'t>>),
     Call(Box<Expr<'t>>, Vec<Expr<'t>>),
     CallMethod(Box<Expr<'t>>, usize, Vec<Expr<'t>>),
-    Struct(usize, Vec<(Expr<'t>, usize)>),
+    Struct(usize, Vec<(Expr<'t>, usize)>, Span),
     Array(TypeId<'t>, Vec<Expr<'t>>),
     Error,
 }

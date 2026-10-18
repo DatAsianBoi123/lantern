@@ -1,3 +1,5 @@
+use diagnostic::Span;
+
 use crate::expr::Expr;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -16,8 +18,8 @@ pub enum Stmt<'t> {
     Val(usize, Option<Expr<'t>>),
     Return(Option<Expr<'t>>),
     Pass(Expr<'t>),
-    Continue,
-    Break,
+    Continue(Span),
+    Break(Span),
     Throw(Expr<'t>),
     Expr(Expr<'t>),
 }
