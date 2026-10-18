@@ -504,10 +504,16 @@ pub struct AnnotationArgs {
     pub closed_paren: ClosedParen,
 }
 
-#[derive(Parse, Debug, Clone, PartialEq, Eq)]
+#[derive(Parse, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Visibility {
     Public(Pub),
     None,
+}
+
+impl Visibility {
+    pub fn is_public(self) -> bool {
+        matches!(self, Self::Public(_))
+    }
 }
 
 #[derive(Parse, Debug, Clone, PartialEq, Eq)]
