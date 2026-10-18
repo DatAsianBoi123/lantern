@@ -393,14 +393,14 @@ define_puncts! {
 #[derive(Debug)]
 pub struct Lexer<'a, 's> {
     source: FileId,
-    symbol_table: &'s mut SymbolTable<'a>,
+    symbol_table: &'s mut SymbolTable,
     chars: Chars<'a>,
     line: u32,
     col: u32,
 }
 
 impl<'a, 's> Lexer<'a, 's> {
-    pub fn new(source: FileId, input: &'a str, symbol_table: &'s mut SymbolTable<'a>) -> Self {
+    pub fn new(source: FileId, input: &'a str, symbol_table: &'s mut SymbolTable) -> Self {
         Self {
             source,
             symbol_table,
@@ -676,8 +676,8 @@ mod tests {
     fn test_str() {
         let input = r#""hello there""#;
 
-        let mut source_map = SourceMap::new();
-        let root = source_map.add_source(PathBuf::new(), input);
+        let mut source_map = SourceMap::new("".into());
+        let root = source_map.add_source(PathBuf::new(), input.to_string());
         let mut symbol_table = SymbolTable::new();
         let mut lexer = Lexer::new(root, input, &mut symbol_table);
 
@@ -688,8 +688,8 @@ mod tests {
     fn test_lexer() {
         let input = "val abc: std.int = 10";
 
-        let mut source_map = SourceMap::new();
-        let root = source_map.add_source(PathBuf::new(), input);
+        let mut source_map = SourceMap::new("".into());
+        let root = source_map.add_source(PathBuf::new(), input.to_string());
         let mut symbol_table = SymbolTable::new();
         let mut lexer = Lexer::new(root, input, &mut symbol_table);
 

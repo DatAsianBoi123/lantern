@@ -33,13 +33,13 @@ fn main() -> ExitCode {
         return ExitCode::from(3);
     };
 
-    let mut source_map = SourceMap::new();
-    let root = source_map.add_source(path.into(), &content);
+    let mut source_map = SourceMap::new(path.parent().expect("file path has parent").into());
+    let root = source_map.add_source(path.file_name().expect("path is a file").into(), content);
 
     let mut symbol_table = SymbolTable::new();
 
     let before_compile = Instant::now();
-    let lantern_file = match parse::parse(root, content.trim(), &mut symbol_table) {
+    let lantern_file = match parse::parse(root, &source_map.get_source(root).1, &mut symbol_table) {
         Ok(tokens) => tokens,
         Err(err) => {
             eprintln!("{}", err.display(&source_map));

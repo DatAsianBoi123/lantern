@@ -23,7 +23,7 @@ impl<T: TokenKind> ParseTokens for T {
     }
 }
 
-pub fn parse<'a>(source: FileId, content: &'a str, symbol_table: &mut SymbolTable<'a>) -> Result<LanternFile> {
+pub fn parse(source: FileId, content: &str, symbol_table: &mut SymbolTable) -> Result<LanternFile> {
     TokenStream::from_input(source, content, symbol_table).parse()
 }
 

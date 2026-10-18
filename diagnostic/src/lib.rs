@@ -1,4 +1,4 @@
-use std::{fmt::{Display, Formatter}, path::PathBuf};
+use std::{fmt::{Display, Formatter}, path::{Path, PathBuf}};
 
 use color_print::cformat;
 
@@ -109,7 +109,7 @@ impl Diagnostic {
             return String::new();
         }
 
-        let src = source_map.get_source(self.span.source).1;
+        let src = &source_map.get_source(self.span.source).1;
         let mut lines = src.lines();
         let first_line = lines.nth((start.line - 1) as usize)
             .unwrap_or("");
@@ -170,32 +170,41 @@ pub trait DiagnosticError {
 }
 
 #[derive(Debug)]
-pub struct SourceMap<'a> {
-    sources: Vec<(PathBuf, &'a str)>,
+pub struct SourceMap {
+    sources: Vec<(PathBuf, String)>,
+    root: PathBuf,
 }
 
-impl<'a> SourceMap<'a> {
-    pub fn new() -> Self {
-        Self { sources: Vec::new() }
+impl SourceMap {
+    pub fn new(root: PathBuf) -> Self {
+        Self { sources: Vec::new(), root }
     }
 
-    pub fn add_source(&mut self, path: PathBuf, source: &'a str) -> FileId {
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub fn add_source(&mut self, path: PathBuf, source: String) -> FileId {
         self.sources.push((path, source));
         FileId(self.sources.len() - 1)
     }
 
-    pub fn get_source(&self, id: FileId) -> &(PathBuf, &'a str) {
+    pub fn get_source(&self, id: FileId) -> &(PathBuf, String) {
         &self.sources[id.0]
     }
-}
 
-impl Default for SourceMap<'_> {
-    fn default() -> Self {
-        Self::new()
+    pub fn get_contents(&self, id: FileId) -> &str {
+        &self.sources[id.0].1
+    }
+
+    pub fn find_id(&self, path: &Path) -> Option<FileId> {
+        self.sources.iter()
+            .enumerate()
+            .find_map(|(i, (source, _))| (source == path).then_some(FileId(i)))
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FileId(usize);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

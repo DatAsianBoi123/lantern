@@ -17,7 +17,7 @@ impl<'a, 's> TokenStream<'a, 's> {
         T::parse(self)
     }
 
-    pub fn from_input(source: FileId, str: &'a str, symbol_table: &'s mut SymbolTable<'a>) -> Self {
+    pub fn from_input(source: FileId, str: &'a str, symbol_table: &'s mut SymbolTable) -> Self {
         Self::new(Lexer::new(source, str, symbol_table))
     }
 
@@ -79,8 +79,8 @@ mod tests {
     fn test_punctuated() {
         let input = "1,23,4";
 
-        let mut source_map = SourceMap::new();
-        let root = source_map.add_source(PathBuf::new(), input);
+        let mut source_map = SourceMap::new("".into());
+        let root = source_map.add_source(PathBuf::new(), input.to_string());
         let mut symbol_table = SymbolTable::new();
         let mut stream = TokenStream::from_input(root, input, &mut symbol_table);
 
@@ -93,8 +93,8 @@ mod tests {
     fn test_stream() {
         let input = "val a: std.int = 10;";
 
-        let mut source_map = SourceMap::new();
-        let root = source_map.add_source(PathBuf::new(), input);
+        let mut source_map = SourceMap::new("".into());
+        let root = source_map.add_source(PathBuf::new(), input.to_string());
         let mut symbol_table = SymbolTable::new();
         let mut stream = TokenStream::from_input(root, input, &mut symbol_table);
 
