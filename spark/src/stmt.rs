@@ -15,7 +15,7 @@ pub enum Stmt<'t> {
         cond: Expr<'t>,
         stmts: Vec<Stmt<'t>>,
     },
-    Val(usize, Option<Expr<'t>>),
+    Val(usize, Expr<'t>),
     Return(Option<Expr<'t>>),
     Pass(Expr<'t>),
     Continue(Span),

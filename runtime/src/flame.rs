@@ -117,13 +117,8 @@ impl FlameGen {
                         self.patch(break_index, inst!(GOTO end));
                     }
                 }
-                // TODO: span data
                 Stmt::Val(id, init) => {
-                    if let Some(init) = init {
-                        self.compile_expr(init);
-                    } else {
-                        inst!(self.instructions; PUSHNULL);
-                    }
+                    self.compile_expr(init);
                     inst! { self.instructions;
                         [STORE_LOCAL *id]
                         [POP]

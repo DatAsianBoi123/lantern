@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fs::File, io::Read};
 
 use arena::Arena;
-use diagnostic::{DiagnosticError, DiagnosticSink, FileId, SourceMap, Span, error, symbol::{SymbolDisplay, SymbolTable}, warning};
+use diagnostic::{DiagnosticError, DiagnosticSink, FileId, SourceMap, Span, error, symbol::{SymbolDisplay, SymbolTable}};
 use parse::{FunArg, FunSig, Item, ItemFun, ItemNativeFun, ItemNativeType, ItemStruct, ItemUsing, LanternFile, MatchPattern, MatchStmt, PassStmt, ReturnStmt, Stmt as PStmt, StructField, UsingItems, ValDeclaration, WhileStmt, expr::{BinaryOperator, Expr as PExpr, ExprArray, ExprBinary, ExprField, ExprFunCall, ExprIndex, ExprMethodCall, ExprParen, ExprStruct, ExprUnary}, lex::{self, TokenKind}};
 
 use crate::{def::{LanternFunction, LanternStruct, LanternStructField}, diagnostics::*, expr::{Expr, ExprKind, Literal, LogicalOperation}, native::{BOOL_NATIVE, FLOAT_NATIVE, FromDefError, INT_NATIVE, NativeFun, STR_NATIVE}, scope::{Globals, ModuleExports, PassBehavior, Scope, ScopeBehavior, ScopeKind}, stmt::{IfBranch, IfStmt, Stmt}, ty::{LanternType, TypeContext, TypeId}};
@@ -188,7 +188,7 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
                     scope.inherit_locals(behavior);
                     spark_stmts.push(Stmt::While { cond, stmts });
                 }
-                PStmt::ValDeclaration(ValDeclaration { ident, r#type, init: Some((_, init)), .. }) => {
+                PStmt::ValDeclaration(ValDeclaration { ident, r#type, init, .. }) => {
                     let init_span = init.span();
                     let init = self.lower_expr(init, &mut scope);
                     let ty = r#type
@@ -205,21 +205,7 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
                         })
                         .unwrap_or(init.ty);
                     match scope.insert_variable(ident.0, ty) {
-                        Some(index) => spark_stmts.push(Stmt::Val(index, Some(init))),
-                        None => self.emit(LocalAlreadyDeclared(ident)),
-                    }
-                }
-                PStmt::ValDeclaration(ValDeclaration { ident, r#type, .. }) => {
-                    // TODO: ensure uninitialized vars are initialized before usage
-                    self.sink.emit(warning!(ident.span() => "unitialized variables are not fully supported, use at your own risk"));
-                    let ty = r#type
-                        .map(|(_, ty)| self.sink.emit_or(LanternType::resolve(&ty, &scope, &self.tcx), self.tcx.error()))
-                        .unwrap_or_else(|| {
-                            self.emit(UninitVarNeedsType(ident));
-                            self.tcx.error()
-                        });
-                    match scope.insert_variable(ident.0, ty) {
-                        Some(index) => spark_stmts.push(Stmt::Val(index, None)),
+                        Some(index) => spark_stmts.push(Stmt::Val(index, init)),
                         None => self.emit(LocalAlreadyDeclared(ident)),
                     }
                 }

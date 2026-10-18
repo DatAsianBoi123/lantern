@@ -360,8 +360,8 @@ pub struct ValDeclaration {
     pub ident: Ident,
     #[parse(with_try(Colon, Type))]
     pub r#type: Option<(Colon, Type)>,
-    #[parse(with_try(Equals, Expr))]
-    pub init: Option<(Equals, Expr)>,
+    pub eq: Equals,
+    pub init: Expr,
     pub semi: Semi,
 }
 
