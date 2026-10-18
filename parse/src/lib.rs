@@ -279,11 +279,37 @@ impl ItemNativeType {
 pub struct ItemUsing {
     pub using: Using,
     pub path: Path,
-    pub period: Period,
-    pub open_brace: OpenBrace,
-    #[parse(with(parse_punctuated::<Ident, Comma, ClosedBrace>))] // TODO: allow {}?
-    pub items: Vec<Ident>,
-    pub closed_brace: ClosedBrace,
+    pub items: UsingItems,
+    pub semi: Semi,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UsingItems {
+    /// using std;
+    Named,
+    /// using std{};
+    Glob,
+    /// using std{item};
+    Items(Vec<FunName>),
+}
+
+impl ParseTokens for UsingItems {
+    fn parse(stream: &mut TokenStream) -> Result<Self> {
+        match stream.peek()? {
+            Token::Punct(Punct::Semi(_)) => Ok(Self::Named),
+            Token::Punct(Punct::OpenBrace(_)) => {
+                let _ = stream.next_token();
+                let items = parse_punctuated::<_, Comma, ClosedBrace>(stream)?;
+                let _ = stream.next_token();
+                if items.is_empty() {
+                    Ok(Self::Glob)
+                } else {
+                    Ok(Self::Items(items))
+                }
+            }
+            token => Err(error!(token.span() => "expected `;` or `{{`")),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
