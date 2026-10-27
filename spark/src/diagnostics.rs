@@ -407,11 +407,30 @@ impl DiagnosticError for ModuleNotFound {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InvalidTextError(pub PathBuf, pub Span);
 
 impl DiagnosticError for InvalidTextError {
     fn into_diagnostic(self, _: &SymbolTable) -> Diagnostic {
         error!(self.1 => "module {} contains invalid UTF-8", self.0.to_string_lossy())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EntrypointAlreadyDefined(pub Span);
+
+impl DiagnosticError for EntrypointAlreadyDefined {
+    fn into_diagnostic(self, _: &SymbolTable) -> Diagnostic {
+        error!(self.0 => "entrypoint has already been defined")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoEntrypoint(pub Span);
+
+impl DiagnosticError for NoEntrypoint {
+    fn into_diagnostic(self, _: &SymbolTable) -> Diagnostic {
+        error!(self.0 => "no entrypoint defined")
     }
 }
 

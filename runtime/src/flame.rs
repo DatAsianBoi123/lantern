@@ -9,7 +9,7 @@ pub type NativeFn = fn(&mut VM) -> Result<Slot, RuntimeError>;
 pub mod instruction;
 pub mod native;
 
-pub fn ignite(spark: Spark, globals: &mut Globals) -> [usize; BuiltinType::SIZE] {
+pub fn ignite(spark: Spark, globals: &mut Globals) -> (usize, [usize; BuiltinType::SIZE]) {
     let type_offset = globals.types.len();
 
     for fun in spark.globals.funs {
@@ -22,7 +22,7 @@ pub fn ignite(spark: Spark, globals: &mut Globals) -> [usize; BuiltinType::SIZE]
 
     globals.vars = spark.globals.vars;
 
-    spark.tcx.into_builtins(type_offset)
+    (spark.entrypoint, spark.tcx.into_builtins(type_offset))
 }
 
 #[derive(Debug)]

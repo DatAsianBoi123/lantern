@@ -144,16 +144,16 @@ impl VM {
             ],
             vars: GlobalVariables::new(),
         };
-        let builtin_type_indices = flame::ignite(spark, &mut globals);
+        let (entrypoint, builtin_type_indices) = flame::ignite(spark, &mut globals);
 
-        let root = globals.funs.last().expect("root function");
+        let root = &globals.funs[entrypoint];
 
         let mut stack = LanternStack::new(2048);
         if let FunctionKind::Instructions(_, locals) = root.kind { 
             stack.reserve(locals).expect("too many locals");
         }
         let mut frames = Vec::with_capacity(512);
-        frames.push(Frame::new(globals.funs.len() - 1, 0));
+        frames.push(Frame::new(entrypoint, 0));
 
         let types = globals.types.into_boxed_slice();
         Self {

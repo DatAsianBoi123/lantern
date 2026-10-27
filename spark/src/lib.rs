@@ -15,6 +15,8 @@ pub mod def;
 pub mod native;
 pub mod diagnostics;
 
+pub static ENTRYPOINT_NAME: &str = "main";
+
 pub fn lower<'a, 't>(
     file: LanternFile,
     arena: &'t Arena<LanternType<'t>>,
@@ -22,14 +24,15 @@ pub fn lower<'a, 't>(
     source_map: &'a mut SourceMap,
 ) -> (Option<Spark<'t>>, DiagnosticSink) {
     let mut lighter = Lighter::new(symbol_table, source_map, arena);
-    lighter.lower_package(file);
-    lighter.compile()
+    let entrypoint = lighter.lower_package(file);
+    lighter.compile(entrypoint)
 }
 
 #[non_exhaustive]
 #[derive(Debug)]
 pub struct Spark<'t> {
     pub globals: Globals<'t>,
+    pub entrypoint: usize,
     pub tcx: TypeContext<'t>,
 }
 
@@ -55,15 +58,16 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
         }
     }
 
-    pub fn compile(self) -> (Option<Spark<'t>>, DiagnosticSink) {
+    pub fn compile(self, entrypoint: usize) -> (Option<Spark<'t>>, DiagnosticSink) {
         if self.sink.fatal() {
             (None, self.sink)
         } else {
-            (Some(Spark { globals: self.globals, tcx: self.tcx }), self.sink)
+            (Some(Spark { globals: self.globals, entrypoint, tcx: self.tcx }), self.sink)
         }
     }
 
     pub fn lower_package(&mut self, root: LanternFile) -> usize {
+        let source = root.source;
         self.load_modules(root);
         self.for_each_module(|this, module| {
             let types = this.resolve_types(&mut module.file.items, &mut module.scope);
@@ -114,13 +118,11 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
         self.for_each_module(|this, module| {
             this.lower_fun_bodies(mem::take(&mut module.pending_bodies), &module.scope);
         });
-        let entry = self.globals.funs.len();
-        self.globals.funs.push(SparkFunction::Lantern {
-            name: "<module>".to_string(),
-            stmts: vec![Stmt::Return(None)],
-            locals: 0,
-        });
-        entry
+
+        self.globals.entrypoint.unwrap_or_else(|| {
+            self.emit(NoEntrypoint(Span::new_single(source, 1, 1)));
+            0
+        })
     }
 
     fn for_each_module(&mut self, mut f: impl FnMut(&mut Self, &mut Module<'t>)) {
@@ -838,7 +840,7 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
         items: Vec<Item>,
         scope: &mut Scope<'_, 't>,
     ) -> (Vec<PendingBody<'t>>, FunctionExports<'t>) {
-        let mut toplevel = HashMap::new();
+        let mut fun_exports = HashMap::new();
         // this is ok since TypeId only hashes an address to a LanternType
         #[allow(clippy::mutable_key_type)]
         let mut associated: HashMap<_, HashMap<_, _>> = HashMap::new();
@@ -880,7 +882,14 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
                             return None;
                         }
                         if item_fun.vis.is_public() {
-                            toplevel.insert(sig.name.ident.0, fun.clone());
+                            fun_exports.insert(sig.name.ident.0, fun.clone());
+                        }
+                        // BUG: any module in the package can define an entrypoint
+                        if self.symbol_table.resolve(sig.name.ident.0) == ENTRYPOINT_NAME {
+                            match &mut self.globals.entrypoint {
+                                Some(_) => self.emit(EntrypointAlreadyDefined(sig.name.span())),
+                                entrypoint => *entrypoint = Some(fun.index),
+                            }
                         }
                     }
                 }
@@ -955,7 +964,7 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
                             return None;
                         }
                         if vis.is_public() {
-                            toplevel.insert(fun_name, fun);
+                            fun_exports.insert(fun_name, fun);
                         }
                     }
                 }
@@ -996,7 +1005,7 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
             _ => None,
         }).collect();
 
-        (funs, FunctionExports { funs: toplevel, associated })
+        (funs, FunctionExports { funs: fun_exports, associated })
     }
 
     fn lower_fun_bodies(&mut self, funs: Vec<PendingBody<'t>>, scope: &Scope<'_, 't>) {

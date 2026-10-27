@@ -395,6 +395,7 @@ impl LoopScope {
 pub struct Globals<'t> {
     pub types: Vec<&'t OnceCell<LanternStructData<'t>>>,
     pub funs: Vec<SparkFunction<'t>>,
+    pub entrypoint: Option<usize>,
     pub vars: GlobalVariables,
 }
 
