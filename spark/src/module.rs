@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use diagnostic::{FileId, Span, symbol::Symbol};
-use parse::{Item, ItemFun, LanternFile};
+use parse::{ItemFun, LanternFile};
 
 use crate::{def::LanternFunction, scope::Scope, ty::{TypeContext, TypeId}};
 
@@ -57,7 +57,6 @@ pub struct Module<'t> {
     pub file: LanternFile,
     pub scope: Scope<'t, 't>,
     pub deps: Vec<ModuleDependency>,
-    pub items: Vec<Item>,
     pub exports: ModuleExports<'t>,
     pub pending_bodies: Vec<PendingBody<'t>>,
 }
@@ -68,7 +67,6 @@ impl<'t> Module<'t> {
             file,
             scope: Scope::new_module(tcx),
             deps,
-            items: Vec::new(),
             exports: ModuleExports::default(),
             pending_bodies: Vec::new(),
         }

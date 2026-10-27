@@ -1,20 +1,4 @@
-native byte;
-native int;
-native float;
-native fun float.to_str(self: float) -> str;
-
-native str;
-native fun str.concat(self: str, str: str) -> str;
-
-fun print(str: str) {
-  write(str);
-  write("\n");
-  flush();
-}
-
-native fun write(str: str);
-native fun flush();
-native fun gc();
+using std{};
 
 struct Position {
   name: str,
@@ -22,24 +6,26 @@ struct Position {
   y: float,
 }
 
-val my_pos = Position {
-  name: "hi",
-  x: 5.2,
-  y: -55.11,
-};
-
 fun Position.print(self: Position) {
-  print("name: ".concat(self.name));
-  print("x: ".concat(self.x.to_str()));
-  print("y: ".concat(self.y.to_str()));
+  println("name: ".concat(self.name));
+  println("x: ".concat(self.x.to_str()));
+  println("y: ".concat(self.y.to_str()));
 }
 
-my_pos.print();
+fun main() {
+  val my_pos = Position {
+    name: "hi",
+    x: 5.2,
+    y: -55.11,
+  };
 
-print("");
+  my_pos.print();
 
-my_pos.x = my_pos.x * 2.0;
-my_pos.y = 5.28;
-my_pos.name = "ho ho ho";
-my_pos.print();
+  println("");
+
+  my_pos.x = my_pos.x * 2.0;
+  my_pos.y = 5.28;
+  my_pos.name = "ho ho ho";
+  my_pos.print();
+}
 

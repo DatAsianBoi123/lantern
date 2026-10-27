@@ -31,7 +31,7 @@ pub fn parse(source: FileId, content: &str, symbol_table: &mut SymbolTable) -> R
 #[derive(Debug, Clone, PartialEq)]
 pub struct LanternFile {
     pub source: FileId,
-    pub stmts: Vec<Stmt>,
+    pub items: Vec<Item>,
 }
 
 impl LanternFile {
@@ -40,7 +40,7 @@ impl LanternFile {
         while !stream.is_eof()? {
             stmts.push(stream.parse()?);
         }
-        Ok(Self { source, stmts })
+        Ok(Self { source, items: stmts })
     }
 }
 
@@ -109,7 +109,7 @@ impl Item {
                     peek => Err(error!(peek.span() => "expected `fun` or IDENT"))
                 }
             }
-            _ => Err(error!(peek.span() => "expected `item`")),
+            _ => Err(error!(peek.span() => "expected `Item`")),
         }
     }
 }

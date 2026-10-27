@@ -23,6 +23,11 @@ pub native bool;
 pub native str;
 pub native fun str.concat(self: str, str: str) -> str;
 
+pub fun print(str: str) {
+  write(str);
+  flush();
+}
+
 pub fun println(str: str) {
   write(str);
   write("\n");

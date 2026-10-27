@@ -1,39 +1,25 @@
-native byte;
-native int;
-
-native fun int.to_str(self: int) -> str;
-native fun int.from_str(str: str) -> int;
-
-native str;
-
-fun print(str: str) {
-  write(str);
-  write("\n");
-  flush();
-}
-
-native fun write(str: str);
-native fun flush();
-native fun input() -> str;
-
-print("Enter max:");
-val max = int.from_str(input());
-
-val index = 1;
-while (index <= max) {
-  fizzbuzz(index);
-  index = index + 1;
-}
+using std{};
 
 fun fizzbuzz(x: int) {
   if (x % 5 == 0 && x % 3 == 0) {
-    print("FizzBuzz");
+    println("FizzBuzz");
   } else if (x % 5 == 0) {
-    print("Buzz");
+    println("Buzz");
   } else if (x % 3 == 0) {
-    print("Fizz");
+    println("Fizz");
   } else {
-    print(x.to_str());
+    println(x.to_str());
+  }
+}
+
+fun main() {
+  println("Enter max:");
+  val max = int.from_str(input());
+
+  val index = 1;
+  while (index <= max) {
+    fizzbuzz(index);
+    index = index + 1;
   }
 }
 

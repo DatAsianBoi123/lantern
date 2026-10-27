@@ -1,20 +1,4 @@
-native byte;
-native float;
-native fun float.to_str(self: float) -> str;
-native fun float.from_str(str: str) -> float;
-
-native str;
-native fun str.concat(self: str, other: str) -> str;
-
-fun println(str: str) {
-  write(str);
-  write("\n");
-  flush();
-}
-
-native fun write(str: str);
-native fun flush();
-native fun input() -> str;
+using std{};
 
 fun (?float).or(self: ?float, other: float) -> float {
   match (self) {
@@ -34,17 +18,19 @@ fun float.reciprocal(self: float) -> ?float {
   return (1.0 / self);
 }
 
-while (true) {
-  val num = float.from_str(input());
-  val inverse = num.reciprocal();
-  match (inverse) {
-    num => {
-      println("reciprocal is ".concat(num.to_str()));
+fun main() {
+  while (true) {
+    val num = float.from_str(input());
+    val inverse = num.reciprocal();
+    match (inverse) {
+      num => {
+        println("reciprocal is ".concat(num.to_str()));
+      }
+      ? => {
+        println("cannot take the reciprocal of 0");
+      }
     }
-    ? => {
-      println("cannot take the reciprocal of 0");
-    }
+    println(inverse.or(0.0).to_str());
   }
-  println(inverse.or(0.0).to_str());
 }
 

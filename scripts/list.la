@@ -1,24 +1,4 @@
-native int;
-native byte;
-native bool;
-native str;
-
-native fun int.to_str(self: int) -> str;
-
-native fun write(str: str);
-native fun flush();
-native fun gc();
-
-fun print(str: str) {
-  write(str);
-  flush();
-}
-
-fun println(str: str) {
-  write(str);
-  write("\n");
-  flush();
-}
+using std{};
 
 struct Node {
   value: int,
@@ -89,25 +69,37 @@ fun LinkedList.for_each(self: LinkedList, fn: fun(LinkedList, int, int)) {
     }
   }
 }
-fun LinkedList.display(self: LinkedList) {
-  fun fmt(list: LinkedList, i: int, int: int) {
-    print(int.to_str());
-    if (i != list.len - 1) {
-      print(", ");
+fun LinkedList.display(self: LinkedList) -> str {
+  val display = "[";
+
+  val i = 0;
+  val node = self.root;
+  while (true) {
+    match (node) {
+      next => {
+        display = display.concat(next.value.to_str());
+        if (i < self.len - 1) {
+          display = display.concat(", ");
+        }
+        node = next.next;
+        i += 1;
+      }
+      ? => {
+        break;
+      }
     }
   }
 
-  print("[");
-  self.for_each(fmt);
-  print("]\n");
-  flush();
+  return display.concat("]");
 }
 
-val mylist = LinkedList.new();
-val i = 1;
-while (i < 100) {
-  mylist.push(i);
-  i += 1;
+fun main() {
+  val mylist = LinkedList.new();
+  val i = 1;
+  while (i < 100) {
+    mylist.push(i);
+    i += 1;
+  }
+  mylist.display();
 }
-mylist.display();
 

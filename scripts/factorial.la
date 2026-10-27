@@ -1,20 +1,4 @@
-native byte;
-native int;
-
-native fun int.to_str(self: int) -> str;
-native fun int.from_str(str: str) -> int;
-
-native str;
-
-fun print(str: str) {
-  write(str);
-  write("\n");
-  flush();
-}
-
-native fun write(str: str);
-native fun flush();
-native fun input() -> str;
+using std{};
 
 fun factorial(num: int) -> int {
   if (num == 0 || num == 1) {
@@ -24,11 +8,13 @@ fun factorial(num: int) -> int {
   return num * factorial(num - 1);
 }
 
-print("Enter number:");
-val num = int.from_str(input());
-if (num < 0) {
-  throw "cannot take the factorial of a negative number";
+fun main() {
+  println("Enter number:");
+  val num = int.from_str(input());
+  if (num < 0) {
+    throw "cannot take the factorial of a negative number";
+  }
+  println("Factorial is:");
+  println(factorial(num).to_str());
 }
-print("Factorial is:");
-print(factorial(num).to_str());
 

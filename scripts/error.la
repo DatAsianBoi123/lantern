@@ -1,9 +1,4 @@
-native byte;
-native float;
-native str;
-
-native fun write(str: str);
-native fun flush();
+using std{};
 
 fun div(a: float, b: float) -> float {
   // no divide by zeroes!
@@ -19,5 +14,7 @@ fun nested(secret: float) -> float {
   return div(normalized, 2.0);
 }
 
-val num = nested(10.0);
+fun main() {
+  val num = nested(10.0);
+}
 

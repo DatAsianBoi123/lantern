@@ -1,43 +1,13 @@
-native byte;
-native int;
-native str;
-
-native fun int.to_str(self: int) -> str;
-
-fun println(str: str) {
-  write(str);
-  write("\n");
-  flush();
-}
-
-native fun write(str: str);
-native fun flush();
+using std{};
 
 fun fib(n: int) -> int {
   if (n < 2) {
     return n;
   }
-
-  val result = 0;
-  val prev1 = 1;
-  val prev2 = 0;
-  val i = 1;
-  while (i < n) {
-    result = prev1 + prev2;
-    prev2 = prev1;
-    prev1 = result;
-
-    i = i + 1;
-  }
-  return result;
+  return fib(n - 1) + fib(n - 2);
 }
 
-fun fib_recursive(n: int) -> int {
-  if (n < 2) {
-    return n;
-  }
-  return fib_recursive(n - 1) + fib_recursive(n - 2);
+fun main() {
+  println(fib(20).to_str());
 }
-
-println(fib_recursive(20).to_str());
 

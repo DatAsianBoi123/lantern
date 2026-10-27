@@ -66,8 +66,7 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
     pub fn lower_package(&mut self, root: LanternFile) -> usize {
         self.load_modules(root);
         self.for_each_module(|this, module| {
-            let (items, types) = this.resolve_types(&mut module.file.stmts, &mut module.scope);
-            module.items = items;
+            let types = this.resolve_types(&mut module.file.items, &mut module.scope);
             module.exports.types = types;
         });
         self.for_each_module(|this, module| {
@@ -89,9 +88,9 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
             }
         });
         self.for_each_module(|this, module| {
-            let (bodies, funs) = this.build_types_and_funs(mem::take(&mut module.items), &mut module.scope);
-            module.exports.funs = funs;
+            let (bodies, funs) = this.build_types_and_funs(mem::take(&mut module.file.items), &mut module.scope);
             module.pending_bodies = bodies;
+            module.exports.funs = funs;
         });
         self.for_each_module(|this, module| {
             for dep in &module.deps {
@@ -145,8 +144,8 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
 
     fn scan_deps(&mut self, file: &LanternFile, queue: &mut Vec<LanternFile>, seen: &mut HashSet<FileId>) -> Vec<ModuleDependency> {
         let mut deps = Vec::new();
-        for item in &file.stmts {
-            if let PStmt::Item(Item::Using(item_using)) = item {
+        for item in &file.items {
+            if let Item::Using(item_using) = item {
                 if !matches!(item_using.items, UsingItems::Glob) {
                     error!(in self.sink; item_using.path.span() => "non-glob imports are currently not supported");
                     continue;
@@ -191,7 +190,14 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
 
     pub fn resolve_toplevel(&mut self, stmts: &mut Vec<PStmt>, scope: &mut Scope<'_, 't>) {
         // TODO: resolve usings as well
-        let (items, _) = self.resolve_types(stmts, scope);
+        let mut items = stmts
+            .extract_if(.., |stmt| matches!(stmt, PStmt::Item(_)))
+            .map(|stmt| match stmt {
+                PStmt::Item(item) => item,
+                _ => unreachable!(),
+            })
+            .collect();
+        let _ = self.resolve_types(&mut items, scope);
         let (funs, _) = self.build_types_and_funs(items, scope);
         self.lower_fun_bodies(funs, scope);
     }
@@ -772,14 +778,8 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
         }
     }
 
-    fn resolve_types(&mut self, stmts: &mut Vec<PStmt>, scope: &mut Scope<'_, 't>) -> (Vec<Item>, TypeExports<'t>) {
+    fn resolve_types(&mut self, items: &mut Vec<Item>, scope: &mut Scope<'_, 't>) -> TypeExports<'t> {
         let mut types = HashMap::new();
-        let mut items = stmts.extract_if(.., |stmt| matches!(stmt, PStmt::Item(_)))
-            .map(|stmt| match stmt {
-                PStmt::Item(item) => item,
-                _ => unreachable!("only items are extracted"),
-            })
-            .collect::<Vec<_>>();
 
         // use retain to delete duplicate items
         items.retain(|item| {
@@ -838,7 +838,7 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
             }
         });
 
-        (items, TypeExports { types })
+        TypeExports { types }
     }
 
     fn build_types_and_funs(

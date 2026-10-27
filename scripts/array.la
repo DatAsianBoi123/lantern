@@ -1,23 +1,9 @@
-native byte;
-native int;
-
-native fun int.to_str(self: int) -> str;
-
-native str;
-
-fun print(str: str) {
-  write(str);
-  write("\n");
-  flush();
-}
-
-native fun write(str: str);
-native fun flush();
+using std{};
 
 fun print_array(array: [int]) {
   val i = 0;
   while (i < array.len) {
-    print(array[i].to_str());
+    println(array[i].to_str());
     i = i + 1;
   }
 }
@@ -55,19 +41,21 @@ fun double(value: int) -> int {
   return value * 2;
 }
 
-val array = [3, 8, 11, -28];
-print_array(array);
-print("");
+fun main() {
+  val array = [3, 8, 11, -28];
+  print_array(array);
+  println("");
 
-print("Sum is: ");
-print(fold(array, 0, sum).to_str());
-print("");
+  println("Sum is: ");
+  println(fold(array, 0, sum).to_str());
+  println("");
 
-print("Largest is: ");
-print(fold(array, 0, largest).to_str());
-print("");
+  println("Largest is: ");
+  println(fold(array, 0, largest).to_str());
+  println("");
 
-map(array, double);
-print("Doubled is: ");
-print_array(array);
+  map(array, double);
+  println("Doubled is: ");
+  print_array(array);
+}
 
