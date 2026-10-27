@@ -1,0 +1,15 @@
+using main{};
+
+pub struct Foo {
+  bar: int,
+  qux: float,
+}
+
+pub fun Foo.display(self: Foo) -> str {
+  return "Foo { bar: "
+    .concat(self.bar.to_str())
+    .concat(", qux: ")
+    .concat(self.qux.to_str())
+    .concat(" }");
+}
+

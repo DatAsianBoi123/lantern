@@ -1,0 +1,23 @@
+using foo{};
+
+pub native int;
+pub native float;
+pub native str;
+
+pub native fun str.concat(self: str, other: str) -> str;
+pub native fun int.to_str(self: int) -> str;
+pub native fun float.to_str(self: float) -> str;
+
+pub native fun write(str: str);
+pub native fun flush();
+
+fun main() {
+  val foo: Foo = Foo {
+    bar: 12,
+    qux: 3.2,
+  };
+
+  write(foo.display());
+  write("\n");
+}
+
