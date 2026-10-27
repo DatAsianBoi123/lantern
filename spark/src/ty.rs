@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashSet, ops::Deref, ptr};
+use std::{cell::RefCell, collections::HashSet, hash::{Hash, Hasher}, ops::Deref, ptr};
 
 use arena::Arena;
 use diagnostic::{Diagnostic, error, symbol::{SymbolDisplay, SymbolTable}};
@@ -6,7 +6,7 @@ use parse::{FunType, Type};
 
 use crate::{def::{LanternNative, LanternStruct, NativeRepr}, scope::Scope};
 
-#[derive(Debug, Clone, Copy, Hash)]
+#[derive(Debug, Clone, Copy)]
 pub struct TypeId<'t>(&'t LanternType<'t>);
 
 impl PartialEq for TypeId<'_> {
@@ -23,6 +23,12 @@ impl<'t> PartialEq<&'_ LanternType<'t>> for TypeId<'t> {
 }
 
 impl Eq for TypeId<'_> { }
+
+impl Hash for TypeId<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write_usize(ptr::from_ref(self.0).addr());
+    }
+}
 
 impl<'t> TypeId<'t> {
     pub fn as_ty(&self) -> &'t LanternType<'t> {
