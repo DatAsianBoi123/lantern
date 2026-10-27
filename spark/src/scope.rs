@@ -2,9 +2,9 @@ use std::{cell::OnceCell, collections::HashMap, rc::Rc};
 
 use diagnostic::{Span, symbol::Symbol};
 
-use crate::{SparkFunction, def::{LanternFunction, LanternStructData, LanternVariable}, ty::{TypeContext, TypeId}};
+use crate::{SparkFunction, def::{LanternFunction, LanternStructData, LanternVariable}, module::{FunctionExports, TypeExports}, ty::{TypeContext, TypeId}};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Scope<'a, 't> {
     items: HashMap<Symbol, TypeId<'t>>,
     functions: HashMap<Symbol, LanternFunction<'t>>,
@@ -65,9 +65,35 @@ impl<'a, 't> Scope<'a, 't> {
         }
     }
 
-    pub fn import_all(&mut self, exports: &ModuleExports<'t>) {
-        self.items.extend(exports.types.iter().map(|(name, ty)| (*name, *ty)));
-        self.functions.extend(exports.funs.iter().map(|(name, fun)| (*name, fun.clone())));
+    pub fn import_all_types(&mut self, types: &TypeExports<'t>) -> Vec<Symbol> {
+        let mut duplicates = Vec::new();
+        for (name, type_id) in &types.types {
+            if self.insert_item(*name, *type_id).is_none() {
+                duplicates.push(*name);
+            }
+        }
+        duplicates
+    }
+
+    pub fn import_all_funs(&mut self, funs: &FunctionExports<'t>) -> Vec<Symbol> {
+        let mut duplicates = Vec::new();
+        for (name, fun) in &funs.funs {
+            if self.insert_function(*name, fun.clone()).is_none() {
+                duplicates.push(*name);
+            }
+        }
+        for (base, associated) in &funs.associated {
+            let associated_funs = self.associated.entry(*base).or_default();
+            for (name, fun) in associated {
+                if associated_funs.contains_key(name) {
+                // TODO: have name include base type as well
+                    duplicates.push(*name);
+                } else {
+                    associated_funs.insert(*name, fun.clone());
+                }
+            }
+        }
+        duplicates
     }
 
     pub fn item(&self, name: Symbol) -> Option<TypeId<'t>> {
@@ -169,9 +195,9 @@ impl<'a, 't> Scope<'a, 't> {
     }
 }
 
-impl<'a: 'b, 'b, 't> Scope<'a, 't> {
-    pub fn child_block(&'a self) -> Scope<'b, 't> {
-        Self {
+impl<'a, 't> Scope<'a, 't> {
+    pub fn child_block<'b>(&'b self) -> Scope<'b, 't> where 'a: 'b {
+        Scope {
             items: HashMap::new(),
             functions: HashMap::new(),
             variables: HashMap::new(),
@@ -189,8 +215,8 @@ impl<'a: 'b, 'b, 't> Scope<'a, 't> {
         }
     }
 
-    pub fn child_block_expr(&'a self) -> Scope<'b, 't> {
-        Self {
+    pub fn child_block_expr<'b>(&'b self) -> Scope<'b, 't> where 'a: 'b {
+        Scope {
             items: HashMap::new(),
             functions: HashMap::new(),
             variables: HashMap::new(),
@@ -208,8 +234,8 @@ impl<'a: 'b, 'b, 't> Scope<'a, 't> {
         }
     }
 
-    pub fn child_function(&'a self, span: Span, expected_ret: TypeId<'t>) -> Scope<'b, 't> {
-        Self {
+    pub fn child_function<'b>(&'b self, span: Span, expected_ret: TypeId<'t>) -> Scope<'b, 't> where 'a: 'b {
+        Scope {
             items: HashMap::new(),
             functions: HashMap::new(),
             variables: HashMap::new(),
@@ -222,8 +248,8 @@ impl<'a: 'b, 'b, 't> Scope<'a, 't> {
         }
     }
 
-    pub fn child_loop(&'a self) -> Scope<'b, 't> {
-        Self {
+    pub fn child_loop<'b>(&'b self) -> Scope<'b, 't> where 'a: 'b {
+        Scope {
             items: HashMap::new(),
             functions: HashMap::new(),
             variables: HashMap::new(),
@@ -242,7 +268,7 @@ impl<'a: 'b, 'b, 't> Scope<'a, 't> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScopeKind<'a, 't> {
     Module,
     Function(&'a Scope<'a, 't>, Span),
@@ -347,18 +373,6 @@ impl<'t> PassBehavior<'t> {
             (_, Self::KnownType(_)) => other,
             (Self::Converges, _) => self,
         }
-    }
-}
-
-#[derive(Default, Debug, Clone, PartialEq, Eq)]
-pub struct ModuleExports<'t> {
-    pub types: HashMap<Symbol, TypeId<'t>>,
-    pub funs: HashMap<Symbol, LanternFunction<'t>>,
-}
-
-impl ModuleExports<'_> {
-    pub fn new() -> Self {
-        Self::default()
     }
 }
 

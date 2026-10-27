@@ -1,13 +1,14 @@
-use std::{collections::HashMap, fs::File, io::Read};
+use std::{collections::{HashMap, HashSet}, fs::File, io::Read, mem};
 
 use arena::Arena;
 use diagnostic::{DiagnosticError, DiagnosticSink, FileId, SourceMap, Span, error, symbol::{SymbolDisplay, SymbolTable}};
-use parse::{FunArg, FunSig, Item, ItemFun, ItemNativeFun, ItemNativeType, ItemStruct, ItemUsing, LanternFile, MatchPattern, MatchStmt, PassStmt, ReturnStmt, Stmt as PStmt, StructField, UsingItems, ValDeclaration, WhileStmt, expr::{BinaryOperator, Expr as PExpr, ExprArray, ExprBinary, ExprField, ExprFunCall, ExprIndex, ExprMethodCall, ExprParen, ExprStruct, ExprUnary}, lex::{self, TokenKind}};
+use parse::{FunArg, FunSig, Item, ItemFun, ItemNativeFun, ItemNativeType, ItemStruct, LanternFile, MatchPattern, MatchStmt, PassStmt, ReturnStmt, Stmt as PStmt, StructField, UsingItems, ValDeclaration, WhileStmt, expr::{BinaryOperator, Expr as PExpr, ExprArray, ExprBinary, ExprField, ExprFunCall, ExprIndex, ExprMethodCall, ExprParen, ExprStruct, ExprUnary}, lex::{self, TokenKind}};
 
-use crate::{def::{LanternFunction, LanternStruct, LanternStructField}, diagnostics::*, expr::{Expr, ExprKind, Literal, LogicalOperation}, native::{BOOL_NATIVE, FLOAT_NATIVE, FromDefError, INT_NATIVE, NativeFun, STR_NATIVE}, scope::{Globals, ModuleExports, PassBehavior, Scope, ScopeBehavior, ScopeKind}, stmt::{IfBranch, IfStmt, Stmt}, ty::{LanternType, TypeContext, TypeId}};
+use crate::{def::{LanternFunction, LanternStruct, LanternStructField}, diagnostics::*, expr::{Expr, ExprKind, Literal, LogicalOperation}, module::{FunctionExports, Module, ModuleDependency, ModuleImport, ModuleRegistry, PendingBody, TypeExports}, native::{BOOL_NATIVE, FLOAT_NATIVE, FromDefError, INT_NATIVE, NativeFun, STR_NATIVE}, scope::{Globals, PassBehavior, Scope, ScopeBehavior, ScopeKind}, stmt::{IfBranch, IfStmt, Stmt}, ty::{LanternType, TypeContext, TypeId}};
 
 pub mod ty;
 pub mod scope;
+pub mod module;
 pub mod stmt;
 pub mod expr;
 pub mod def;
@@ -21,7 +22,7 @@ pub fn lower<'a, 't>(
     source_map: &'a mut SourceMap,
 ) -> (Option<Spark<'t>>, DiagnosticSink) {
     let mut lighter = Lighter::new(symbol_table, source_map, arena);
-    lighter.lower_module(file);
+    lighter.lower_package(file);
     lighter.compile()
 }
 
@@ -39,7 +40,7 @@ pub struct Lighter<'a, 's, 't> {
     symbol_table: &'s mut SymbolTable,
     source_map: &'a mut SourceMap,
     tcx: TypeContext<'t>,
-    exports: HashMap<FileId, ModuleExports<'t>>,
+    modules: ModuleRegistry<'t>,
 }
 
 impl<'a, 's, 't> Lighter<'a, 's, 't> {
@@ -50,7 +51,7 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
             symbol_table,
             source_map,
             tcx: TypeContext::new(arena),
-            exports: HashMap::new(),
+            modules: ModuleRegistry::new(),
         }
     }
 
@@ -62,52 +63,147 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
         }
     }
 
-    pub fn lower_module(&mut self, file: LanternFile) -> usize {
-        let (lowered, behavior) = self.lower_stmts(file.stmts, Scope::new_module(&self.tcx));
+    pub fn lower_package(&mut self, root: LanternFile) -> usize {
+        self.load_modules(root);
+        self.for_each_module(|this, module| {
+            let (items, types) = this.resolve_types(&mut module.file.stmts, &mut module.scope);
+            module.items = items;
+            module.exports.types = types;
+        });
+        self.for_each_module(|this, module| {
+            for dep in &module.deps {
+                let types = if dep.file == module.file.source {
+                    // TODO: allow self importing?
+                    &module.exports.types
+                } else {
+                    let Some(dep_module) = this.modules.get(dep.file) else { return; };
+                    &dep_module.exports.types
+                };
+                match dep.import {
+                    ModuleImport::Glob(span) => {
+                        for duplicate in module.scope.import_all_types(types) {
+                            this.emit(StructAlreadyDeclared(duplicate, span));
+                        }
+                    }
+                }
+            }
+        });
+        self.for_each_module(|this, module| {
+            let (bodies, funs) = this.build_types_and_funs(mem::take(&mut module.items), &mut module.scope);
+            module.exports.funs = funs;
+            module.pending_bodies = bodies;
+        });
+        self.for_each_module(|this, module| {
+            for dep in &module.deps {
+                let funs = if dep.file == module.file.source {
+                    // TODO: allow self importing?
+                    &module.exports.funs
+                } else {
+                    let Some(dep_module) = this.modules.get(dep.file) else { return; };
+                    &dep_module.exports.funs
+                };
+                match dep.import {
+                    ModuleImport::Glob(span) => {
+                        for duplicate in module.scope.import_all_funs(funs) {
+                            // TODO: DiagnosticError impl for this error
+                            error!(in this.sink; span => "function `{}` already declared", duplicate.display(this.symbol_table));
+                        }
+                    }
+                }
+            }
+        });
+        self.for_each_module(|this, module| {
+            this.lower_fun_bodies(mem::take(&mut module.pending_bodies), &module.scope);
+        });
         let entry = self.globals.funs.len();
         self.globals.funs.push(SparkFunction::Lantern {
             name: "<module>".to_string(),
-            stmts: lowered,
-            locals: behavior.locals_used,
+            stmts: vec![Stmt::Return(None)],
+            locals: 0,
         });
         entry
+    }
+
+    fn for_each_module(&mut self, mut f: impl FnMut(&mut Self, &mut Module<'t>)) {
+        for i in 0..self.modules.len() {
+            let file = self.modules.index(i).expect("module size stays the same");
+            let Some(mut module) = self.modules.remove(file) else { continue; };
+            f(self, &mut module);
+            self.modules.put_back(module);
+        }
+    }
+
+    fn load_modules(&mut self, root: LanternFile) {
+        let mut seen = HashSet::new();
+        seen.insert(root.source);
+        let mut queue = vec![root];
+        while let Some(file) = queue.pop() {
+            let deps = self.scan_deps(&file, &mut queue, &mut seen);
+            self.modules.insert(Module::new(file, deps, &self.tcx));
+        }
+    }
+
+    fn scan_deps(&mut self, file: &LanternFile, queue: &mut Vec<LanternFile>, seen: &mut HashSet<FileId>) -> Vec<ModuleDependency> {
+        let mut deps = Vec::new();
+        for item in &file.stmts {
+            if let PStmt::Item(Item::Using(item_using)) = item {
+                if !matches!(item_using.items, UsingItems::Glob) {
+                    error!(in self.sink; item_using.path.span() => "non-glob imports are currently not supported");
+                    continue;
+                }
+                let path_span = item_using.path.span();
+                let mut path_buf = self.source_map.root().to_path_buf();
+                for item in &item_using.path.items {
+                    path_buf.push(self.symbol_table.resolve(item.0));
+                }
+                path_buf.set_extension("la");
+                let file_id = match self.source_map.find_id(&path_buf) {
+                    Some(file_id) => file_id,
+                    None => {
+                        let Ok(mut file) = File::open(&path_buf) else {
+                            self.emit(ModuleNotFound(path_buf, path_span));
+                            continue;
+                        };
+                        let mut contents = String::new();
+                        if file.read_to_string(&mut contents).is_err() {
+                            self.emit(InvalidTextError(path_buf, path_span));
+                            continue;
+                        }
+                        self.source_map.add_source(path_buf, contents)
+                    }
+                };
+                if seen.insert(file_id) {
+                    let file = match parse::parse(file_id, &self.source_map.get_source(file_id).1, self.symbol_table) {
+                        Ok(file) => file,
+                        Err(diagnostic) => {
+                            self.sink.emit(diagnostic);
+                            continue;
+                        }
+                    };
+                    queue.push(file);
+                }
+                deps.push(ModuleDependency::new(file_id, ModuleImport::Glob(item_using.span())));
+            }
+        }
+
+        deps
+    }
+
+    pub fn resolve_toplevel(&mut self, stmts: &mut Vec<PStmt>, scope: &mut Scope<'_, 't>) {
+        // TODO: resolve usings as well
+        let (items, _) = self.resolve_types(stmts, scope);
+        let (funs, _) = self.build_types_and_funs(items, scope);
+        self.lower_fun_bodies(funs, scope);
     }
 
     #[must_use]
     pub fn lower_stmts(&mut self, mut stmts: Vec<PStmt>, mut scope: Scope<'_, 't>) -> (Vec<Stmt<'t>>, ScopeBehavior<'t>) {
         let mut spark_stmts = Vec::new();
 
-        // TODO: optimize looping through all statements every pass
-        self.resolve_types(&mut stmts, &mut scope);
-        self.resolve_usings(&mut stmts, &mut scope);
-        self.build_types_and_funs(&stmts, &mut scope);
+        self.resolve_toplevel(&mut stmts, &mut scope);
 
         for stmt in stmts {
             match stmt {
-                PStmt::Item(Item::Fun(ItemFun { sig: FunSig { name, args, .. }, block, .. })) => {
-                    let fun_def = match &name.base {
-                        Some(base) if let Ok(ty) = LanternType::resolve(base, &scope, &self.tcx)
-                            && let Some(fun) = scope.associated(ty, name.ident.0) =>
-                        {
-                            fun
-                        }
-                        None if let Some(fun) = scope.function(name.ident.0) => fun,
-                        _ => continue,
-                    };
-
-                    let mut fun_scope = scope.child_function(block.closed_brace.span(), fun_def.ret);
-                    fun_def.args.iter().zip(args).for_each(|((arg_name, ty), fun_arg)| {
-                        if fun_scope.insert_variable(*arg_name, *ty).is_none() {
-                            self.emit(DuplicateFunArg(fun_arg.ident));
-                        }
-                    });
-                    let (stmts, behavior) = self.lower_stmts(block.stmts, fun_scope);
-                    self.globals.funs[fun_def.index] = SparkFunction::Lantern {
-                        name: name.display(self.symbol_table),
-                        stmts,
-                        locals: behavior.locals_used,
-                    };
-                }
                 PStmt::Item(_) => {}
                 PStmt::IfStmt(if_stmt) => spark_stmts.push(Stmt::If(self.check_if(if_stmt, &mut scope))),
                 PStmt::MatchStmt(MatchStmt { expr, arms, .. }) => {
@@ -382,6 +478,9 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
                     Some(ty) => {
                         let Some(associated) = scope.associated(ty, ident.0) else {
                             self.emit(UnknownAssociated { ident, ty });
+                            for arg in args {
+                                self.lower_expr(arg, scope);
+                            }
                             return Expr::error(&self.tcx, ident.span());
                         };
                         (associated, None)
@@ -399,6 +498,9 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
                         let Some(method) = scope.associated(recv.ty, ident.0) else {
                             // TODO: diagnostic hint for (obj.field)()
                             self.emit(UnknownAssociated { ident, ty: recv.ty });
+                            for arg in args {
+                                self.lower_expr(arg, scope);
+                            }
                             return Expr::error(&self.tcx, closed_paren.span());
                         };
 
@@ -670,12 +772,19 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
         }
     }
 
-    fn resolve_types(&mut self, stmts: &mut Vec<PStmt>, scope: &mut Scope<'_, 't>) -> ModuleExports<'t> {
-        let mut exports = ModuleExports::new();
+    fn resolve_types(&mut self, stmts: &mut Vec<PStmt>, scope: &mut Scope<'_, 't>) -> (Vec<Item>, TypeExports<'t>) {
+        let mut types = HashMap::new();
+        let mut items = stmts.extract_if(.., |stmt| matches!(stmt, PStmt::Item(_)))
+            .map(|stmt| match stmt {
+                PStmt::Item(item) => item,
+                _ => unreachable!("only items are extracted"),
+            })
+            .collect::<Vec<_>>();
+
         // use retain to delete duplicate items
-        stmts.retain(|stmt| {
-            match stmt {
-                PStmt::Item(Item::Struct(ItemStruct { vis, annotations, ident, .. })) => {
+        items.retain(|item| {
+            match item {
+                Item::Struct(ItemStruct { vis, annotations, ident, .. }) => {
                     let r#struct = LanternStruct::new(ident.0, self.globals.types.len());
 
                     for annotation in &annotations.annotations {
@@ -695,21 +804,21 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
                     }
 
                     if scope.is_duplicate_item(ident.0) {
-                        self.emit(StructAlreadyDeclared(*ident));
+                        self.emit(StructAlreadyDeclared(ident.0, ident.span()));
                         return false;
                     }
 
                     let ty = self.tcx.intern(LanternType::Struct(r#struct));
                     scope.insert_item(ident.0, ty);
                     if vis.is_public() {
-                        exports.types.insert(ident.0, ty);
+                        types.insert(ident.0, ty);
                     }
 
                     let LanternType::Struct(r#struct) = ty.as_ty() else { unreachable!() };
                     self.globals.types.push(&r#struct.data);
                     true
                 }
-                PStmt::Item(Item::NativeType(ItemNativeType { vis, ident, .. })) => {
+                Item::NativeType(ItemNativeType { vis, ident, .. }) => {
                     if let Some(primitive) = native::get_native(self.symbol_table.resolve(ident.0)) {
                         let ty = self.tcx.primitive(primitive);
                         if scope.insert_item(ident.0, ty).is_none() {
@@ -717,7 +826,7 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
                             return false;
                         }
                         if vis.is_public() {
-                            exports.types.insert(ident.0, ty);
+                            types.insert(ident.0, ty);
                         }
                         true
                     } else {
@@ -729,194 +838,190 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
             }
         });
 
-        exports
+        (items, TypeExports { types })
     }
 
-    fn resolve_usings(&mut self, stmts: &mut Vec<PStmt>, scope: &mut Scope<'_, 't>) {
-        for stmt in stmts {
-            if let PStmt::Item(Item::Using(ItemUsing { path, items, .. })) = stmt {
-                if !matches!(items, UsingItems::Glob) {
-                    error!(in self.sink; path.span() => "non-glob imports are currently not supported");
-                    continue;
-                }
-                let path_span = path.span();
-                let mut path_buf = self.source_map.root().to_path_buf();
-                for item in &path.items {
-                    path_buf.push(self.symbol_table.resolve(item.0));
-                }
-                path_buf.set_extension("la");
-                let file_id = match self.source_map.find_id(&path_buf) {
-                    Some(file_id) => file_id,
-                    None => {
-                        let Ok(mut file) = File::open(&path_buf) else {
-                            self.emit(ModuleNotFound(path_buf, path_span));
-                            continue;
-                        };
-                        let mut contents = String::new();
-                        if file.read_to_string(&mut contents).is_err() {
-                            self.emit(InvalidTextError(path_buf, path_span));
-                            continue;
+    fn build_types_and_funs(
+        &mut self,
+        items: Vec<Item>,
+        scope: &mut Scope<'_, 't>,
+    ) -> (Vec<PendingBody<'t>>, FunctionExports<'t>) {
+        let mut toplevel = HashMap::new();
+        // this is ok since TypeId only hashes an address to a LanternType
+        #[allow(clippy::mutable_key_type)]
+        let mut associated: HashMap<_, HashMap<_, _>> = HashMap::new();
+        let funs = items.into_iter().filter_map(|item| match item {
+            Item::Fun(item_fun) => {
+                let sig = &item_fun.sig;
+                let args = sig.args.iter()
+                    .map(|FunArg { ident, r#type, .. }| {
+                        (ident.0, self.sink.emit_or(LanternType::resolve(r#type, scope, &self.tcx), self.tcx.error()))
+                    })
+                    .collect();
+
+                let ret = sig.ret.as_ref()
+                    .map(|(_, ty)| self.sink.emit_or(LanternType::resolve(ty, scope, &self.tcx), self.tcx.error()))
+                    .unwrap_or(self.tcx.none());
+
+                let fun = LanternFunction::new(self.globals.funs.len(), args, ret, &self.tcx);
+                match &sig.name.base {
+                    Some(ty) => {
+                        match LanternType::resolve(ty, scope, &self.tcx) {
+                            Ok(ty) => {
+                                if scope.insert_associated(ty, sig.name.ident.0, fun.clone()).is_none() {
+                                    self.emit(FunAlreadyDeclared(sig.name.clone()));
+                                    return None;
+                                }
+                                if item_fun.vis.is_public() {
+                                    associated.entry(ty).or_default().insert(sig.name.ident.0, fun.clone());
+                                }
+                            }
+                            Err(err) => {
+                                self.sink.emit(err);
+                                return None;
+                            }
                         }
-                        self.source_map.add_source(path_buf, contents)
+                    }
+                    None => {
+                        if scope.insert_function(sig.name.ident.0, fun.clone()).is_none() {
+                            self.emit(FunAlreadyDeclared(sig.name.clone()));
+                            return None;
+                        }
+                        if item_fun.vis.is_public() {
+                            toplevel.insert(sig.name.ident.0, fun.clone());
+                        }
+                    }
+                }
+                // this gets overridden when the function is lowered
+                self.globals.funs.push(SparkFunction::Lantern {
+                    name: String::new(),
+                    stmts: Vec::new(),
+                    locals: 0,
+                });
+                Some(PendingBody::new(fun, item_fun))
+            }
+            Item::NativeFun(ItemNativeFun { vis, sig: FunSig { name, open_paren, args, closed_paren, ret }, semi, .. }) => {
+                let base = name.base.as_ref()
+                    .map(|ty| self.sink.emit_or(LanternType::resolve(ty, scope, &self.tcx), self.tcx.error()));
+
+                let mut arg_types = Vec::new();
+                let mut has_err = false;
+                for arg in &args {
+                    match LanternType::resolve(&arg.r#type, scope, &self.tcx) {
+                        Ok(ty) => arg_types.push(ty),
+                        Err(err) => {
+                            self.sink.emit(err);
+                            has_err = true;
+                        }
+                    }
+                }
+
+                let ret_ty = ret.as_ref()
+                    .map(|(_, ty)| self.sink.emit_or(LanternType::resolve(ty, scope, &self.tcx), self.tcx.error()))
+                    .unwrap_or(self.tcx.none());
+
+                if has_err || *ret_ty == LanternType::Error || base.is_some_and(|ty| *ty == LanternType::Error) {
+                    return None;
+                }
+
+                let fun_name = name.ident.0;
+                let args = args.iter().zip(arg_types.iter())
+                    .map(|(arg, ty)| (arg.ident.0, *ty))
+                    .collect();
+                let fun = LanternFunction::new(self.globals.funs.len(), args, ret_ty, &self.tcx);
+
+                let native = match NativeFun::from_def(base, self.symbol_table.resolve(fun_name), &arg_types, ret_ty, &self.tcx) {
+                    Ok(native) => Some(native),
+                    Err(FromDefError::NotFound) => {
+                        self.emit(UnknownNative(name.clone()));
+                        None
+                    }
+                    Err(FromDefError::MismatchedArgs) => {
+                        self.emit(MismatchedNativeArgs(open_paren.span().containing(closed_paren.span())));
+                        None
+                    }
+                    Err(FromDefError::MismatchedRet) => {
+                        let span = ret.as_ref().map_or(semi.span(), |(_, ty)| ty.span());
+                        self.emit(MismatchedNativeRet(span));
+                        None
                     }
                 };
-                if !self.exports.contains_key(&file_id) {
-                    let mut lantern_file = match parse::parse(file_id, &self.source_map.get_source(file_id).1, self.symbol_table) {
-                        Ok(lantern_file) => lantern_file,
-                        Err(diagnostic) => {
-                            self.sink.emit(diagnostic);
-                            return;
+
+                match base {
+                    Some(base) => {
+                        if scope.insert_associated(base, fun_name, fun.clone()).is_none() {
+                            self.emit(NativeAlreadyDeclared(name.clone()));
+                            return None;
                         }
-                    };
-                    let mut module_scope = Scope::new_module(&self.tcx);
-                    let exports = self.resolve_types(&mut lantern_file.stmts, &mut module_scope);
-                    self.exports.insert(file_id, exports);
-                    self.resolve_usings(&mut lantern_file.stmts, &mut module_scope);
-                    self.build_types_and_funs(&lantern_file.stmts, &mut module_scope);
-                    // TODO: lower function bodies
+                        if vis.is_public() {
+                            associated.entry(base).or_default().insert(fun_name, fun);
+                        }
+                    }
+                    None => {
+                        if scope.insert_function(fun_name, fun.clone()).is_none() {
+                            self.emit(NativeAlreadyDeclared(name.clone()));
+                            return None;
+                        }
+                        if vis.is_public() {
+                            toplevel.insert(fun_name, fun);
+                        }
+                    }
                 }
-                scope.import_all(self.exports.get(&file_id).unwrap());
+                if let Some(native) = native {
+                    self.globals.funs.push(SparkFunction::Native {
+                        name: name.display(self.symbol_table),
+                        native,
+                    });
+                } else {
+                    // "dummy" function
+                    self.globals.funs.push(SparkFunction::Lantern {
+                        name: name.display(self.symbol_table),
+                        stmts: Vec::new(),
+                        locals: 0,
+                    });
+                }
+                None
             }
-        }
+            Item::Struct(ItemStruct { ident, fields, .. }) => {
+                let fields = fields.iter()
+                    .map(|StructField { vis, ident, r#type, .. }| {
+                        // type may not have fields initialized, but structs have constant
+                        // size/alignment and primitives are hardcoded
+                        let ty = self.sink.emit_or(LanternType::resolve(r#type, scope, &self.tcx), self.tcx.error());
+                        if ty.needs_tag() {
+                            error!(in self.sink; r#type.span() => "optional primitives are currently not supported as struct fields");
+                        }
+                        (*vis, ident.0, ty)
+                    })
+                .collect();
+
+                let item = scope.item(ident.0).expect("types were resolved");
+                let LanternType::Struct(ref r#struct) = *item else { panic!("resolved type not a struct") };
+                // self.globals.types holds a reference to the OnceCell
+                r#struct.init(fields);
+                None
+            }
+            _ => None,
+        }).collect();
+
+        (funs, FunctionExports { funs: toplevel, associated })
     }
 
-    fn build_types_and_funs(&mut self, stmts: &[PStmt], scope: &mut Scope<'_, 't>) {
-        stmts.iter()
-            .filter_map(|stmt| match stmt {
-                PStmt::Item(item) => Some(item),
-                _ => None,
-            })
-            .for_each(|item| match item {
-                    Item::Fun(ItemFun { sig: FunSig { name, args, ret, .. }, .. }) => {
-                        let args = args.iter()
-                            .map(|FunArg { ident, r#type, .. }| {
-                                (ident.0, self.sink.emit_or(LanternType::resolve(r#type, scope, &self.tcx), self.tcx.error()))
-                            })
-                            .collect();
-
-                        let ret = ret.as_ref()
-                            .map(|(_, ty)| self.sink.emit_or(LanternType::resolve(ty, scope, &self.tcx), self.tcx.error()))
-                            .unwrap_or(self.tcx.none());
-
-                        let fun = LanternFunction::new(self.globals.funs.len(), args, ret, &self.tcx);
-                        match &name.base {
-                            Some(ty) => {
-                                match LanternType::resolve(ty, scope, &self.tcx) {
-                                    Ok(ty) => {
-                                        if scope.insert_associated(ty, name.ident.0, fun).is_none() {
-                                            self.emit(FunAlreadyDeclared(name.clone()));
-                                            return;
-                                        }
-                                    }
-                                    Err(err) => {
-                                        self.sink.emit(err);
-                                        return;
-                                    }
-                                }
-                            }
-                            None => {
-                                if scope.insert_function(name.ident.0, fun).is_none() {
-                                    self.emit(FunAlreadyDeclared(name.clone()));
-                                    return;
-                                }
-                            }
-                        }
-                        // this gets overridden when the function is generated
-                        self.globals.funs.push(SparkFunction::Lantern {
-                            name: String::new(),
-                            stmts: Vec::new(),
-                            locals: 0,
-                        });
-                    }
-                    Item::NativeFun(ItemNativeFun { sig: FunSig { name, open_paren, args, closed_paren, ret }, semi, .. }) => {
-                        let base = name.base.as_ref()
-                            .map(|ty| self.sink.emit_or(LanternType::resolve(ty, scope, &self.tcx), self.tcx.error()));
-
-                        let mut arg_types = Vec::new();
-                        let mut has_err = false;
-                        for arg in args {
-                            match LanternType::resolve(&arg.r#type, scope, &self.tcx) {
-                                Ok(ty) => arg_types.push(ty),
-                                Err(err) => {
-                                    self.sink.emit(err);
-                                    has_err = true;
-                                }
-                            }
-                        }
-
-                        let ret_ty = ret.as_ref()
-                            .map(|(_, ty)| self.sink.emit_or(LanternType::resolve(ty, scope, &self.tcx), self.tcx.error()))
-                            .unwrap_or(self.tcx.none());
-
-                        if has_err || *ret_ty == LanternType::Error || base.is_some_and(|ty| *ty == LanternType::Error) {
-                            return;
-                        }
-
-                        let fun_name = name.ident.0;
-                        let args = args.iter().zip(arg_types.iter())
-                            .map(|(arg, ty)| (arg.ident.0, *ty))
-                            .collect();
-                        let fun = LanternFunction::new(self.globals.funs.len(), args, ret_ty, &self.tcx);
-
-                        let native = match NativeFun::from_def(base, self.symbol_table.resolve(fun_name), &arg_types, ret_ty, &self.tcx) {
-                            Ok(native) => Some(native),
-                            Err(FromDefError::NotFound) => {
-                                self.emit(UnknownNative(name.clone()));
-                                None
-                            }
-                            Err(FromDefError::MismatchedArgs) => {
-                                self.emit(MismatchedNativeArgs(open_paren.span().containing(closed_paren.span())));
-                                None
-                            }
-                            Err(FromDefError::MismatchedRet) => {
-                                let span = ret.as_ref().map_or(semi.span(), |(_, ty)| ty.span());
-                                self.emit(MismatchedNativeRet(span));
-                                None
-                            }
-                        };
-
-                        let exists = match base {
-                            Some(base) => scope.insert_associated(base, fun_name, fun),
-                            None => scope.insert_function(fun_name, fun),
-                        };
-                        if exists.is_none() {
-                            self.emit(NativeAlreadyDeclared(name.clone()));
-                        } else {
-                            if let Some(native) = native {
-                                self.globals.funs.push(SparkFunction::Native {
-                                    name: name.display(self.symbol_table),
-                                    native,
-                                });
-                            } else {
-                                // "dummy" function
-                                self.globals.funs.push(SparkFunction::Lantern {
-                                    name: name.display(self.symbol_table),
-                                    stmts: Vec::new(),
-                                    locals: 0,
-                                });
-                            }
-                        }
-                    }
-                    Item::Struct(ItemStruct { ident, fields, .. }) => {
-                        let fields = fields.iter()
-                            .map(|StructField { vis, ident, r#type, .. }| {
-                                // type may not have fields initialized, but structs have constant
-                                // size/alignment and primitives are hardcoded
-                                let ty = self.sink.emit_or(LanternType::resolve(r#type, scope, &self.tcx), self.tcx.error());
-                                if ty.needs_tag() {
-                                    error!(in self.sink; r#type.span() => "optional primitives are currently not supported as struct fields");
-                                }
-                                (*vis, ident.0, ty)
-                            })
-                            .collect();
-
-                        let item = scope.item(ident.0).expect("types were resolved");
-                        let LanternType::Struct(ref r#struct) = *item else { panic!("resolved type not a struct") };
-                        // self.globals.types holds a reference to the OnceCell
-                        r#struct.init(fields);
-                    }
-                    _ => {}
+    fn lower_fun_bodies(&mut self, funs: Vec<PendingBody<'t>>, scope: &Scope<'_, 't>) {
+        for PendingBody { fun, def: ItemFun { sig: FunSig { name, args, .. }, block, .. } } in funs {
+            let mut fun_scope = scope.child_function(block.closed_brace.span(), fun.ret);
+            fun.args.iter().zip(args).for_each(|((arg_name, ty), fun_arg)| {
+                if fun_scope.insert_variable(*arg_name, *ty).is_none() {
+                    self.emit(DuplicateFunArg(fun_arg.ident));
+                }
             });
+            let (stmts, behavior) = self.lower_stmts(block.stmts, fun_scope);
+            self.globals.funs[fun.index] = SparkFunction::Lantern {
+                name: name.display(self.symbol_table),
+                stmts,
+                locals: behavior.locals_used,
+            };
+        }
     }
 
     fn check_if(&mut self, if_stmt: parse::IfStmt, scope: &mut Scope<'_, 't>) -> IfStmt<'t> {

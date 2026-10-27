@@ -193,10 +193,6 @@ impl SourceMap {
         &self.sources[id.0]
     }
 
-    pub fn get_contents(&self, id: FileId) -> &str {
-        &self.sources[id.0].1
-    }
-
     pub fn find_id(&self, path: &Path) -> Option<FileId> {
         self.sources.iter()
             .enumerate()
@@ -204,7 +200,7 @@ impl SourceMap {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FileId(usize);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

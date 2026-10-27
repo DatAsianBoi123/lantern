@@ -285,6 +285,12 @@ pub struct ItemUsing {
     pub semi: Semi,
 }
 
+impl ItemUsing {
+    pub fn span(&self) -> Span {
+        self.using.span().containing(self.semi.span())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UsingItems {
     /// using std;

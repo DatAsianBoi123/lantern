@@ -287,11 +287,11 @@ impl DiagnosticError for UnknownStdType {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StructAlreadyDeclared(pub Ident);
+pub struct StructAlreadyDeclared(pub Symbol, pub Span);
 
 impl DiagnosticError for StructAlreadyDeclared {
     fn into_diagnostic(self, symbol_table: &SymbolTable) -> Diagnostic {
-        error!(self.0.span() => "struct `{}` already declared", self.0.display(symbol_table))
+        error!(self.1 => "struct `{}` already declared", self.0.display(symbol_table))
     }
 }
 
