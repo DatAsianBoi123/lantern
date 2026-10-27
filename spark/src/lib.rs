@@ -1,4 +1,4 @@
-use std::{collections::{HashMap, HashSet}, fs::File, io::Read, mem};
+use std::{collections::{HashMap, HashSet}, mem, path::PathBuf};
 
 use arena::Arena;
 use diagnostic::{DiagnosticError, DiagnosticSink, FileId, SourceMap, Span, error, symbol::{SymbolDisplay, SymbolTable}};
@@ -151,24 +151,16 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
                     continue;
                 }
                 let path_span = item_using.path.span();
-                let mut path_buf = self.source_map.root().to_path_buf();
+                let mut path_buf = PathBuf::new();
                 for item in &item_using.path.items {
                     path_buf.push(self.symbol_table.resolve(item.0));
                 }
                 path_buf.set_extension("la");
-                let file_id = match self.source_map.find_id(&path_buf) {
-                    Some(file_id) => file_id,
-                    None => {
-                        let Ok(mut file) = File::open(&path_buf) else {
-                            self.emit(ModuleNotFound(path_buf, path_span));
-                            continue;
-                        };
-                        let mut contents = String::new();
-                        if file.read_to_string(&mut contents).is_err() {
-                            self.emit(InvalidTextError(path_buf, path_span));
-                            continue;
-                        }
-                        self.source_map.add_source(path_buf, contents)
+                let file_id = match self.source_map.load(&path_buf) {
+                    Ok(file_id) => file_id,
+                    Err(err) => {
+                        error!(in self.sink; path_span => "{err}");
+                        continue;
                     }
                 };
                 if seen.insert(file_id) {

@@ -1,4 +1,4 @@
-use std::{fmt::{Display, Formatter}, path::{Path, PathBuf}};
+use std::{fmt::{Display, Formatter}, fs::File, io::{self, Read}, path::{Path, PathBuf}};
 
 use color_print::cformat;
 
@@ -184,6 +184,19 @@ impl SourceMap {
         &self.root
     }
 
+    pub fn load(&mut self, path: impl AsRef<Path>) -> Result<FileId, LoadError> {
+        let path = self.root.join(path.as_ref());
+        match self.find_id(&path) {
+            Some(file_id) => Ok(file_id),
+            None => {
+                let mut file = File::open(&path).map_err(LoadError::FileNotFound)?;
+                let mut content = String::new();
+                file.read_to_string(&mut content).map_err(LoadError::UnableToRead)?;
+                Ok(self.add_source(path, content))
+            }
+        }
+    }
+
     pub fn add_source(&mut self, path: PathBuf, source: String) -> FileId {
         self.sources.push((path, source));
         FileId(self.sources.len() - 1)
@@ -202,6 +215,14 @@ impl SourceMap {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FileId(usize);
+
+#[derive(thiserror::Error, Debug)]
+pub enum LoadError {
+    #[error("{0}")]
+    FileNotFound(io::Error),
+    #[error("{0}")]
+    UnableToRead(io::Error),
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span {

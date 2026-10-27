@@ -1,4 +1,4 @@
-use std::{fs::File, io::Read, path::Path, process::ExitCode, time::Instant};
+use std::{path::Path, process::ExitCode, time::Instant};
 
 use arena::Arena;
 use clap::Parser;
@@ -22,19 +22,23 @@ fn main() -> ExitCode {
     let Args { file: file_name, print_ast, print_codegen, no_run } = Args::parse();
 
     let path: &Path = file_name.as_ref();
-    let Ok(mut file) = File::open(path) else {
-        eprintln!("file not found: `{file_name}`");
-        return ExitCode::from(3);
+    let Some(parent) = path.parent() else {
+        eprintln!("invalid file path");
+        return ExitCode::from(11);
+    };
+    let Some(filename) = path.file_name() else {
+        eprintln!("invalid file path");
+        return ExitCode::from(12);
     };
 
-    let mut content = String::new();
-    if file.read_to_string(&mut content).is_err() {
-        eprintln!("file contains invalid UTF-8");
-        return ExitCode::from(3);
+    let mut source_map = SourceMap::new(parent.into());
+    let root = match source_map.load(filename) {
+        Ok(file) => file,
+        Err(err) => {
+            eprintln!("{err}");
+            return ExitCode::from(50);
+        }
     };
-
-    let mut source_map = SourceMap::new(path.parent().expect("file path has parent").into());
-    let root = source_map.add_source(path.to_path_buf(), content);
 
     let mut symbol_table = SymbolTable::new();
 
