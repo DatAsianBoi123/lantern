@@ -24,21 +24,23 @@ impl<T: TokenKind> ParseTokens for T {
 }
 
 pub fn parse(source: FileId, content: &str, symbol_table: &mut SymbolTable) -> Result<LanternFile> {
-    TokenStream::from_input(source, content, symbol_table).parse()
+    let mut stream = TokenStream::from_input(source, content, symbol_table);
+    LanternFile::parse(&mut stream, source)
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LanternFile {
+    pub source: FileId,
     pub stmts: Vec<Stmt>,
 }
 
-impl ParseTokens for LanternFile {
-    fn parse(stream: &mut TokenStream) -> Result<Self> {
+impl LanternFile {
+    pub fn parse(stream: &mut TokenStream, source: FileId) -> Result<Self> {
         let mut stmts = Vec::new();
         while !stream.is_eof()? {
             stmts.push(stream.parse()?);
         }
-        Ok(Self { stmts })
+        Ok(Self { source, stmts })
     }
 }
 
