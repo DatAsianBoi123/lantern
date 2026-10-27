@@ -34,7 +34,7 @@ fn main() -> ExitCode {
     };
 
     let mut source_map = SourceMap::new(path.parent().expect("file path has parent").into());
-    let root = source_map.add_source(path.file_name().expect("path is a file").into(), content);
+    let root = source_map.add_source(path.to_path_buf(), content);
 
     let mut symbol_table = SymbolTable::new();
 
