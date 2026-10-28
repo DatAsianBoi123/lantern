@@ -195,10 +195,6 @@ impl VM {
         &self.funs
     }
 
-    pub fn root(&self) -> &GeneratedFunction {
-        self.funs.last().expect("root fun")
-    }
-
     pub fn frames(&self) -> &[Frame] {
         &self.frames
     }
