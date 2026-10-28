@@ -11,6 +11,7 @@ pub mod native;
 
 pub fn ignite(spark: Spark, globals: &mut Globals) -> (usize, [usize; BuiltinType::SIZE]) {
     let type_offset = globals.types.len();
+    let fun_offsets = globals.funs.len();
 
     for fun in spark.globals.funs {
         globals.funs.push(FlameGen::compile_fun(fun, type_offset));
@@ -22,7 +23,7 @@ pub fn ignite(spark: Spark, globals: &mut Globals) -> (usize, [usize; BuiltinTyp
 
     globals.vars = spark.globals.vars;
 
-    (spark.entrypoint, spark.tcx.into_builtins(type_offset))
+    (spark.entrypoint + fun_offsets, spark.tcx.into_builtins(type_offset))
 }
 
 #[derive(Debug)]
