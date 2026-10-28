@@ -19,13 +19,27 @@ pub struct Scope<'a, 't> {
 }
 
 impl<'a, 't> Scope<'a, 't> {
+    pub fn new_root(tcx: &TypeContext<'t>) -> Self {
+        Self {
+            items: HashMap::new(),
+            functions: HashMap::new(),
+            variables: HashMap::new(),
+            associated: HashMap::new(),
+            kind: ScopeKind::Module(true),
+            expected_ret: tcx.none(),
+            diverges: false,
+            next_local_index: 0,
+            max_locals: 0,
+        }
+    }
+
     pub fn new_module(tcx: &TypeContext<'t>) -> Self {
         Self {
             items: HashMap::new(),
             functions: HashMap::new(),
             variables: HashMap::new(),
             associated: HashMap::new(),
-            kind: ScopeKind::Module,
+            kind: ScopeKind::Module(false),
             expected_ret: tcx.none(),
             diverges: false,
             next_local_index: 0,
@@ -39,6 +53,10 @@ impl<'a, 't> Scope<'a, 't> {
 
     pub fn kind_mut(&mut self) -> &mut ScopeKind<'a, 't> {
         &mut self.kind
+    }
+
+    pub fn is_root(&self) -> bool {
+        matches!(self.kind, ScopeKind::Module(true))
     }
 
     pub fn in_loop(&self) -> bool {
@@ -98,7 +116,7 @@ impl<'a, 't> Scope<'a, 't> {
 
     pub fn item(&self, name: Symbol) -> Option<TypeId<'t>> {
         match self.kind {
-            ScopeKind::Module => self.items.get(&name).copied(),
+            ScopeKind::Module(_) => self.items.get(&name).copied(),
             ScopeKind::Block { parent, .. } | ScopeKind::Function(parent, _) => {
                 self.items.get(&name)
                     .copied()
@@ -119,7 +137,7 @@ impl<'a, 't> Scope<'a, 't> {
 
     pub fn function(&self, name: Symbol) -> Option<&LanternFunction<'t>> {
         match self.kind {
-            ScopeKind::Module => self.functions.get(&name),
+            ScopeKind::Module(_) => self.functions.get(&name),
             ScopeKind::Block { parent, .. } | ScopeKind::Function(parent, _) => {
                 self.functions.get(&name)
                     .or_else(|| parent.function(name))
@@ -135,7 +153,7 @@ impl<'a, 't> Scope<'a, 't> {
 
     pub fn variable(&self, name: Symbol) -> Option<LanternVariable<'t>> {
         match self.kind {
-            ScopeKind::Module | ScopeKind::Function(..) => self.variables.get(&name).copied(),
+            ScopeKind::Module(_) | ScopeKind::Function(..) => self.variables.get(&name).copied(),
             ScopeKind::Block { parent, .. } => {
                 self.variables.get(&name)
                     .copied()
@@ -154,7 +172,7 @@ impl<'a, 't> Scope<'a, 't> {
 
     pub fn associated(&self, ty: TypeId<'t>, name: Symbol) -> Option<&LanternFunction<'t>> {
         match self.kind {
-            ScopeKind::Module => self.associated.get(&ty).and_then(|associated| associated.get(&name)),
+            ScopeKind::Module(_) => self.associated.get(&ty).and_then(|associated| associated.get(&name)),
             ScopeKind::Block { parent, .. } | ScopeKind::Function(parent, _) => {
                 self.associated.get(&ty).and_then(|type_associated| type_associated.get(&name))
                     .or_else(|| parent.associated(ty, name))
@@ -270,7 +288,7 @@ impl<'a, 't> Scope<'a, 't> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScopeKind<'a, 't> {
-    Module,
+    Module(bool),
     Function(&'a Scope<'a, 't>, Span),
     Block {
         parent: &'a Scope<'a, 't>,

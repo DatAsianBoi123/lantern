@@ -378,7 +378,7 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
                 }
                 spark_stmts.push(Stmt::Return(None));
             }
-            ScopeKind::Module => spark_stmts.push(Stmt::Return(None)),
+            ScopeKind::Module(_) => spark_stmts.push(Stmt::Return(None)),
             _ => {}
         }
 
@@ -884,8 +884,7 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
                         if item_fun.vis.is_public() {
                             fun_exports.insert(sig.name.ident.0, fun.clone());
                         }
-                        // BUG: any module in the package can define an entrypoint
-                        if self.symbol_table.resolve(sig.name.ident.0) == ENTRYPOINT_NAME {
+                        if scope.is_root() && self.symbol_table.resolve(sig.name.ident.0) == ENTRYPOINT_NAME {
                             match &mut self.globals.entrypoint {
                                 Some(_) => self.emit(EntrypointAlreadyDefined(sig.name.span())),
                                 entrypoint => *entrypoint = Some(fun.index),
