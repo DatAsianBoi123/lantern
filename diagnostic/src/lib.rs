@@ -237,7 +237,7 @@ impl Span {
     }
 
     pub fn new_width(source: FileId, line: u32, col: u32, width: u32) -> Self {
-        Self { source, start: Location { line, col }, end: Location { line, col: col + width - 1 } }
+        Self { source, start: Location { line, col }, end: Location { line, col: col + width.saturating_sub(1) } }
     }
 
     pub fn new_single(source: FileId, line: u32, col: u32) -> Self {
