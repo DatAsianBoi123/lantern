@@ -69,55 +69,7 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
     pub fn lower_package(&mut self, root: LanternFile) -> usize {
         let source = root.source;
         self.load_modules(root);
-        self.for_each_module(|this, module| {
-            let types = this.resolve_types(&mut module.file.items, &mut module.scope);
-            module.exports.types = types;
-        });
-        self.for_each_module(|this, module| {
-            for dep in &module.deps {
-                let types = if dep.file == module.file.source {
-                    // TODO: allow self importing?
-                    &module.exports.types
-                } else {
-                    let Some(dep_module) = this.modules.get(dep.file) else { return; };
-                    &dep_module.exports.types
-                };
-                match dep.import {
-                    ModuleImport::Glob(span) => {
-                        for duplicate in module.scope.import_all_types(types) {
-                            this.emit(StructAlreadyDeclared(duplicate, span));
-                        }
-                    }
-                }
-            }
-        });
-        self.for_each_module(|this, module| {
-            let (bodies, funs) = this.build_types_and_funs(mem::take(&mut module.file.items), &mut module.scope);
-            module.pending_bodies = bodies;
-            module.exports.funs = funs;
-        });
-        self.for_each_module(|this, module| {
-            for dep in &module.deps {
-                let funs = if dep.file == module.file.source {
-                    // TODO: allow self importing?
-                    &module.exports.funs
-                } else {
-                    let Some(dep_module) = this.modules.get(dep.file) else { return; };
-                    &dep_module.exports.funs
-                };
-                match dep.import {
-                    ModuleImport::Glob(span) => {
-                        for duplicate in module.scope.import_all_funs(funs) {
-                            // TODO: DiagnosticError impl for this error
-                            error!(in this.sink; span => "function `{}` already declared", duplicate.display(this.symbol_table));
-                        }
-                    }
-                }
-            }
-        });
-        self.for_each_module(|this, module| {
-            this.lower_fun_bodies(mem::take(&mut module.pending_bodies), &module.scope);
-        });
+        self.resolve_modules_since(0);
 
         self.globals.entrypoint.unwrap_or_else(|| {
             self.emit(NoEntrypoint(Span::new_single(source, 1, 1)));
@@ -125,10 +77,45 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
         })
     }
 
-    fn for_each_module(&mut self, mut f: impl FnMut(&mut Self, &mut Module<'t>)) {
-        for i in 0..self.modules.len() {
-            let file = self.modules.index(i).expect("module size stays the same");
-            let Some(mut module) = self.modules.remove(file) else { continue; };
+    fn resolve_modules_since(&mut self, start_index: usize) {
+        self.for_each_module(start_index, |this, module| {
+            let types = this.resolve_types(&mut module.file.items, &mut module.scope);
+            module.exports.types = types;
+        });
+        self.for_each_module(start_index, |this, module| {
+            for dep in &module.deps {
+                if dep.file == module.file.source {
+                    this.emit(SelfImport(dep.import.span()));
+                } else {
+                    this.import_types_into(&mut module.scope, dep);
+                }
+            }
+        });
+        self.for_each_module(start_index, |this, module| {
+            let (bodies, funs) = this.build_types_and_funs(mem::take(&mut module.file.items), &mut module.scope);
+            module.pending_bodies = bodies;
+            module.exports.funs = funs;
+        });
+        self.for_each_module(start_index, |this, module| {
+            for dep in &module.deps {
+                if dep.file != module.file.source {
+                    this.import_funs_into(&mut module.scope, dep);
+                }
+                // self import diagnostic already emitted
+            }
+        });
+        for i in start_index..self.modules.len() {
+            let file = self.modules.index(i).expect("module size does not shrink");
+            let Some((pending_bodies, scope)) = self.modules.take_bodies(file, &self.tcx) else { continue; };
+            self.lower_fun_bodies(pending_bodies, &scope);
+            self.modules.put_scope(file, scope);
+        }
+    }
+
+    fn for_each_module(&mut self, start: usize, mut f: impl FnMut(&mut Self, &mut Module<'t>)) {
+        for i in start..self.modules.len() {
+            let file = self.modules.index(i).expect("module size does not shrink");
+            let Some(mut module) = self.modules.take(file) else { continue; };
             f(self, &mut module);
             self.modules.put_back(module);
         }
@@ -137,16 +124,18 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
     fn load_modules(&mut self, root: LanternFile) {
         let mut seen = HashSet::new();
         seen.insert(root.source);
-        let mut queue = vec![root];
+        let mut queue = Vec::new();
+        let deps = self.scan_deps(&root.items, &mut queue, &mut seen);
+        self.modules.insert(Module::new_root(root, deps, &self.tcx));
         while let Some(file) = queue.pop() {
-            let deps = self.scan_deps(&file, &mut queue, &mut seen);
+            let deps = self.scan_deps(&file.items, &mut queue, &mut seen);
             self.modules.insert(Module::new(file, deps, &self.tcx));
         }
     }
 
-    fn scan_deps(&mut self, file: &LanternFile, queue: &mut Vec<LanternFile>, seen: &mut HashSet<FileId>) -> Vec<ModuleDependency> {
+    fn scan_deps(&mut self, items: &[Item], queue: &mut Vec<LanternFile>, seen: &mut HashSet<FileId>) -> Vec<ModuleDependency> {
         let mut deps = Vec::new();
-        for item in &file.items {
+        for item in items {
             if let Item::Using(item_using) = item {
                 if !matches!(item_using.items, UsingItems::Glob) {
                     error!(in self.sink; item_using.path.span() => "non-glob imports are currently not supported");
@@ -182,8 +171,7 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
         deps
     }
 
-    pub fn resolve_toplevel(&mut self, stmts: &mut Vec<PStmt>, scope: &mut Scope<'_, 't>) {
-        // TODO: resolve usings as well
+    fn resolve_toplevel(&mut self, stmts: &mut Vec<PStmt>, scope: &mut Scope<'_, 't>) {
         let mut items = stmts
             .extract_if(.., |stmt| matches!(stmt, PStmt::Item(_)))
             .map(|stmt| match stmt {
@@ -192,8 +180,48 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
             })
             .collect();
         let _ = self.resolve_types(&mut items, scope);
+
+        let start_index = self.modules.len();
+        let mut seen = HashSet::from_iter(self.modules.files());
+        let mut queue = Vec::new();
+        let deps = self.scan_deps(&items, &mut queue, &mut seen);
+        if !queue.is_empty() {
+            while let Some(file) = queue.pop() {
+                let deps = self.scan_deps(&file.items, &mut queue, &mut seen);
+                self.modules.insert(Module::new(file, deps, &self.tcx));
+            }
+            self.resolve_modules_since(start_index);
+            for dep in deps {
+                self.import_types_into(scope, &dep);
+                self.import_funs_into(scope, &dep);
+            }
+        }
+
         let (funs, _) = self.build_types_and_funs(items, scope);
         self.lower_fun_bodies(funs, scope);
+    }
+
+    fn import_types_into(&mut self, scope: &mut Scope<'_, 't>, dep: &ModuleDependency) {
+        let Some(module) = self.modules.get(dep.file) else { return; };
+        match dep.import {
+            ModuleImport::Glob(span) => {
+                for duplicate in scope.import_all_types(&module.exports.types) {
+                    self.emit(StructAlreadyDeclared(duplicate, span));
+                }
+            }
+        }
+    }
+
+    fn import_funs_into(&mut self, scope: &mut Scope<'_, 't>, dep: &ModuleDependency) {
+        let Some(module) = self.modules.get(dep.file) else { return; };
+        match dep.import {
+            ModuleImport::Glob(span) => {
+                for duplicate in scope.import_all_funs(&module.exports.funs) {
+                    // TODO: DiagnosticError impl for this error
+                    error!(in self.sink; span => "function `{}` already declared", duplicate.display(self.symbol_table));
+                }
+            }
+        }
     }
 
     #[must_use]

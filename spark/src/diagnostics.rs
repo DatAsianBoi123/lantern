@@ -434,3 +434,12 @@ impl DiagnosticError for NoEntrypoint {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelfImport(pub Span);
+
+impl DiagnosticError for SelfImport {
+    fn into_diagnostic(self, _: &SymbolTable) -> Diagnostic {
+        error!(self.0 => "self-imports are not allowed")
+    }
+}
+
