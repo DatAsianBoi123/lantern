@@ -58,10 +58,14 @@ define_native_funs! { for tcx,
             -> ty = ty.is_primitive_type(&STR_NATIVE),
         FloatFromStr = [ty = ty.is_primitive_type(&FLOAT_NATIVE)]"from_str"(ty = ty.is_primitive_type(&STR_NATIVE))
             -> ty = ty.is_primitive_type(&FLOAT_NATIVE),
+        FloatAsInt = [ty = ty.is_primitive_type(&FLOAT_NATIVE)]"as_int"(ty = ty.is_primitive_type(&FLOAT_NATIVE))
+            -> ty = ty.is_primitive_type(&INT_NATIVE),
         IntToStr = [ty = ty.is_primitive_type(&INT_NATIVE)]"to_str"(ty = ty.is_primitive_type(&INT_NATIVE))
             -> ty = ty.is_primitive_type(&STR_NATIVE),
         IntFromStr = [ty = ty.is_primitive_type(&INT_NATIVE)]"from_str"(ty = ty.is_primitive_type(&STR_NATIVE))
             -> ty = ty.is_primitive_type(&INT_NATIVE),
+        IntAsFloat = [ty = ty.is_primitive_type(&INT_NATIVE)]"as_float"(ty = ty.is_primitive_type(&INT_NATIVE))
+            -> ty = ty.is_primitive_type(&FLOAT_NATIVE),
         Input = "input"() -> ty = ty.is_primitive_type(&STR_NATIVE),
         Concat = [ty = ty.is_primitive_type(&STR_NATIVE)]"concat"(
             ty = ty.is_primitive_type(&STR_NATIVE),

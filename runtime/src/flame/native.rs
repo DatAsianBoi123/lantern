@@ -56,6 +56,10 @@ native_funs![for vm,
         let float = unsafe { str::from_utf8_unchecked(slice).parse().map_err(|_| vm.throw("not a float"))? };
         Ok(Slot::new_float(float))
     }
+    FloatAsInt(float) {
+        let float = unsafe { float.read_float() };
+        Ok(Slot::new_int(float as i64))
+    }
     IntToStr(int) {
         let int = unsafe { int.read_int() };
         Ok(Slot::new_ref(vm.alloc_string(int.to_string().as_bytes())?.as_mut_ptr()))
@@ -66,6 +70,10 @@ native_funs![for vm,
         let slice = unsafe { std::slice::from_raw_parts(str.element_ptr(), str.len()) };
         let int = unsafe { str::from_utf8_unchecked(slice).parse().map_err(|_| vm.throw("not an int"))? };
         Ok(Slot::new_int(int))
+    }
+    IntAsFloat(int) {
+        let int = unsafe { int.read_int() };
+        Ok(Slot::new_float(int as f64))
     }
     Input() {
         let mut input = String::new();

@@ -7,7 +7,9 @@ pub native str;
 
 pub native fun str.concat(self: str, other: str) -> str;
 pub native fun int.to_str(self: int) -> str;
+pub native fun int.as_float(self: int) -> float;
 pub native fun float.to_str(self: float) -> str;
+pub native fun float.as_int(self: float) -> int;
 
 pub native fun write(str: str);
 pub native fun flush();
@@ -25,7 +27,7 @@ fun main() {
   };
   val bar = Bar {
     foo: foo,
-    mult: 2.0,
+    mult: 1.5,
   };
 
   println(foo.display());

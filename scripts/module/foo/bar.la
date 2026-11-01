@@ -8,7 +8,7 @@ pub struct Bar {
 
 pub fun Bar.compute(self: Bar) -> Foo {
   return Foo {
-    bar: self.foo.bar,
+    bar: (self.foo.bar.as_float() * self.mult).as_int(),
     qux: self.foo.qux * self.mult,
   };
 }
