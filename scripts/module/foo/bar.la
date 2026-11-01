@@ -1,0 +1,23 @@
+using main{};
+using foo{Foo, Foo.display};
+
+pub struct Bar {
+  pub foo: Foo,
+  pub mult: float,
+}
+
+pub fun Bar.compute(self: Bar) -> Foo {
+  return Foo {
+    bar: self.foo.bar,
+    qux: self.foo.qux * self.mult,
+  };
+}
+pub fun Bar.display(self: Bar) -> str {
+  return "Bar {"
+    .concat(" foo: ")
+    .concat(self.foo.display())
+    .concat(", mult: ")
+    .concat(self.mult.to_str())
+    .concat(" }");
+}
+

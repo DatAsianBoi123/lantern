@@ -1,8 +1,8 @@
 using main{int, float, str, int.to_str, float.to_str, str.concat};
 
 pub struct Foo {
-  bar: int,
-  qux: float,
+  pub bar: int,
+  pub qux: float,
 }
 
 pub fun Foo.display(self: Foo) -> str {
