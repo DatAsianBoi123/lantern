@@ -1,6 +1,6 @@
 use std::{cell::OnceCell, collections::HashMap, rc::Rc};
 
-use diagnostic::{Span, symbol::Symbol};
+use diagnostic::{FileId, Span, symbol::Symbol};
 
 use crate::{SparkFunction, def::{LanternFunction, LanternStructData, LanternVariable}, module::{FunctionExports, TypeExports}, ty::{TypeContext, TypeId}};
 
@@ -11,6 +11,7 @@ pub struct Scope<'a, 't> {
     variables: HashMap<Symbol, LanternVariable<'t>>,
     associated: HashMap<TypeId<'t>, HashMap<Symbol, LanternFunction<'t>>>,
     kind: ScopeKind<'a, 't>,
+    pub source: FileId,
     pub expected_ret: TypeId<'t>,
     pub diverges: bool,
     // TODO: reusing locals makes GC collect garbage data
@@ -19,13 +20,14 @@ pub struct Scope<'a, 't> {
 }
 
 impl<'a, 't> Scope<'a, 't> {
-    pub fn new_root(tcx: &TypeContext<'t>) -> Self {
+    pub fn new_root(source: FileId, tcx: &TypeContext<'t>) -> Self {
         Self {
             items: HashMap::new(),
             functions: HashMap::new(),
             variables: HashMap::new(),
             associated: HashMap::new(),
             kind: ScopeKind::Module(true),
+            source,
             expected_ret: tcx.none(),
             diverges: false,
             next_local_index: 0,
@@ -33,13 +35,14 @@ impl<'a, 't> Scope<'a, 't> {
         }
     }
 
-    pub fn new_module(tcx: &TypeContext<'t>) -> Self {
+    pub fn new_module(source: FileId, tcx: &TypeContext<'t>) -> Self {
         Self {
             items: HashMap::new(),
             functions: HashMap::new(),
             variables: HashMap::new(),
             associated: HashMap::new(),
             kind: ScopeKind::Module(false),
+            source,
             expected_ret: tcx.none(),
             diverges: false,
             next_local_index: 0,
@@ -226,6 +229,7 @@ impl<'a, 't> Scope<'a, 't> {
                 in_expr: self.in_expr(),
                 pass: self.pass(),
             },
+            source: self.source,
             expected_ret: self.expected_ret,
             diverges: false,
             next_local_index: self.next_local_index,
@@ -245,6 +249,7 @@ impl<'a, 't> Scope<'a, 't> {
                 in_expr: true,
                 pass: PassBehavior::Converges,
             },
+            source: self.source,
             expected_ret: self.expected_ret,
             diverges: false,
             next_local_index: self.next_local_index,
@@ -259,6 +264,7 @@ impl<'a, 't> Scope<'a, 't> {
             variables: HashMap::new(),
             associated: HashMap::new(),
             kind: ScopeKind::Function(self, span),
+            source: self.source,
             expected_ret,
             diverges: false,
             next_local_index: 0,
@@ -278,6 +284,7 @@ impl<'a, 't> Scope<'a, 't> {
                 in_expr: self.in_expr(),
                 pass: self.pass(),
             },
+            source: self.source,
             expected_ret: self.expected_ret,
             diverges: false,
             next_local_index: self.next_local_index,

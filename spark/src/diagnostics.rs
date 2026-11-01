@@ -443,3 +443,12 @@ impl DiagnosticError for SelfImport {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrivateField(pub Ident);
+
+impl DiagnosticError for PrivateField {
+    fn into_diagnostic(self, symbol_table: &SymbolTable) -> Diagnostic {
+        error!(self.0.span() => "field `{}` is private", self.0.display(symbol_table))
+    }
+}
+

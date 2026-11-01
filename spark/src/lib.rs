@@ -516,8 +516,10 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
                 }
                 match *base.ty {
                     LanternType::Struct(ref r#struct) => {
-                        if let Some(LanternStructField { offset, ty, .. }) = r#struct.find_field(ident.0) {
-                            // TODO: check if the field is accessible
+                        if let Some(LanternStructField { vis, offset, ty, .. }) = r#struct.find_field(ident.0) {
+                            if !vis.is_public() && scope.source != r#struct.source {
+                                self.emit(PrivateField(ident));
+                            }
                             return Expr::new(ExprKind::Field(Box::new(base), offset), ty, ident.span())
                         }
                     }
@@ -863,7 +865,7 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
         items.retain(|item| {
             match item {
                 Item::Struct(ItemStruct { vis, annotations, ident, .. }) => {
-                    let r#struct = LanternStruct::new(ident.0, self.globals.types.len());
+                    let r#struct = LanternStruct::new(scope.source, ident.0, self.globals.types.len());
 
                     for annotation in &annotations.annotations {
                         if self.symbol_table.resolve(annotation.ident.0) == "std" {

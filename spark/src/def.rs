@@ -1,6 +1,6 @@
 use std::{cell::OnceCell, hash::{Hash, Hasher}};
 
-use diagnostic::symbol::Symbol;
+use diagnostic::{FileId, symbol::Symbol};
 use parse::{Visibility, expr::{BinaryOperator, UnaryOperator}};
 
 use crate::{expr::{BinaryOperation, UnaryOperation}, ty::{LanternType, TypeContext, TypeId}};
@@ -46,6 +46,7 @@ impl<'t> LanternFunction<'t> {
 
 #[derive(Debug, Clone)]
 pub struct LanternStruct<'t> {
+    pub source: FileId,
     pub name: Symbol,
     pub id: usize,
     pub data: OnceCell<LanternStructData<'t>>,
@@ -66,8 +67,9 @@ impl Hash for LanternStruct<'_> {
 }
 
 impl<'t> LanternStruct<'t> {
-    pub fn new(name: Symbol, index: usize) -> Self {
+    pub fn new(source: FileId, name: Symbol, index: usize) -> Self {
         Self {
+            source,
             name,
             id: index,
             data: OnceCell::new(),

@@ -58,7 +58,9 @@ impl<'t> ModuleRegistry<'t> {
     #[must_use]
     pub fn take_bodies(&mut self, file: FileId, tcx: &TypeContext<'t>) -> Option<(Vec<PendingBody<'t>>, Scope<'t, 't>)> {
         // TODO: find a better representation for a partially-taken module
-        self.get_mut(file).map(|module| (mem::take(&mut module.pending_bodies), mem::replace(&mut module.scope, Scope::new_module(tcx))))
+        self.get_mut(file).map(|module| {
+            (mem::take(&mut module.pending_bodies), mem::replace(&mut module.scope, Scope::new_module(file, tcx)))
+        })
     }
 
     pub fn put_scope(&mut self, file: FileId, scope: Scope<'t, 't>) {
@@ -80,8 +82,8 @@ pub struct Module<'t> {
 impl<'t> Module<'t> {
     pub fn new(file: LanternFile, deps: Vec<ModuleDependency>, tcx: &TypeContext<'t>) -> Self {
         Self {
+            scope: Scope::new_module(file.source, tcx),
             file,
-            scope: Scope::new_module(tcx),
             deps,
             exports: ModuleExports::default(),
             pending_bodies: Vec::new(),
@@ -90,8 +92,8 @@ impl<'t> Module<'t> {
 
     pub fn new_root(file: LanternFile, deps: Vec<ModuleDependency>, tcx: &TypeContext<'t>) -> Self {
         Self {
+            scope: Scope::new_root(file.source, tcx),
             file,
-            scope: Scope::new_root(tcx),
             deps,
             exports: ModuleExports::default(),
             pending_bodies: Vec::new(),
