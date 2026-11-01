@@ -83,7 +83,7 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
             module.exports.types = types;
         });
         self.for_each_module(start_index, |this, module| {
-            for dep in &module.deps {
+            for dep in &mut module.deps {
                 if dep.file == module.file.source {
                     this.emit(SelfImport(dep.import.span()));
                 } else {
@@ -137,10 +137,6 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
         let mut deps = Vec::new();
         for item in items {
             if let Item::Using(item_using) = item {
-                if !matches!(item_using.items, UsingItems::Glob) {
-                    error!(in self.sink; item_using.path.span() => "non-glob imports are currently not supported");
-                    continue;
-                }
                 let path_span = item_using.path.span();
                 let mut path_buf = PathBuf::new();
                 for item in &item_using.path.items {
@@ -164,7 +160,18 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
                     };
                     queue.push(file);
                 }
-                deps.push(ModuleDependency::new(file_id, ModuleImport::Glob(item_using.span())));
+                let import = match &item_using.items {
+                    UsingItems::Glob => ModuleImport::Glob(item_using.span()),
+                    UsingItems::Items(names) => {
+                        let items = names.iter().map(|name| (name.clone(), false)).collect();
+                        ModuleImport::Items(items, item_using.span())
+                    }
+                    UsingItems::Named => {
+                        error!(in self.sink; item_using.span() => "named imports are currently not supported");
+                        continue;
+                    }
+                };
+                deps.push(ModuleDependency::new(file_id, import));
             }
         }
 
@@ -191,22 +198,36 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
                 self.modules.insert(Module::new(file, deps, &self.tcx));
             }
             self.resolve_modules_since(start_index);
-            for dep in deps {
-                self.import_types_into(scope, &dep);
-                self.import_funs_into(scope, &dep);
-            }
+        }
+        for mut dep in deps {
+            self.import_types_into(scope, &mut dep);
+            self.import_funs_into(scope, &dep);
         }
 
         let (funs, _) = self.build_types_and_funs(items, scope);
         self.lower_fun_bodies(funs, scope);
     }
 
-    fn import_types_into(&mut self, scope: &mut Scope<'_, 't>, dep: &ModuleDependency) {
+    fn import_types_into(&mut self, scope: &mut Scope<'_, 't>, dep: &mut ModuleDependency) {
         let Some(module) = self.modules.get(dep.file) else { return; };
         match dep.import {
             ModuleImport::Glob(span) => {
                 for duplicate in scope.import_all_types(&module.exports.types) {
                     self.emit(StructAlreadyDeclared(duplicate, span));
+                }
+            }
+            ModuleImport::Items(ref mut items, _) => {
+                let type_exports = &module.exports.types.types;
+                for (name, found_type) in items {
+                    if name.base.is_some() {
+                        continue;
+                    }
+                    if let Some(item) = type_exports.get(&name.ident.0).copied() {
+                        if scope.insert_item(name.ident.0, item).is_none() {
+                            self.sink.emit(StructAlreadyDeclared(name.ident.0, name.span()).into_diagnostic(self.symbol_table));
+                        }
+                        *found_type = true;
+                    }
                 }
             }
         }
@@ -219,6 +240,41 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
                 for duplicate in scope.import_all_funs(&module.exports.funs) {
                     // TODO: DiagnosticError impl for this error
                     error!(in self.sink; span => "function `{}` already declared", duplicate.display(self.symbol_table));
+                }
+            }
+            ModuleImport::Items(ref items, _) => {
+                for (name, found_type) in items {
+                    match name.base {
+                        Some(ref base) => {
+                            let base = match LanternType::resolve(base, scope, &self.tcx) {
+                                Ok(ty) => ty,
+                                Err(diagnostic) => {
+                                    self.sink.emit(diagnostic);
+                                    continue;
+                                }
+                            };
+                            // TypeId hashes by address
+                            #[allow(clippy::mutable_key_type)]
+                            let associated = &module.exports.funs.associated;
+                            if let Some(associated) = associated.get(&base).and_then(|funs| funs.get(&name.ident.0)) {
+                                if scope.insert_associated(base, name.ident.0, associated.clone()).is_none() {
+                                    self.sink.emit(FunAlreadyDeclared(name.clone()).into_diagnostic(self.symbol_table));
+                                }
+                            } else {
+                                self.sink.emit(UnknownAssociated { ident: name.ident, ty: base }.into_diagnostic(self.symbol_table));
+                            }
+                        }
+                        None => {
+                            let funs = &module.exports.funs.funs;
+                            if let Some(fun) = funs.get(&name.ident.0) {
+                                if scope.insert_function(name.ident.0, fun.clone()).is_none() {
+                                    self.sink.emit(FunAlreadyDeclared(name.clone()).into_diagnostic(self.symbol_table));
+                                }
+                            } else if !found_type {
+                                self.sink.emit(ItemNotFound(name.ident).into_diagnostic(self.symbol_table));
+                            }
+                        }
+                    }
                 }
             }
         }

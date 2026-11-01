@@ -1,7 +1,7 @@
 use std::{collections::HashMap, mem};
 
 use diagnostic::{FileId, Span, symbol::Symbol};
-use parse::{ItemFun, LanternFile};
+use parse::{FunName, ItemFun, LanternFile};
 
 use crate::{def::LanternFunction, scope::Scope, ty::{TypeContext, TypeId}};
 
@@ -114,12 +114,14 @@ impl ModuleDependency {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModuleImport {
     Glob(Span),
+    Items(Vec<(FunName, bool)>, Span),
 }
 
 impl ModuleImport {
     pub fn span(&self) -> Span {
         match self {
             Self::Glob(span) => *span,
+            Self::Items(_, span) => *span,
         }
     }
 }

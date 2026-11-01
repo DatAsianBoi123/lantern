@@ -117,7 +117,7 @@ impl<'t> LanternType<'t> {
             Type::Path(path) => {
                 if path.items.len() > 1 {
                     // module.Type
-                    return Err(error!(path.span() => "modules are not supported yet"))
+                    return Err(error!(path.span() => "named imports are not supported yet"))
                 }
                 return scope.item(path.last().0).ok_or(error!(path.span() => "unknown type"));
             }
