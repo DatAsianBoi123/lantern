@@ -654,7 +654,10 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
                                 field_exprs.push((field_expr, struct_field.offset));
                             }
                         }
-                        None => self.emit(UnknownField { ident: field.ident, ty: item }),
+                        None => {
+                            self.lower_expr(field.expr, scope);
+                            self.emit(UnknownField { ident: field.ident, ty: item });
+                        },
                     }
                 }
 
