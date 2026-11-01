@@ -1,4 +1,4 @@
-using main{};
+using main{int, float, str, int.to_str, float.to_str, str.concat};
 
 pub struct Foo {
   bar: int,

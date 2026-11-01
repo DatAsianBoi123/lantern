@@ -1,4 +1,4 @@
-using foo{};
+using foo{Foo, Foo.display};
 
 pub native int;
 pub native float;
