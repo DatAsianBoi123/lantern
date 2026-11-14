@@ -10,7 +10,7 @@ fun factorial(num: int) -> int {
 
 fun main() {
   println("Enter number:");
-  val num = int.from_str(input());
+  val num = int.from_str(input()).or_throw("not an integer");
   if (num < 0) {
     throw "cannot take the factorial of a negative number";
   }

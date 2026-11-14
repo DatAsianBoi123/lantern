@@ -20,7 +20,7 @@ fun float.reciprocal(self: float) -> ?float {
 
 fun main() {
   while (true) {
-    val num = float.from_str(input());
+    val num = float.from_str(input()).or_throw("not a float");
     val inverse = num.reciprocal();
     match (inverse) {
       num => {

@@ -14,7 +14,7 @@ fun fizzbuzz(x: int) {
 
 fun main() {
   println("Enter max:");
-  val max = int.from_str(input());
+  val max = int.from_str(input()).or_throw("not an integer");
 
   val index = 1;
   while (index <= max) {

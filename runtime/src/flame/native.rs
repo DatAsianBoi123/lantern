@@ -53,8 +53,10 @@ native_funs![for vm,
         let str = unsafe { HeapArray::from_raw(str.read_ptr()) };
 
         let slice = unsafe { std::slice::from_raw_parts(str.element_ptr(), str.len()) };
-        let float = unsafe { str::from_utf8_unchecked(slice).parse().map_err(|_| vm.throw("not a float"))? };
-        Ok(Slot::new_float(float))
+        unsafe {
+            str::from_utf8_unchecked(slice).parse()
+                .map_or(Ok(Slot::new_ref(ptr::null_mut())), |int| Ok(Slot::new_float(int)))
+        }
     }
     FloatAsInt(float) {
         let float = unsafe { float.read_float() };
@@ -68,8 +70,10 @@ native_funs![for vm,
         let str = unsafe { HeapArray::from_raw(str.read_ptr()) };
 
         let slice = unsafe { std::slice::from_raw_parts(str.element_ptr(), str.len()) };
-        let int = unsafe { str::from_utf8_unchecked(slice).parse().map_err(|_| vm.throw("not an int"))? };
-        Ok(Slot::new_int(int))
+        unsafe {
+            str::from_utf8_unchecked(slice).parse()
+                .map_or(Ok(Slot::new_ref(ptr::null_mut())), |int| Ok(Slot::new_int(int)))
+        }
     }
     IntAsFloat(int) {
         let int = unsafe { int.read_int() };
