@@ -430,9 +430,15 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
                         self.emit(PassOutsideBlock(pass));
                     }
                 }
-                PStmt::Continue(cont, _) if scope.in_loop() => spark_stmts.push(Stmt::Continue(cont.span())),
+                PStmt::Continue(cont, _) if scope.in_loop() => {
+                    scope.diverges = true;
+                    spark_stmts.push(Stmt::Continue(cont.span()));
+                }
                 PStmt::Continue(cont, _) => self.emit(ContinueOutsideLoop(cont)),
-                PStmt::Break(r#break, _) if scope.in_loop() => spark_stmts.push(Stmt::Break(r#break.span())),
+                PStmt::Break(r#break, _) if scope.in_loop() => {
+                    scope.diverges = true;
+                    spark_stmts.push(Stmt::Break(r#break.span()));
+                }
                 PStmt::Break(r#break, _) => self.emit(BreakOutsideLoop(r#break)),
                 PStmt::Throw(_, expr, _) => {
                     let expr_span = expr.span();
