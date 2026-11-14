@@ -2,7 +2,7 @@
 
 A fast, typed, interpreted programming language.
 
-**This is not a full-fledged language yet! Many features are missing, including an fully functional runtime. Expect bugs!**
+**This is not a full-fledged language yet! Many features are missing. Expect bugs!**
 
 **Also! The runtime is likely broken on 32 bit systems due to pointer size, though this was not tested and may still function properly**
 
@@ -22,6 +22,8 @@ cargo install --path cli/
 ## Usage
 
 ```
+A modern, fast, statically typed language
+
 Usage: lantern [OPTIONS] <FILE>
 
 Arguments:
@@ -40,6 +42,8 @@ A basic syntax file for `neovim` can be found at `syntax/la.vim`.
 A treesitter server and LSP server are coming soon(tm).
 
 For examples on basic syntax, please check out the files in the `scripts` directory.
+
+For more details on the language, check out the [wiki](https://github.com/DatAsianBoi123/lantern/wiki/).
 
 ## Architecture Details
 
