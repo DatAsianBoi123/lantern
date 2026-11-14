@@ -20,7 +20,7 @@ pub fn expand_derive_parse(input: DeriveInput) -> syn::Result<proc_macro2::Token
         }
         Data::Enum(DataEnum { variants, .. }) => {
             let variant_checks = variants.iter()
-                .take(variants.len() - 1)
+                .take(variants.len().saturating_sub(1))
                 .map(|variant @ Variant { attrs, ident, fields, .. }| {
                     let VariantAttributes { using } = match VariantAttributes::from_attrs(attrs) {
                         Ok(attrs) => attrs,
