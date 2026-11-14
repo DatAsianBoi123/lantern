@@ -6,7 +6,7 @@ use diagnostic::{SourceMap, symbol::SymbolTable};
 use runtime::{VM, flame::FunctionKind};
 
 #[derive(Parser, Debug)]
-#[command(version, about)]
+#[command(name = "lantern", version, about = "A modern, fast, statically typed language")]
 struct Args {
     file: String,
 
