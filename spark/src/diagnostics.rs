@@ -452,3 +452,21 @@ impl DiagnosticError for PrivateField {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvalidEntrypointArguments(pub Span);
+
+impl DiagnosticError for InvalidEntrypointArguments {
+    fn into_diagnostic(self, _: &SymbolTable) -> Diagnostic {
+        error!(self.0 => "entrypoint must not take any arguments")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvalidEntrypointReturn(pub Span);
+
+impl DiagnosticError for InvalidEntrypointReturn {
+    fn into_diagnostic(self, _: &SymbolTable) -> Diagnostic {
+        error!(self.0 => "entrypoint must return none")
+    }
+}
+

@@ -177,6 +177,12 @@ pub struct FunSig {
     pub ret: Option<(ArrowRight, Type)>,
 }
 
+impl FunSig {
+    pub fn span(&self) -> Span {
+        self.name.span().containing(self.ret.as_ref().map_or(self.closed_paren.span(), |(_, ty)| ty.span()))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunName {
     pub base: Option<Type>,

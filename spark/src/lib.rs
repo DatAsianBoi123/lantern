@@ -976,7 +976,15 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
                         if scope.is_root() && self.symbol_table.resolve(sig.name.ident.0) == ENTRYPOINT_NAME {
                             match &mut self.globals.entrypoint {
                                 Some(_) => self.emit(EntrypointAlreadyDefined(sig.name.span())),
-                                entrypoint => *entrypoint = Some(fun.index),
+                                entrypoint => {
+                                    *entrypoint = Some(fun.index);
+                                    if !sig.args.is_empty() {
+                                        self.emit(InvalidEntrypointArguments(sig.span()));
+                                    }
+                                    if ret != self.tcx.none() {
+                                        self.emit(InvalidEntrypointReturn(sig.span()));
+                                    }
+                                }
                             }
                         }
                     }
