@@ -1,0 +1,6 @@
+using std{};
+
+fun main() {
+  println("Hello, World!");
+}
+
