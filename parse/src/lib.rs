@@ -1,5 +1,5 @@
 use diagnostic::{Diagnostic, FileId, Span, error, symbol::{SymbolDisplay, SymbolTable}};
-use lex::{ArrowRight, At, Break, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Continue, Else, Equals, FatArrowRight, Fun, Ident, If, Keyword, Match, Native, OpenBrace, OpenBracket, OpenParen, Pass, Period, Pub, Punct, Question, Return, Semi, Struct, Throw, Token, TokenKind, Using, Val, While};
+use lex::{ArrowRight, Asterisk, At, Break, ClosedBrace, ClosedBracket, ClosedParen, Colon, Comma, Continue, Else, Equals, FatArrowRight, Fun, Ident, If, Keyword, Match, Native, OpenBrace, OpenBracket, OpenParen, Pass, Period, Pub, Punct, Question, Return, Semi, Struct, Throw, Token, TokenKind, Using, Val, While};
 use macros::Parse;
 
 use crate::{expr::{Expr, ExprBlock}, stream::{TokenStream, parse_punctuated, parse_repetition}};
@@ -304,7 +304,7 @@ pub enum UsingItems {
     /// using std{};
     Glob,
     /// using std{item};
-    Items(Vec<FunName>),
+    Items(Vec<ImportItem>),
 }
 
 impl ParseTokens for UsingItems {
@@ -322,6 +322,27 @@ impl ParseTokens for UsingItems {
                 }
             }
             token => Err(error!(token.span() => "expected `;` or `{{`")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImportItem {
+    Ident(Ident, Option<Asterisk>),
+    Associated(Type, Ident),
+}
+
+impl ParseTokens for ImportItem {
+    fn parse(stream: &mut TokenStream) -> Result<Self> {
+        let fun_name = stream.parse::<FunName>()?;
+        match fun_name.base {
+            Some(base) => Ok(Self::Associated(base, fun_name.ident)),
+            None if let Ok(Token::Punct(Punct::Asterisk(star))) = stream.peek() => {
+                let star = *star;
+                let _ = stream.next_token();
+                Ok(Self::Ident(fun_name.ident, Some(star)))
+            }
+            None => Ok(Self::Ident(fun_name.ident, None))
         }
     }
 }

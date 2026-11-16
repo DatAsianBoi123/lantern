@@ -1,5 +1,5 @@
-using foo{Foo, Foo.display};
-using foo.bar{Bar, Bar.compute, Bar.display};
+using foo{Foo*};
+using foo.bar{Bar*};
 
 pub native int;
 pub native float;

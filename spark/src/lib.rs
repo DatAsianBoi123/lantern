@@ -2,7 +2,7 @@ use std::{collections::{HashMap, HashSet}, mem, path::PathBuf};
 
 use arena::Arena;
 use diagnostic::{DiagnosticError, DiagnosticSink, FileId, SourceMap, Span, error, symbol::{SymbolDisplay, SymbolTable}};
-use parse::{FunArg, FunSig, Item, ItemFun, ItemNativeFun, ItemNativeType, ItemStruct, LanternFile, MatchPattern, MatchStmt, PassStmt, ReturnStmt, Stmt as PStmt, StructField, UsingItems, ValDeclaration, WhileStmt, expr::{BinaryOperator, Expr as PExpr, ExprArray, ExprBinary, ExprField, ExprFunCall, ExprIndex, ExprMethodCall, ExprParen, ExprStruct, ExprUnary}, lex::{self, TokenKind}};
+use parse::{FunArg, FunName, FunSig, ImportItem, Item, ItemFun, ItemNativeFun, ItemNativeType, ItemStruct, LanternFile, MatchPattern, MatchStmt, PassStmt, ReturnStmt, Stmt as PStmt, StructField, UsingItems, ValDeclaration, WhileStmt, expr::{BinaryOperator, Expr as PExpr, ExprArray, ExprBinary, ExprField, ExprFunCall, ExprIndex, ExprMethodCall, ExprParen, ExprStruct, ExprUnary}, lex::{self, TokenKind}};
 
 use crate::{def::{LanternFunction, LanternStruct, LanternStructField}, diagnostics::*, expr::{Expr, ExprKind, Literal, LogicalOperation}, module::{FunctionExports, Module, ModuleDependency, ModuleImport, ModuleRegistry, PendingBody, TypeExports}, native::{BOOL_NATIVE, FLOAT_NATIVE, FromDefError, INT_NATIVE, NativeFun, STR_NATIVE}, scope::{Globals, PassBehavior, Scope, ScopeBehavior, ScopeKind}, stmt::{IfBranch, IfStmt, Stmt}, ty::{LanternType, TypeContext, TypeId}};
 
@@ -218,13 +218,10 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
             }
             ModuleImport::Items(ref mut items, _) => {
                 let type_exports = &module.exports.types.types;
-                for (name, found_type) in items {
-                    if name.base.is_some() {
-                        continue;
-                    }
-                    if let Some(item) = type_exports.get(&name.ident.0).copied() {
-                        if scope.insert_item(name.ident.0, item).is_none() {
-                            self.sink.emit(StructAlreadyDeclared(name.ident.0, name.span()).into_diagnostic(self.symbol_table));
+                for (import, found_type) in items {
+                    if let ImportItem::Ident(ident, _) = import && let Some(item) = type_exports.get(&ident.0).copied() {
+                        if scope.insert_item(ident.0, item).is_none() {
+                            self.sink.emit(StructAlreadyDeclared(ident.0, ident.span()).into_diagnostic(self.symbol_table));
                         }
                         *found_type = true;
                     }
@@ -243,10 +240,10 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
                 }
             }
             ModuleImport::Items(ref items, _) => {
-                for (name, found_type) in items {
-                    match name.base {
-                        Some(ref base) => {
-                            let base = match LanternType::resolve(base, scope, &self.tcx) {
+                for (import, found_type) in items {
+                    match import {
+                        ImportItem::Associated(ty, ident) => {
+                            let base = match LanternType::resolve(ty, scope, &self.tcx) {
                                 Ok(ty) => ty,
                                 Err(diagnostic) => {
                                     self.sink.emit(diagnostic);
@@ -256,22 +253,41 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
                             // TypeId hashes by address
                             #[allow(clippy::mutable_key_type)]
                             let associated = &module.exports.funs.associated;
-                            if let Some(associated) = associated.get(&base).and_then(|funs| funs.get(&name.ident.0)) {
-                                if scope.insert_associated(base, name.ident.0, associated.clone()).is_none() {
-                                    self.sink.emit(FunAlreadyDeclared(name.clone()).into_diagnostic(self.symbol_table));
+                            if let Some(associated) = associated.get(&base).and_then(|funs| funs.get(&ident.0)) {
+                                if scope.insert_associated(base, ident.0, associated.clone()).is_none() {
+                                    let fun_name = FunName { base: Some(ty.clone()), ident: *ident };
+                                    self.sink.emit(FunAlreadyDeclared(fun_name).into_diagnostic(self.symbol_table));
                                 }
                             } else {
-                                self.sink.emit(UnknownAssociated { ident: name.ident, ty: base }.into_diagnostic(self.symbol_table));
+                                self.sink.emit(UnknownAssociated { ident: *ident, ty: base }.into_diagnostic(self.symbol_table));
                             }
                         }
-                        None => {
-                            let funs = &module.exports.funs.funs;
-                            if let Some(fun) = funs.get(&name.ident.0) {
-                                if scope.insert_function(name.ident.0, fun.clone()).is_none() {
-                                    self.sink.emit(FunAlreadyDeclared(name.clone()).into_diagnostic(self.symbol_table));
+                        ImportItem::Ident(ident, star) => {
+                            if let Some(fun) = module.exports.funs.funs.get(&ident.0) {
+                                if scope.insert_function(ident.0, fun.clone()).is_none() {
+                                    let fun_name = FunName { base: None, ident: *ident };
+                                    self.sink.emit(FunAlreadyDeclared(fun_name).into_diagnostic(self.symbol_table));
                                 }
                             } else if !found_type {
-                                self.sink.emit(ItemNotFound(name.ident).into_diagnostic(self.symbol_table));
+                                self.sink.emit(ItemNotFound(*ident).into_diagnostic(self.symbol_table));
+                            }
+
+                            if let Some(star) = star {
+                                let Some(base) = scope.item(ident.0) else {
+                                    self.sink.emit(ItemNotFound(*ident).into_diagnostic(self.symbol_table));
+                                    continue;
+                                };
+                                let associated_funs = module.exports.funs.associated.get(&base);
+                                for (name, fun) in associated_funs.into_iter().flatten() {
+                                    if scope.insert_associated(base, *name, fun.clone()).is_none() {
+                                        // TODO: DiagnosticError impl for this error
+                                        error!(in self.sink;
+                                            star.span() => "function `{}.{}` already declared",
+                                            ident.display(self.symbol_table),
+                                            name.display(self.symbol_table),
+                                        );
+                                    }
+                                }
                             }
                         }
                     }
