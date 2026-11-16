@@ -49,7 +49,7 @@ pub struct UnknownAssociated<'t> {
 
 impl DiagnosticError for UnknownAssociated<'_> {
     fn into_diagnostic(self, symbol_table: &SymbolTable) -> Diagnostic {
-        error!(self.ident.span() => "associated item `{}` does not exist on {}", self.ident.display(symbol_table), self.ty.display(symbol_table))
+        error!(self.ident.span() => "associated function `{}` does not exist on {}", self.ident.display(symbol_table), self.ty.display(symbol_table))
     }
 }
 
@@ -60,7 +60,7 @@ pub struct MissingReceiver {
 
 impl DiagnosticError for MissingReceiver {
     fn into_diagnostic(self, symbol_table: &SymbolTable) -> Diagnostic {
-        error!(self.fun.span() => "method `{}` is missing a receiver", self.fun.display(symbol_table))
+        error!(self.fun.span() => "cannot call associated function `{}` as a method", self.fun.display(symbol_table))
     }
 }
 
