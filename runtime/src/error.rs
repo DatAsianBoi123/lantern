@@ -1,4 +1,4 @@
-use std::fmt::{Display, Formatter};
+use std::{fmt::{Display, Formatter}};
 
 #[derive(thiserror::Error, Debug)]
 pub struct RuntimeError {

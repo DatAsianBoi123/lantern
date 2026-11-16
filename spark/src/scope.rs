@@ -107,7 +107,7 @@ impl<'a, 't> Scope<'a, 't> {
             let associated_funs = self.associated.entry(*base).or_default();
             for (name, fun) in associated {
                 if associated_funs.contains_key(name) {
-                // TODO: have name include base type as well
+                    // TODO: have name include base type as well
                     duplicates.push(*name);
                 } else {
                     associated_funs.insert(*name, fun.clone());
