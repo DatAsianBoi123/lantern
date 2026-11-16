@@ -2,9 +2,9 @@ use diagnostic::Span;
 use instruction::{Instruction, InstructionSet};
 use spark::{Spark, SparkFunction, expr::{Expr, ExprKind, Literal, LogicalOperation}, scope::GlobalVariables, stmt::{IfBranch, IfStmt, Stmt}, ty::{BuiltinType, TypeId}};
 
-use crate::{Slot, VM, error::{RuntimeError, StacktraceLocation}, heap::{HeapArray, HeapObject, TypeInfo}, inst};
+use crate::{Program, Slot, VM, error::{RuntimeError, StacktraceLocation}, heap::{HeapArray, HeapObject, TypeInfo}, inst};
 
-pub type NativeFn = fn(&mut VM) -> Result<Slot, RuntimeError>;
+pub type NativeFn = fn(&mut VM, &Program) -> Result<Slot, RuntimeError>;
 
 pub mod instruction;
 pub mod native;
@@ -281,7 +281,7 @@ impl FlameGen {
                 }
                 // BUG: primitive array expects a size and align of 8 regardless of the actual
                 // primitive's size and align
-                let id = if ty.is_ref() { VM::REF_ARR_TYPE_INDEX } else { VM::PRIMITIVE_ARR_TYPE_INDEX };
+                let id = if ty.is_ref() { Program::REF_ARR_TYPE_INDEX } else { Program::PRIMITIVE_ARR_TYPE_INDEX };
                 inst!(with self => expr.span; ALLOC_ARR id, elements.len());
             }
             ExprKind::Error => panic!("error expression encountered"),

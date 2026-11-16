@@ -3,7 +3,7 @@ use std::{path::Path, process::ExitCode, time::Instant};
 use arena::Arena;
 use clap::Parser;
 use diagnostic::{SourceMap, symbol::SymbolTable};
-use runtime::{VM, flame::FunctionKind};
+use runtime::{Program, VM, flame::FunctionKind};
 
 #[derive(Parser, Debug)]
 #[command(name = "lantern", version, about = "A modern, fast, statically typed language")]
@@ -64,9 +64,9 @@ fn main() -> ExitCode {
 
     let Some(spark) = spark else { return ExitCode::from(101); };
 
-    let vm = VM::new(spark);
+    let program = Program::new(spark);
     if print_codegen {
-        vm.funs().iter().enumerate().for_each(|(i, fun)| {
+        program.funs().iter().enumerate().for_each(|(i, fun)| {
             println!("Generated {i} ({}):", fun.name);
             match &fun.kind {
                 FunctionKind::Instructions(instructions, locals) => println!("{locals} locals\n{instructions}"),
@@ -79,8 +79,9 @@ fn main() -> ExitCode {
 
     if no_run { return ExitCode::SUCCESS; }
 
+    let mut vm = VM::new();
     println!("running {file_name}");
-    match vm.exec() {
+    match vm.exec(&program) {
         Ok(_) => ExitCode::SUCCESS,
         Err(err) => {
             eprintln!("{err}");

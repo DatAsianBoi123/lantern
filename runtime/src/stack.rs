@@ -79,13 +79,13 @@ impl LanternStack {
         self.top
     }
 
-    pub fn reserve(&mut self, slots: usize) -> Result<(), StackOverflowError> {
-        if slots == 0 { return Ok(()); };
-        if slots + self.top > self.inner.len() { return Err(StackOverflowError); };
+    pub fn reserve_to(&mut self, top: usize) -> Result<(), StackOverflowError> {
+        if top <= self.top { return Ok(()); };
+        if top > self.inner.len() { return Err(StackOverflowError); };
 
         // initialize top data
-        self.inner[self.top..self.top + slots].fill(MaybeUninit::zeroed());
-        self.top += slots;
+        self.inner[self.top..top].fill(MaybeUninit::zeroed());
+        self.top = top;
         Ok(())
     }
 

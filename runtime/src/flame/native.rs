@@ -4,12 +4,12 @@ use std::{io::Write, ptr};
 use crate::{Slot, heap::HeapArray};
 
 macro_rules! native_funs {
-    (for $vm: pat, $( $native: ident( $($pat: pat),* $(,)? ) $expr: block )*) => {
+    (for $vm: pat, $prg: pat, $( $native: ident( $($pat: pat),* $(,)? ) $expr: block )*) => {
         pub fn get_native_spark_fn(native: ::spark::native::NativeFun) -> $crate::flame::NativeFn {
             match native {$(
                 ::spark::native::NativeFun::$native => {
                     #[allow(unused)]
-                    fn inner(vm: &mut $crate::VM) -> Result<crate::Slot, $crate::error::RuntimeError> {
+                    fn inner(vm: &mut $crate::VM, prg: &$crate::Program) -> Result<crate::Slot, $crate::error::RuntimeError> {
                         let stack = vm.stack();
                         let frame = vm.frames().last().expect("called from a frame");
                         let mut curr = 0;
@@ -18,6 +18,7 @@ macro_rules! native_funs {
                             curr += 1;
                         )*
                         let $vm = vm;
+                        let $prg = prg;
                         $expr
                     }
                     inner as $crate::flame::NativeFn
@@ -27,18 +28,18 @@ macro_rules! native_funs {
     };
 }
 
-native_funs![for vm,
+native_funs![for vm, program,
     Write(str) {
         let bytes = unsafe { HeapArray::from_raw(str.read_ptr()) };
         let mut stdout = std::io::stdout();
         unsafe {
             let bytes = std::slice::from_raw_parts(bytes.element_ptr(), bytes.len());
-            stdout.write_all(bytes).map_err(|err| vm.throw(err));
+            stdout.write_all(bytes).map_err(|err| vm.throw(program, err));
         }
         Ok(Slot::new_usize(0))
     }
     Flush() {
-        std::io::stdout().flush().map_err(|err| vm.throw(err));
+        std::io::stdout().flush().map_err(|err| vm.throw(program, err));
         Ok(Slot::new_usize(0))
     }
     Gc() {
@@ -47,7 +48,7 @@ native_funs![for vm,
     }
     FloatToStr(float) {
         let float = unsafe { float.read_float() };
-        Ok(Slot::new_ref(vm.alloc_string(float.to_string().as_bytes())?.as_mut_ptr()))
+        Ok(Slot::new_ref(vm.alloc_string(program, float.to_string().as_bytes())?.as_mut_ptr()))
     }
     FloatFromStr(str) {
         let str = unsafe { HeapArray::from_raw(str.read_ptr()) };
@@ -64,7 +65,7 @@ native_funs![for vm,
     }
     IntToStr(int) {
         let int = unsafe { int.read_int() };
-        Ok(Slot::new_ref(vm.alloc_string(int.to_string().as_bytes())?.as_mut_ptr()))
+        Ok(Slot::new_ref(vm.alloc_string(program, int.to_string().as_bytes())?.as_mut_ptr()))
     }
     IntFromStr(str) {
         let str = unsafe { HeapArray::from_raw(str.read_ptr()) };
@@ -81,14 +82,14 @@ native_funs![for vm,
     }
     Input() {
         let mut input = String::new();
-        std::io::stdin().read_line(&mut input).map_err(|err| vm.throw(err));
-        Ok(Slot::new_ref(vm.alloc_string(input.trim_suffix('\n').as_bytes())?.as_mut_ptr()))
+        std::io::stdin().read_line(&mut input).map_err(|err| vm.throw(program, err));
+        Ok(Slot::new_ref(vm.alloc_string(program, input.trim_suffix('\n').as_bytes())?.as_mut_ptr()))
     }
     Concat() {
         let other = unsafe { HeapArray::from_raw(vm.stack.peek().expect("other argument").read_ptr()) };
         let str = unsafe { HeapArray::from_raw(vm.stack.read(vm.stack.top() - 2).expect("self argument").read_ptr()) };
 
-        let mut new_str = vm.alloc_string_zeroed(str.len() + other.len())?;
+        let mut new_str = vm.alloc_string_zeroed(program, str.len() + other.len())?;
 
         // pop from stack here in case allocating the new string GCs
         let other = unsafe { HeapArray::from_raw(vm.stack.pop().expect("other argument").read_ptr()) };
