@@ -329,9 +329,14 @@ impl ScopeBehavior<'_> {
     }
 
     pub fn combine_branch(self, other: Self) -> Self {
+        let pass = if other.diverges {
+            self.pass
+        } else {
+            self.pass.and(other.pass)
+        };
         Self {
             diverges: self.diverges && other.diverges,
-            pass: self.pass.and(other.pass),
+            pass,
             locals_used: self.locals_used.max(other.locals_used),
         }
     }
