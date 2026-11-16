@@ -100,6 +100,6 @@ fun main() {
     mylist.push(i);
     i += 1;
   }
-  mylist.display();
+  println(mylist.display());
 }
 
