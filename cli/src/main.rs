@@ -67,9 +67,22 @@ fn main() -> ExitCode {
     let program = Program::new(spark);
     if print_codegen {
         program.funs().iter().enumerate().for_each(|(i, fun)| {
-            println!("Generated {i} ({}):", fun.name);
+            println!("Generated {i} ({} in {}):", fun.name, fun.module.to_string_lossy());
             match &fun.kind {
-                FunctionKind::Instructions(instructions, locals) => println!("{locals} locals\n{instructions}"),
+                FunctionKind::Instructions(instructions, locals) => {
+                    println!("{locals} local(s)");
+                    let mut line_iter = fun.line_table.iter().copied();
+                    let mut next = line_iter.next();
+                    for (i, inst) in instructions.iter().enumerate() {
+                        if let Some(map) = next && i == map.ip {
+                            print!("{:<5}", map.line);
+                            next = line_iter.next();
+                        } else {
+                            print!("     ");
+                        }
+                        println!("{inst}");
+                    }
+                }
                 FunctionKind::Native(native) => println!("<native function {native:?}>"),
             }
         });

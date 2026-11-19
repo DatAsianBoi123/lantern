@@ -188,15 +188,6 @@ impl Default for InstructionSet {
     }
 }
 
-impl Display for InstructionSet {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        for (i, inst) in self.iter().enumerate() {
-            writeln!(f, "{i:<5}{inst}")?;
-        }
-        Ok(())
-    }
-}
-
 impl Deref for InstructionSet {
     type Target = Vec<Instruction>;
 
