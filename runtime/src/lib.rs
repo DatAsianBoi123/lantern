@@ -4,7 +4,7 @@ use error::RuntimeError;
 use flame::{GeneratedFunction, instruction::Instruction};
 use spark::{Spark, scope::GlobalVariables, ty::BuiltinType};
 
-use crate::{error::{OutOfBoundsError, UserError}, flame::{FunctionKind, Globals}, heap::{GlobalStorage, Heap, HeapArray, HeapObject, TypeInfo}, stack::LanternStack};
+use crate::{error::{OutOfBoundsError, Trace, UserError}, flame::{FunctionKind, Globals}, heap::{GlobalStorage, Heap, HeapArray, HeapObject, TypeInfo}, stack::LanternStack};
 
 macro_rules! args {
     (@pop usize, $stack: expr) => {
@@ -222,7 +222,12 @@ impl VM {
         let mut stacktrace = Vec::with_capacity(self.frames.len());
         while let Some(frame) = self.frames.pop() {
             let fun = &program.funs[frame.fun_index];
-            stacktrace.push((fun.name.to_string(), fun.line_for(frame.inst_ptr)));
+            let trace = Trace {
+                module: fun.module.clone(),
+                function: fun.name.to_string(),
+                loc: fun.line_for(frame.inst_ptr),
+            };
+            stacktrace.push(trace);
         }
         RuntimeError {
             message: message.to_string(),

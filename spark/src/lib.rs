@@ -1013,6 +1013,7 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
                 }
                 // this gets overridden when the function is lowered
                 self.globals.funs.push(SparkFunction::Lantern {
+                    module: PathBuf::new(),
                     name: String::new(),
                     stmts: Vec::new(),
                     locals: 0,
@@ -1086,15 +1087,20 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
                         }
                     }
                 }
+                let name = name.display(self.symbol_table);
+                let mut module = self.source_map.get_source(scope.source).0.clone();
+                module.set_extension("");
                 if let Some(native) = native {
                     self.globals.funs.push(SparkFunction::Native {
-                        name: name.display(self.symbol_table),
+                        module,
+                        name,
                         native,
                     });
                 } else {
                     // "dummy" function
                     self.globals.funs.push(SparkFunction::Lantern {
-                        name: name.display(self.symbol_table),
+                        module,
+                        name,
                         stmts: Vec::new(),
                         locals: 0,
                     });
@@ -1135,7 +1141,10 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
                 }
             });
             let (stmts, behavior) = self.lower_stmts(block.stmts, fun_scope);
+            let mut module = self.source_map.get_source(scope.source).0.clone();
+            module.set_extension("");
             self.globals.funs[fun.index] = SparkFunction::Lantern {
+                module,
                 name: name.display(self.symbol_table),
                 stmts,
                 locals: behavior.locals_used,
@@ -1226,11 +1235,13 @@ impl<'a, 's, 't> Lighter<'a, 's, 't> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum SparkFunction<'t> {
     Lantern {
+        module: PathBuf,
         name: String,
         stmts: Vec<Stmt<'t>>,
         locals: usize,
     },
     Native {
+        module: PathBuf,
         name: String,
         native: NativeFun,
     },

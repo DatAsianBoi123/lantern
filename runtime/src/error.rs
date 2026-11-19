@@ -1,21 +1,32 @@
-use std::{fmt::{Display, Formatter}};
+use std::{fmt::{Display, Formatter}, path::PathBuf};
 
 #[derive(thiserror::Error, Debug)]
 pub struct RuntimeError {
     pub message: String,
-    pub stacktrace: Vec<(String, StacktraceLocation)>,
+    pub stacktrace: Vec<Trace>,
 }
 
 impl Display for RuntimeError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "Error: {}", self.message)?;
-        self.stacktrace.iter().take(30).try_for_each(|(function, location)| {
-            write!(f, "\n  at {function} ({location})")
-        })?;
+        self.stacktrace.iter().take(30).try_for_each(|trace| write!(f, "\n  {trace}"))?;
         if self.stacktrace.len() > 30 {
             write!(f, "\n  ...and {} more", self.stacktrace.len() - 30)?;
         }
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Trace {
+    pub module: PathBuf,
+    pub function: String,
+    pub loc: StacktraceLocation,
+}
+
+impl Display for Trace {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "at {} ({}:{})", self.function, self.module.to_string_lossy(), self.loc)
     }
 }
 
@@ -28,7 +39,7 @@ pub enum StacktraceLocation {
 impl Display for StacktraceLocation {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Line(line) => write!(f, "line {line}"),
+            Self::Line(line) => write!(f, "{line}"),
             Self::Native => write!(f, "<native function>"),
         }
     }

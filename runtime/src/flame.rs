@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use diagnostic::Span;
 use instruction::{Instruction, InstructionSet};
 use spark::{Spark, SparkFunction, expr::{Expr, ExprKind, Literal, LogicalOperation}, scope::GlobalVariables, stmt::{IfBranch, IfStmt, Stmt}, ty::{BuiltinType, TypeId}};
@@ -38,7 +40,7 @@ struct FlameGen {
 impl FlameGen {
     fn compile_fun(fun: SparkFunction, type_offset: usize) -> GeneratedFunction {
         match fun {
-            SparkFunction::Lantern { name, stmts, locals } => {
+            SparkFunction::Lantern { module, name, stmts, locals } => {
                 let mut r#gen = FlameGen {
                     instructions: InstructionSet::new(),
                     line_table: Vec::new(),
@@ -49,12 +51,14 @@ impl FlameGen {
                 r#gen.compile_stmts(&stmts);
                 GeneratedFunction {
                     line_table: r#gen.line_table,
+                    module,
                     name: name.into_boxed_str(),
                     kind: FunctionKind::Instructions(r#gen.instructions, locals),
                 }
             }
-            SparkFunction::Native { name, native } => GeneratedFunction {
+            SparkFunction::Native { module, name, native } => GeneratedFunction {
                 line_table: Vec::new(),
+                module,
                 name: name.into_boxed_str(),
                 kind: FunctionKind::Native(native::get_native_spark_fn(native)),
             },
@@ -370,6 +374,7 @@ impl LineMap {
 #[derive(Debug, Clone)]
 pub struct GeneratedFunction {
     pub line_table: Vec<LineMap>,
+    pub module: PathBuf,
     pub name: Box<str>,
     pub kind: FunctionKind,
 }
